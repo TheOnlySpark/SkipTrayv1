@@ -2,7 +2,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Navigate } from 'react-router-dom';
 
 export default function Dashboard() {
-  const { profile, loading } = useAuth();
+  const { profile, loading, signOut } = useAuth();
 
   if (loading) return null;
 
@@ -14,5 +14,17 @@ export default function Dashboard() {
     return <Navigate to="/admin" replace />;
   }
 
-  return <div>Unknown role</div>;
+  return (
+    <div className="flex flex-col items-center justify-center min-h-[50vh] space-y-4">
+      <div className="text-xl font-semibold text-slate-700">
+        Unknown role: {profile === null ? 'null (Profile missing)' : String(profile.role)}
+      </div>
+      <button 
+        onClick={signOut} 
+        className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl transition-colors"
+      >
+        Sign Out
+      </button>
+    </div>
+  );
 }
