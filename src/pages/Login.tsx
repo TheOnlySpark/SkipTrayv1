@@ -112,6 +112,7 @@ export default function Login() {
         setLoading(false);
       } else {
         await refreshProfile();
+        navigate('/dashboard');
       }
     }
   };

@@ -5,7 +5,7 @@ create type public.order_status as enum ('PLACED', 'ACCEPTED', 'REJECTED', 'PREP
 
 -- Create profiles table
 create table public.profiles (
-  id uuid references auth.users not null primary key,
+  id uuid references auth.users on delete cascade not null primary key,
   name text,
   id_number text,
   role public.user_role default 'STUDENT'::public.user_role not null,
@@ -62,8 +62,13 @@ create policy "Users can update own profile" on public.profiles for update using
 -- Function to safely get user role without infinite recursion
 create or replace function public.get_user_role()
 returns public.user_role as $$
-  select role from public.profiles where id = auth.uid();
-$$ language sql security definer;
+declare
+  user_role public.user_role;
+begin
+  select role into user_role from public.profiles where id = auth.uid();
+  return user_role;
+end;
+$$ language plpgsql security definer set search_path = public;
 
 -- Staff and Admin can view all profiles
 create policy "Staff/Admin can view all profiles" on public.profiles for select using (

@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Database } from '../types/supabase';
+import { useQuery } from '@tanstack/react-query';
 
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 type Order = Database['public']['Tables']['orders']['Row'];
@@ -14,7 +15,6 @@ export default function StudentDashboard() {
   const [activeOrder, setActiveOrder] = useState<Order | null>(null);
   const [pastOrders, setPastOrders] = useState<Order[]>([]);
   const [showHistory, setShowHistory] = useState(false);
-  const [loading, setLoading] = useState(true);
   
   const [cart, setCart] = useState<{item: MenuItem, quantity: number}[]>([]);
   const [pickupTime, setPickupTime] = useState('');
@@ -48,41 +48,47 @@ export default function StudentDashboard() {
     };
   }, [profile?.id]);
 
-  const fetchInitialData = async () => {
-    setLoading(true);
-    // Fetch active order
-    const { data: orderData } = await supabase
-      .from('orders')
-      .select('*')
-      .eq('user_id', profile?.id || '')
-      .in('status', ['PLACED', 'ACCEPTED', 'PREPARING', 'READY'])
-      .maybeSingle();
+  const { data: menuItems = [], isLoading: menuLoading } = useQuery({
+    queryKey: ['menuItems'],
+    queryFn: async () => {
+      const { data } = await supabase.from('menu_items').select('*').order('name');
+      return data || [];
+    },
+    staleTime: 1000 * 60 * 5, // 5 minutes
+  });
 
-    if (orderData) {
-      setActiveOrder(orderData);
-    }
+  const { data: pastOrdersData = [], isLoading: pastOrdersLoading } = useQuery({
+    queryKey: ['pastOrders', profile?.id],
+    queryFn: async () => {
+      if (!profile?.id) return [];
+      const { data } = await supabase
+        .from('orders')
+        .select('*')
+        .eq('user_id', profile.id)
+        .in('status', ['COLLECTED', 'REJECTED'])
+        .order('created_at', { ascending: false });
+      return data || [];
+    },
+    enabled: !!profile?.id,
+  });
 
-    // Fetch past orders
-    const { data: pastData } = await supabase
-      .from('orders')
-      .select('*')
-      .eq('user_id', profile?.id || '')
-      .in('status', ['COLLECTED', 'REJECTED'])
-      .order('created_at', { ascending: false });
-    
-    if (pastData) {
-      setPastOrders(pastData);
-    }
+  useEffect(() => {
+    if (pastOrdersData) setPastOrders(pastOrdersData);
+  }, [pastOrdersData]);
 
-    // Fetch menu
-    const { data: menuData } = await supabase
-      .from('menu_items')
-      .select('*')
-      .order('name');
-    if (menuData) setMenuItems(menuData);
-    
-    setLoading(false);
-  };
+  useEffect(() => {
+    const fetchActive = async () => {
+      if (!profile?.id) return;
+      const { data } = await supabase
+        .from('orders')
+        .select('*')
+        .eq('user_id', profile.id)
+        .in('status', ['PLACED', 'ACCEPTED', 'PREPARING', 'READY'])
+        .maybeSingle();
+      if (data) setActiveOrder(data);
+    };
+    fetchActive();
+  }, [profile?.id]);
 
   const cartTotalItems = cart.reduce((acc, c) => acc + c.quantity, 0);
 
@@ -184,7 +190,7 @@ export default function StudentDashboard() {
         </div>
       </div>
 
-      {loading ? (
+      {menuLoading ? (
         <div className="col-span-12 text-center text-slate-500">Loading...</div>
       ) : showHistory ? (
         <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-8 shadow-sm">
