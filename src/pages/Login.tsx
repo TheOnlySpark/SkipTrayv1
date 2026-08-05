@@ -76,28 +76,31 @@ export default function Login() {
     setLoading(true);
     setError('');
     
-    const formattedPhone = phone.replace(/[^0-9+]/g, '');
-    const email = `user${formattedPhone.replace('+', '')}@skiptray.local`;
-    const password = 'SkipTrayUser123!';
+    let currentUserId = user?.id;
 
-    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-      email,
-      password,
-    });
+    if (!currentUserId) {
+      const formattedPhone = phone.replace(/[^0-9+]/g, '');
+      const email = `user${formattedPhone.replace('+', '')}@skiptray.local`;
+      const password = 'SkipTrayUser123!';
 
-    if (signUpError) {
-      if (signUpError.message.toLowerCase().includes('rate limit')) {
-        setError('Supabase Email Rate Limit Exceeded! FIX: Go to your Supabase Dashboard > Authentication > Providers > Email, and turn OFF "Confirm email". This allows the app to instantly create users without sending real emails.');
-      } else {
-        setError(signUpError.message);
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email,
+        password,
+      });
+
+      if (signUpError) {
+        if (signUpError.message.toLowerCase().includes('rate limit')) {
+          setError('Supabase Rate Limit! Go to Dashboard > Auth > Providers > Email, turn OFF "Confirm email".');
+        } else {
+          setError(signUpError.message);
+        }
+        setLoading(false);
+        return;
       }
-      setLoading(false);
-      return;
+      currentUserId = signUpData.user?.id;
     }
 
-    const user = signUpData.user;
-    
-    if (user) {
+    if (currentUserId) {
       const { error: updateError } = await supabase
         .from('profiles')
         .update({
@@ -105,15 +108,22 @@ export default function Login() {
           id_number: idNumber,
           role
         })
-        .eq('id', user.id);
+        .eq('id', currentUserId);
         
       if (updateError) {
         setError(updateError.message);
         setLoading(false);
       } else {
+        // Manually trigger a hard navigation or wait for context
         await refreshProfile();
-        navigate('/dashboard');
+        // Since refreshProfile uses state 'user' which might be null for brand new signups, 
+        // we can force a session refresh or just redirect and let the ProtectedRoute re-evaluate when session arrives.
+        // Actually, if we just reload the page, AuthContext handles it perfectly.
+        window.location.href = '/dashboard';
       }
+    } else {
+      setError("Failed to get user ID.");
+      setLoading(false);
     }
   };
 

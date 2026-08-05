@@ -240,23 +240,30 @@ export default function StudentDashboard() {
           {/* Menu */}
           <div className="col-span-8 bg-white border border-slate-200 rounded-[2rem] p-8 shadow-sm">
             <h2 className="text-xl font-bold text-slate-800 mb-6">Menu</h2>
-            <div className="grid grid-cols-1 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {menuItems.map(item => (
-                <div key={item.id} className={`flex items-center justify-between p-4 rounded-xl border transition-colors ${item.is_sold_out ? 'bg-slate-50 border-slate-100 opacity-60' : 'bg-white border-slate-200 hover:border-slate-300 shadow-sm'}`}>
-                  <div className="flex items-center gap-3">
-                    <div className={`w-3 h-3 rounded-full ${item.veg_non_veg === 'VEG' ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                    <span className="font-semibold text-slate-800">{item.name}</span>
-                    {item.is_sold_out && <span className="text-xs font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full">Sold Out</span>}
+                <div key={item.id} className={`flex flex-col justify-between p-5 rounded-2xl border transition-all ${item.is_sold_out ? 'bg-slate-50 border-slate-100 opacity-60' : 'bg-white border-slate-200 hover:border-indigo-300 hover:shadow-md'}`}>
+                  <div>
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className={`w-2.5 h-2.5 rounded-full shadow-sm ${item.veg_non_veg === 'VEG' ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                      {item.is_sold_out && <span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full uppercase tracking-wider">Sold Out</span>}
+                    </div>
+                    <h3 className="font-bold text-slate-800 leading-tight">{item.name}</h3>
                   </div>
-                  {!item.is_sold_out && (
-                    <button 
-                      onClick={() => addToCart(item)}
-                      disabled={cartTotalItems >= 5}
-                      className="w-8 h-8 flex items-center justify-center bg-slate-100 text-slate-600 rounded-lg font-bold hover:bg-indigo-50 hover:text-indigo-600 transition-colors disabled:opacity-50"
-                    >
-                      +
-                    </button>
-                  )}
+                  
+                  <div className="mt-6 flex justify-end">
+                    {!item.is_sold_out ? (
+                      <button 
+                        onClick={() => addToCart(item)}
+                        disabled={cartTotalItems >= 5}
+                        className="w-10 h-10 flex items-center justify-center bg-indigo-50 text-indigo-600 rounded-xl font-bold hover:bg-indigo-600 hover:text-white transition-colors disabled:opacity-50 disabled:hover:bg-indigo-50 disabled:hover:text-indigo-600 shadow-sm"
+                      >
+                        +
+                      </button>
+                    ) : (
+                      <div className="h-10"></div>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -266,7 +273,7 @@ export default function StudentDashboard() {
           <div className="col-span-4 bg-slate-900 rounded-[2rem] p-8 text-white flex flex-col shadow-sm">
             <h3 className="font-bold text-lg mb-6 text-slate-100">Your Order</h3>
             
-            <div className="flex-grow space-y-4 mb-8">
+            <div className="space-y-4 mb-8">
               {cart.map(c => (
                 <div key={c.item.id} className="flex justify-between items-center border-b border-slate-800 pb-3">
                   <div>
@@ -286,7 +293,7 @@ export default function StudentDashboard() {
               )}
             </div>
 
-            <form onSubmit={handlePlaceOrder} className="mt-auto pt-4 border-t border-slate-800">
+            <form onSubmit={handlePlaceOrder} className="pt-4 border-t border-slate-800">
               {error && <div className="text-red-400 text-xs mb-3 font-semibold">{error}</div>}
               <div className="mb-4">
                 <label className="block text-xs text-slate-400 uppercase font-semibold mb-2">Pickup Time</label>
