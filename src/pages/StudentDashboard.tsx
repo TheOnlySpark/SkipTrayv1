@@ -3,15 +3,14 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Database } from '../types/supabase';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 type Order = Database['public']['Tables']['orders']['Row'];
 
 export default function StudentDashboard() {
   const { profile, signOut } = useAuth();
-  
-  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const queryClient = useQueryClient();
   const [activeOrder, setActiveOrder] = useState<Order | null>(null);
   const [pastOrders, setPastOrders] = useState<Order[]>([]);
   const [showHistory, setShowHistory] = useState(false);
@@ -22,8 +21,6 @@ export default function StudentDashboard() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    fetchInitialData();
-
     // Listen to changes on our active order
     const subscription = supabase
       .channel('public:orders')
@@ -156,7 +153,7 @@ export default function StudentDashboard() {
       alert(error.message);
     } else {
       setActiveOrder(null);
-      fetchInitialData();
+      queryClient.invalidateQueries({ queryKey: ['pastOrders'] });
     }
   };
 
