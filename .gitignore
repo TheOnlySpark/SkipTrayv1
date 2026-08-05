@@ -9,4 +9,4 @@ coverage/
 !.env.example
 *.pem
 *.key
-*.local
+
