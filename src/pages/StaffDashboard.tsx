@@ -80,10 +80,23 @@ export default function StaffDashboard() {
   };
 
   const handleToggleSoldOut = async (id: string, currentStatus: boolean) => {
-    await supabase.rpc('toggle_sold_out', {
+    // Optimistic update for instant UI feedback
+    setMenuItems(prev => prev.map(item => 
+      item.id === id ? { ...item, is_sold_out: !currentStatus } : item
+    ));
+
+    const { error } = await supabase.rpc('toggle_sold_out', {
       item_id: id,
       new_status: !currentStatus
     });
+
+    if (error) {
+      // Revert on error
+      setMenuItems(prev => prev.map(item => 
+        item.id === id ? { ...item, is_sold_out: currentStatus } : item
+      ));
+      console.error("Failed to toggle sold out status", error);
+    }
   };
 
   const handleVerifyOtp = async (orderId: string, expectedOtp: string) => {
