@@ -59,9 +59,15 @@ alter table public.order_items enable row level security;
 create policy "Users can view own profile" on public.profiles for select using (auth.uid() = id);
 -- Users can update their own profile
 create policy "Users can update own profile" on public.profiles for update using (auth.uid() = id);
+-- Function to safely get user role without infinite recursion
+create or replace function public.get_user_role()
+returns public.user_role as $$
+  select role from public.profiles where id = auth.uid();
+$$ language sql security definer;
+
 -- Staff and Admin can view all profiles
 create policy "Staff/Admin can view all profiles" on public.profiles for select using (
-  exists (select 1 from public.profiles where id = auth.uid() and role in ('STAFF', 'ADMIN'))
+  public.get_user_role() in ('STAFF', 'ADMIN')
 );
 
 -- MENU ITEMS POLICIES
@@ -69,15 +75,15 @@ create policy "Staff/Admin can view all profiles" on public.profiles for select 
 create policy "Anyone can view menu items" on public.menu_items for select using (true);
 -- Admin can insert menu items
 create policy "Admin can insert menu items" on public.menu_items for insert with check (
-  exists (select 1 from public.profiles where id = auth.uid() and role = 'ADMIN')
+  public.get_user_role() = 'ADMIN'
 );
 -- Admin can update menu items
 create policy "Admin can update menu items" on public.menu_items for update using (
-  exists (select 1 from public.profiles where id = auth.uid() and role = 'ADMIN')
+  public.get_user_role() = 'ADMIN'
 );
 -- Admin can delete menu items
 create policy "Admin can delete menu items" on public.menu_items for delete using (
-  exists (select 1 from public.profiles where id = auth.uid() and role = 'ADMIN')
+  public.get_user_role() = 'ADMIN'
 );
 
 -- ORDERS POLICIES
@@ -87,11 +93,11 @@ create policy "Users can view own orders" on public.orders for select using (aut
 create policy "Users can insert own orders" on public.orders for insert with check (auth.uid() = user_id);
 -- Staff/Admin can view all orders
 create policy "Staff/Admin can view all orders" on public.orders for select using (
-  exists (select 1 from public.profiles where id = auth.uid() and role in ('STAFF', 'ADMIN'))
+  public.get_user_role() in ('STAFF', 'ADMIN')
 );
 -- Staff/Admin can update all orders
 create policy "Staff/Admin can update all orders" on public.orders for update using (
-  exists (select 1 from public.profiles where id = auth.uid() and role in ('STAFF', 'ADMIN'))
+  public.get_user_role() in ('STAFF', 'ADMIN')
 );
 
 -- ORDER ITEMS POLICIES
@@ -105,7 +111,7 @@ create policy "Users can insert own order items" on public.order_items for inser
 );
 -- Staff/Admin can view all order items
 create policy "Staff/Admin can view all order items" on public.order_items for select using (
-  exists (select 1 from public.profiles where id = auth.uid() and role in ('STAFF', 'ADMIN'))
+  public.get_user_role() in ('STAFF', 'ADMIN')
 );
 
 -- Function to handle profile creation on auth.users insert
@@ -126,7 +132,7 @@ create trigger on_auth_user_created
 create or replace function public.toggle_sold_out(item_id uuid, new_status boolean)
 returns void as $$
 begin
-  if not exists (select 1 from public.profiles where id = auth.uid() and role in ('STAFF', 'ADMIN')) then
+  if public.get_user_role() not in ('STAFF', 'ADMIN') then
     raise exception 'Unauthorized';
   end if;
 

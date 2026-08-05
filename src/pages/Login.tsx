@@ -33,32 +33,42 @@ export default function Login() {
     setLoading(true);
     setError('');
     
-    const formattedPhone = phone.replace(/[^0-9+]/g, '');
-    const email = `user${formattedPhone.replace('+', '')}@skiptray.local`;
-    const password = 'SkipTrayUser123!';
-    
-    const { data: { user }, error: signInError } = await supabase.auth.signInWithPassword({
-      email,
-      password
-    });
+    try {
+      const formattedPhone = phone.replace(/[^0-9+]/g, '');
+      const email = `user${formattedPhone.replace('+', '')}@skiptray.local`;
+      const password = 'SkipTrayUser123!';
+      
+      const { data: { user }, error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password
+      });
 
-    if (signInError) {
-      if (signInError.message.includes('Invalid login credentials')) {
-        // User doesn't exist, go to profile step to collect details for signup
-        setStep('PROFILE');
-      } else if (signInError.message.toLowerCase().includes('email not confirmed')) {
-        setError('Error: "Confirm email" is enabled in Supabase. FIX: Go to Supabase Dashboard > Authentication > Providers > Email, turn OFF "Confirm email". You may need to delete the unconfirmed user from the dashboard and try again.');
-      } else {
-        setError(signInError.message);
+      if (signInError) {
+        if (signInError.message.includes('Invalid login credentials')) {
+          // User doesn't exist, go to profile step to collect details for signup
+          setStep('PROFILE');
+        } else if (signInError.message.toLowerCase().includes('email not confirmed')) {
+          setError('Error: "Confirm email" is enabled in Supabase. FIX: Go to Supabase Dashboard > Authentication > Providers > Email, turn OFF "Confirm email". You may need to delete the unconfirmed user from the dashboard and try again.');
+        } else {
+          setError(signInError.message);
+        }
+        return;
       }
-      setLoading(false);
-      return;
-    }
 
-    if (user) {
-      await refreshProfile();
+      if (user) {
+        await refreshProfile();
+        
+        // Double check if the database profile was actually created by the trigger
+        const { data: checkProfile } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
+        if (!checkProfile) {
+          setError("Your account exists but your profile is missing! This usually happens if you created the account before running the SQL migrations. Please delete your user from the Supabase Authentication dashboard and try again.");
+        }
+      }
+    } catch (err: any) {
+      setError(err.message || 'An unexpected error occurred during login. Check your internet or Supabase URL.');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleCompleteProfile = async (e: React.FormEvent) => {
