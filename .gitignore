@@ -6,6 +6,8 @@ coverage/
 *.log
 .env
 .env.local
+.env.*
 !.env.example
 *.pem
 *.key
+*.local
