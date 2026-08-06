@@ -274,40 +274,90 @@ export default function StudentDashboard() {
             <h3 className="font-bold text-lg mb-6 text-slate-100">Your Order</h3>
             
             <div className="space-y-4 mb-8">
-              {cart.map(c => (
-                <div key={c.item.id} className="flex justify-between items-center border-b border-slate-800 pb-3">
-                  <div>
-                    <div className="text-sm font-medium text-slate-200">{c.item.name}</div>
-                    <div className="text-xs text-slate-500 mt-1">Qty: {c.quantity}</div>
+              {cart.map(c => {
+                const liveItem = menuItems.find(m => m.id === c.item.id);
+                const isSoldOut = liveItem?.is_sold_out ?? false;
+                return (
+                  <div key={c.item.id} className={`flex justify-between items-center border-b pb-3 ${isSoldOut ? 'border-red-500/30' : 'border-slate-800'}`}>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-sm font-medium ${isSoldOut ? 'text-red-400 line-through' : 'text-slate-200'}`}>{c.item.name}</span>
+                        {isSoldOut && (
+                          <span className="text-[10px] font-bold text-red-400 bg-red-500/20 px-1.5 py-0.5 rounded-full uppercase tracking-wider">Sold Out</span>
+                        )}
+                      </div>
+                      <div className="text-xs text-slate-500 mt-1">Qty: {c.quantity}</div>
+                    </div>
+                    <button 
+                      onClick={() => removeFromCart(c.item.id)}
+                      className={`text-xs px-2 py-1 rounded ${isSoldOut ? 'text-red-400 hover:text-red-300 bg-red-500/10' : 'text-slate-400 hover:text-white bg-slate-800'}`}
+                    >
+                      Remove
+                    </button>
                   </div>
-                  <button 
-                    onClick={() => removeFromCart(c.item.id)}
-                    className="text-xs text-slate-400 hover:text-white bg-slate-800 px-2 py-1 rounded"
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
+                );
+              })}
               {cart.length === 0 && (
                 <div className="text-slate-500 text-sm text-center mt-10">Select items from the menu. (Max 5)</div>
               )}
             </div>
 
+            {/* Sold out summary warning */}
+            {cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out) && (
+              <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-xl">
+                <p className="text-red-400 text-xs font-semibold mb-1">⚠ Sold out items in your order:</p>
+                <ul className="text-red-300 text-xs space-y-0.5">
+                  {cart
+                    .filter(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out)
+                    .map(c => (
+                      <li key={c.item.id}>• {c.item.name}</li>
+                    ))
+                  }
+                </ul>
+                <p className="text-red-400/70 text-[10px] mt-2">Remove sold out items to place your order.</p>
+              </div>
+            )}
+
             <form onSubmit={handlePlaceOrder} className="pt-4 border-t border-slate-800">
               {error && <div className="text-red-400 text-xs mb-3 font-semibold">{error}</div>}
               <div className="mb-4">
-                <label className="block text-xs text-slate-400 uppercase font-semibold mb-2">Pickup Time</label>
-                <input 
-                  type="time"
-                  required
-                  value={pickupTime}
-                  onChange={e => setPickupTime(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 text-white px-3 py-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
-                />
+                <label className="block text-xs text-slate-400 uppercase font-semibold mb-2">Pickup Time (9 AM – 6 PM)</label>
+                <div className="flex gap-2">
+                  <select
+                    value={pickupTime.split(':')[0] || ''}
+                    onChange={e => {
+                      const hour = e.target.value;
+                      const minute = pickupTime.split(':')[1] || '00';
+                      setPickupTime(hour ? `${hour}:${minute}` : '');
+                    }}
+                    className="flex-1 bg-slate-800 border border-slate-700 text-white px-3 py-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm appearance-none cursor-pointer"
+                  >
+                    <option value="">Hour</option>
+                    {Array.from({ length: 10 }, (_, i) => i + 9).map(h => (
+                      <option key={h} value={String(h).padStart(2, '0')}>
+                        {h > 12 ? `${h - 12} PM` : h === 12 ? '12 PM' : `${h} AM`}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={pickupTime.split(':')[1] || ''}
+                    onChange={e => {
+                      const hour = pickupTime.split(':')[0] || '09';
+                      setPickupTime(`${hour}:${e.target.value}`);
+                    }}
+                    disabled={!pickupTime.split(':')[0]}
+                    className="flex-1 bg-slate-800 border border-slate-700 text-white px-3 py-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm appearance-none cursor-pointer disabled:opacity-50"
+                  >
+                    <option value="">Min</option>
+                    {['00', '10', '20', '30', '40', '50'].map(m => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
               <button 
                 type="submit"
-                disabled={cart.length === 0 || !pickupTime || submitting}
+                disabled={cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out)}
                 className="w-full py-3 bg-indigo-500 text-white rounded-xl font-bold text-sm shadow-sm hover:bg-indigo-400 disabled:opacity-50 transition-colors"
               >
                 {submitting ? 'Placing...' : `Place Order (${cartTotalItems} items)`}
