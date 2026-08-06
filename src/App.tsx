@@ -6,6 +6,8 @@
 import { BrowserRouter as Router, Routes, Route, Link, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import { useState } from 'react';
+import { Menu, X } from 'lucide-react';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import StudentDashboard from './pages/StudentDashboard';
@@ -14,24 +16,52 @@ import AdminDashboard from './pages/AdminDashboard';
 
 function NavigationHeader() {
   const { user } = useAuth();
+  const [isOpen, setIsOpen] = useState(false);
   
   return (
-    <header className="flex items-center justify-between w-full max-w-4xl mb-8 px-4">
-      <div className="flex items-center gap-2">
-        <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
-          <div className="w-4 h-4 border-2 border-white rounded-sm"></div>
+    <header className="flex flex-col w-full max-w-4xl mb-8 px-4 relative z-50">
+      <div className="flex items-center justify-between w-full">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
+            <div className="w-4 h-4 border-2 border-white rounded-sm"></div>
+          </div>
+          <Link to="/" className="font-bold text-2xl tracking-tight text-slate-800">SkipTray</Link>
         </div>
-        <Link to="/" className="font-bold text-2xl tracking-tight text-slate-800">SkipTray</Link>
+
+        {/* Desktop Nav */}
+        <div className="hidden md:flex gap-4 items-center">
+          {!user && (
+            <Link to="/login" className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition">
+              Login
+            </Link>
+          )}
+          {user && (
+            <Link to="/dashboard" className="px-4 py-2 bg-slate-100 text-slate-700 text-sm font-semibold rounded-lg hover:bg-slate-200 transition">
+              Dashboard
+            </Link>
+          )}
+        </div>
+
+        {/* Mobile Toggle */}
+        <button 
+          className="md:hidden p-2 text-slate-600"
+          onClick={() => setIsOpen(!isOpen)}
+        >
+          {isOpen ? <X size={24} /> : <Menu size={24} />}
+        </button>
       </div>
-      {!user && (
-        <Link to="/login" className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition">
-          Login
-        </Link>
-      )}
-      {user && (
-        <Link to="/dashboard" className="px-4 py-2 bg-slate-100 text-slate-700 text-sm font-semibold rounded-lg hover:bg-slate-200 transition">
-          Dashboard
-        </Link>
+
+      {/* Mobile Nav Dropdown */}
+      {isOpen && (
+        <div className="md:hidden absolute top-full left-4 right-4 mt-2 p-4 bg-white rounded-2xl shadow-xl border border-slate-100 flex flex-col gap-2 z-50">
+          <Link to="/" onClick={() => setIsOpen(false)} className="px-4 py-3 text-slate-700 font-medium hover:bg-slate-50 rounded-xl">Home</Link>
+          {!user && (
+            <Link to="/login" onClick={() => setIsOpen(false)} className="px-4 py-3 bg-indigo-50 text-indigo-700 font-semibold rounded-xl text-center mt-2">Login</Link>
+          )}
+          {user && (
+            <Link to="/dashboard" onClick={() => setIsOpen(false)} className="px-4 py-3 bg-indigo-50 text-indigo-700 font-semibold rounded-xl text-center mt-2">Dashboard</Link>
+          )}
+        </div>
       )}
     </header>
   );
@@ -70,7 +100,7 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <Router>
-          <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center font-sans text-slate-900 p-6 pt-12">
+          <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center font-sans text-slate-900 p-4 pt-6 md:p-6 md:pt-12">
             <NavigationHeader />
 
             <main className="w-full flex-grow flex flex-col items-center justify-center">

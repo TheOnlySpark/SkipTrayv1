@@ -210,8 +210,8 @@ export default function StudentDashboard() {
   return (
     <div className="w-full max-w-4xl grid grid-cols-12 gap-4">
       {/* Header */}
-      <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-8 flex flex-col justify-between shadow-sm relative overflow-hidden mb-4">
-        <div className="z-10 flex justify-between items-start">
+      <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 flex flex-col justify-between shadow-sm relative overflow-hidden mb-4">
+        <div className="z-10 flex flex-col sm:flex-row justify-between items-start gap-4">
           <div>
             <span className="px-3 py-1 bg-indigo-50 text-indigo-600 text-xs font-bold uppercase tracking-wider rounded-full">{profile?.role || 'Student'}</span>
             <h1 className="text-3xl font-extrabold text-slate-900 mt-4 leading-tight">Welcome, {profile?.name || 'User'}</h1>
@@ -230,7 +230,7 @@ export default function StudentDashboard() {
       {menuLoading ? (
         <div className="col-span-12 text-center text-slate-500">Loading...</div>
       ) : showHistory ? (
-        <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-8 shadow-sm">
+        <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 shadow-sm">
           <h2 className="text-xl font-bold text-slate-800 mb-6">Past Orders</h2>
           {pastOrders.length === 0 ? (
             <div className="text-slate-500">No past orders found.</div>
@@ -342,7 +342,7 @@ export default function StudentDashboard() {
         </div>
       ) : activeOrder ? (
         // Active Order View
-        <div className="col-span-12 bg-indigo-600 rounded-[2rem] p-8 text-white flex flex-col items-center justify-center min-h-[300px] shadow-sm relative overflow-hidden">
+        <div className="col-span-12 bg-indigo-600 rounded-[2rem] p-5 md:p-8 text-white flex flex-col items-center justify-center min-h-[300px] shadow-sm relative overflow-hidden">
           {/* Cancel button if within 5 mins and not preparing */}
           {['PLACED', 'ACCEPTED'].includes(activeOrder.status) && (new Date().getTime() - new Date(activeOrder.created_at).getTime()) < 5 * 60 * 1000 && (
             <button 
@@ -368,9 +368,9 @@ export default function StudentDashboard() {
       ) : (
         <>
           {/* Menu */}
-          <div className="col-span-8 bg-white border border-slate-200 rounded-[2rem] p-8 shadow-sm">
+          <div className="col-span-12 lg:col-span-8 bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 shadow-sm">
             <h2 className="text-xl font-bold text-slate-800 mb-6">Menu</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
               {menuItems.map(item => (
                 <div key={item.id} className={`flex flex-col justify-between p-5 rounded-2xl border transition-all ${item.is_sold_out ? 'bg-slate-50 border-slate-100 opacity-60' : 'bg-white border-slate-200 hover:border-indigo-300 hover:shadow-md'}`}>
                   <div>
@@ -400,7 +400,7 @@ export default function StudentDashboard() {
           </div>
 
           {/* Cart */}
-          <div className="col-span-4 bg-slate-900 rounded-[2rem] p-8 text-white flex flex-col shadow-sm">
+          <div className="col-span-12 lg:col-span-4 bg-slate-900 rounded-[2rem] p-5 md:p-8 text-white flex flex-col shadow-sm">
             <h3 className="font-bold text-lg mb-6 text-slate-100">Your Order</h3>
             
             <div className="space-y-4 mb-8">
