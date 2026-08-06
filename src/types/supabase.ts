@@ -36,6 +36,58 @@ export interface Database {
         }
         Relationships: []
       }
+      item_reviews: {
+        Row: {
+          admin_reply: string | null
+          created_at: string
+          feedback_text: string | null
+          id: string
+          menu_item_id: string
+          order_id: string
+          rating: number
+          user_id: string
+        }
+        Insert: {
+          admin_reply?: string | null
+          created_at?: string
+          feedback_text?: string | null
+          id?: string
+          menu_item_id: string
+          order_id: string
+          rating: number
+          user_id: string
+        }
+        Update: {
+          admin_reply?: string | null
+          created_at?: string
+          feedback_text?: string | null
+          id?: string
+          menu_item_id?: string
+          order_id?: string
+          rating?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "item_reviews_menu_item_id_fkey"
+            columns: ["menu_item_id"]
+            referencedRelation: "menu_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "item_reviews_order_id_fkey"
+            columns: ["order_id"]
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "item_reviews_user_id_fkey"
+            columns: ["user_id"]
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
       order_items: {
         Row: {
           id: string

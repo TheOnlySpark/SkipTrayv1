@@ -3,15 +3,59 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Database } from '../types/supabase';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 type FoodType = Database['public']['Enums']['food_type'];
+type Review = Database['public']['Tables']['item_reviews']['Row'] & {
+  menu_items: { name: string } | null;
+  profiles: { name: string | null; id_number: string | null } | null;
+};
 
 export default function AdminDashboard() {
   const { profile, signOut } = useAuth();
+  const queryClient = useQueryClient();
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({ placed: 0, collected: 0, rejected: 0 });
+  
+  const [replyingTo, setReplyingTo] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState('');
+  const [submittingReply, setSubmittingReply] = useState(false);
+
+  const { data: reviews = [], isLoading: reviewsLoading } = useQuery({
+    queryKey: ['adminReviews'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('item_reviews')
+        .select(`
+          *,
+          menu_items (name),
+          profiles (name, id_number)
+        `)
+        .order('created_at', { ascending: false });
+      return (data as unknown as Review[]) || [];
+    }
+  });
+
+  const handleReplyToReview = async (reviewId: string) => {
+    if (!replyText.trim()) return;
+    setSubmittingReply(true);
+    
+    const { error } = await supabase
+      .from('item_reviews')
+      .update({ admin_reply: replyText })
+      .eq('id', reviewId);
+      
+    if (error) {
+      alert(error.message);
+    } else {
+      setReplyingTo(null);
+      setReplyText('');
+      queryClient.invalidateQueries({ queryKey: ['adminReviews'] });
+    }
+    setSubmittingReply(false);
+  };
   
   const [newItemName, setNewItemName] = useState('');
   const [newItemType, setNewItemType] = useState<FoodType>('VEG');
@@ -174,6 +218,90 @@ export default function AdminDashboard() {
             {menuItems.length === 0 && (
               <div className="text-slate-500 text-sm text-center py-4">No menu items yet.</div>
             )}
+          </div>
+        )}
+      </div>
+
+      {/* Feedback & Reviews */}
+      <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-8 shadow-sm">
+        <h2 className="text-xl font-bold text-slate-800 mb-6">Student Feedback & Reviews</h2>
+        
+        {reviewsLoading ? (
+          <div className="text-slate-500 text-sm">Loading reviews...</div>
+        ) : reviews.length === 0 ? (
+          <div className="text-slate-500 text-sm py-4">No reviews yet.</div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {reviews.map(review => (
+              <div key={review.id} className="p-5 rounded-2xl border border-slate-200 bg-slate-50 flex flex-col gap-3 hover:shadow-md transition-shadow">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h3 className="font-bold text-slate-800">{review.menu_items?.name || 'Unknown Item'}</h3>
+                    <div className="text-xs text-slate-500 mt-0.5">
+                      By {review.profiles?.name || 'Unknown'} ({review.profiles?.id_number || 'No ID'})
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <span key={i} className={`text-lg ${i < review.rating ? 'text-yellow-400' : 'text-slate-200'}`}>★</span>
+                    ))}
+                  </div>
+                </div>
+                
+                {review.feedback_text && (
+                  <div className="bg-white p-3 rounded-xl border border-slate-100 text-sm text-slate-700 italic">
+                    "{review.feedback_text}"
+                  </div>
+                )}
+                
+                <div className="text-xs text-slate-400">
+                  Reviewed on: {new Date(review.created_at).toLocaleString()}
+                </div>
+
+                {/* Admin Reply Section */}
+                <div className="mt-2 pt-3 border-t border-slate-200">
+                  {review.admin_reply ? (
+                    <div className="bg-indigo-50 p-3 rounded-xl border border-indigo-100">
+                      <div className="text-xs font-bold text-indigo-600 uppercase tracking-wider mb-1">Your Reply</div>
+                      <p className="text-sm text-slate-800">{review.admin_reply}</p>
+                    </div>
+                  ) : replyingTo === review.id ? (
+                    <div className="flex flex-col gap-2">
+                      <textarea
+                        value={replyText}
+                        onChange={(e) => setReplyText(e.target.value)}
+                        placeholder="Write a reply..."
+                        className="w-full text-sm bg-white border border-indigo-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        rows={2}
+                      />
+                      <div className="flex justify-end gap-2">
+                        <button 
+                          onClick={() => { setReplyingTo(null); setReplyText(''); }}
+                          className="px-3 py-1.5 text-xs font-semibold text-slate-500 hover:text-slate-700 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                        <button 
+                          onClick={() => handleReplyToReview(review.id)}
+                          disabled={submittingReply || !replyText.trim()}
+                          className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                        >
+                          {submittingReply ? 'Sending...' : 'Send Reply'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button 
+                      onClick={() => setReplyingTo(review.id)}
+                      className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 21l1.9-5.7a8.5 8.5 0 1 1 3.8 3.8z"></path></svg>
+                      Reply to feedback
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>

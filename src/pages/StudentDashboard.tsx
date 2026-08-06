@@ -7,18 +7,28 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 type Order = Database['public']['Tables']['orders']['Row'];
+type ItemReview = Database['public']['Tables']['item_reviews']['Row'];
+type PastOrder = Order & {
+  order_items: { menu_items: MenuItem | null }[];
+  item_reviews: ItemReview[];
+};
 
 export default function StudentDashboard() {
   const { profile, signOut } = useAuth();
   const queryClient = useQueryClient();
   const [activeOrder, setActiveOrder] = useState<Order | null>(null);
-  const [pastOrders, setPastOrders] = useState<Order[]>([]);
+  const [pastOrders, setPastOrders] = useState<PastOrder[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   
   const [cart, setCart] = useState<{item: MenuItem, quantity: number}[]>([]);
   const [pickupTime, setPickupTime] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  const [reviewingItem, setReviewingItem] = useState<{ orderId: string, menuItemId: string, itemName: string } | null>(null);
+  const [reviewRating, setReviewRating] = useState(5);
+  const [reviewText, setReviewText] = useState('');
+  const [submittingReview, setSubmittingReview] = useState(false);
 
   useEffect(() => {
     // Listen to changes on our active order
@@ -60,11 +70,17 @@ export default function StudentDashboard() {
       if (!profile?.id) return [];
       const { data } = await supabase
         .from('orders')
-        .select('*')
+        .select(`
+          *,
+          order_items (
+            menu_items (*)
+          ),
+          item_reviews (*)
+        `)
         .eq('user_id', profile.id)
         .in('status', ['COLLECTED', 'REJECTED'])
         .order('created_at', { ascending: false });
-      return data || [];
+      return (data as unknown as PastOrder[]) || [];
     },
     enabled: !!profile?.id,
   });
@@ -157,6 +173,30 @@ export default function StudentDashboard() {
     }
   };
 
+  const handleSubmitReview = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reviewingItem || !profile?.id) return;
+    setSubmittingReview(true);
+    
+    const { error } = await supabase.from('item_reviews').insert({
+      order_id: reviewingItem.orderId,
+      menu_item_id: reviewingItem.menuItemId,
+      user_id: profile.id,
+      rating: reviewRating,
+      feedback_text: reviewText
+    });
+    
+    if (error) {
+      alert(error.message);
+    } else {
+      setReviewingItem(null);
+      setReviewRating(5);
+      setReviewText('');
+      queryClient.invalidateQueries({ queryKey: ['pastOrders'] });
+    }
+    setSubmittingReview(false);
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'PLACED': return 'bg-slate-100 text-slate-600';
@@ -197,14 +237,104 @@ export default function StudentDashboard() {
           ) : (
             <div className="space-y-4">
               {pastOrders.map(o => (
-                <div key={o.id} className="p-4 rounded-xl border border-slate-200 flex justify-between items-center">
-                  <div>
-                    <div className="font-semibold text-slate-800">Placed on: {new Date(o.created_at).toLocaleDateString()}</div>
-                    <div className="text-sm text-slate-500">Pickup: {o.pickup_time}</div>
+                <div key={o.id} className="p-4 rounded-xl border border-slate-200 flex flex-col gap-4 shadow-sm">
+                  <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                    <div>
+                      <div className="font-semibold text-slate-800">Placed on: {new Date(o.created_at).toLocaleDateString()}</div>
+                      <div className="text-sm text-slate-500">Pickup: {o.pickup_time}</div>
+                    </div>
+                    <div className={`px-3 py-1 rounded-full text-xs font-bold border ${o.status === 'COLLECTED' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+                      {o.status}
+                    </div>
                   </div>
-                  <div className={`px-3 py-1 rounded-full text-xs font-bold border ${o.status === 'COLLECTED' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
-                    {o.status}
-                  </div>
+                  
+                  {o.order_items && o.order_items.length > 0 && (
+                    <div className="space-y-3">
+                      {o.order_items.map((oi, idx) => {
+                        const menuItem = oi.menu_items;
+                        if (!menuItem) return null;
+                        const existingReview = o.item_reviews?.find(r => r.menu_item_id === menuItem.id);
+                        
+                        return (
+                          <div key={idx} className="flex flex-col gap-2 p-3 bg-slate-50 rounded-lg border border-slate-100">
+                            <div className="flex justify-between items-center">
+                              <span className="font-medium text-slate-700">{menuItem.name}</span>
+                              {o.status === 'COLLECTED' && !existingReview && reviewingItem?.menuItemId !== menuItem.id && (
+                                <button
+                                  onClick={() => setReviewingItem({ orderId: o.id, menuItemId: menuItem.id, itemName: menuItem.name })}
+                                  className="text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors"
+                                >
+                                  Leave Review
+                                </button>
+                              )}
+                            </div>
+                            
+                            {/* Existing Review Display */}
+                            {existingReview && (
+                              <div className="mt-1 bg-white p-3 rounded-lg border border-indigo-100 shadow-sm">
+                                <div className="flex items-center gap-1 mb-1">
+                                  {Array.from({ length: 5 }).map((_, i) => (
+                                    <span key={i} className={`text-sm ${i < existingReview.rating ? 'text-yellow-400' : 'text-slate-200'}`}>★</span>
+                                  ))}
+                                </div>
+                                {existingReview.feedback_text && (
+                                  <p className="text-sm text-slate-600 italic">"{existingReview.feedback_text}"</p>
+                                )}
+                                {existingReview.admin_reply && (
+                                  <div className="mt-2 pl-3 border-l-2 border-indigo-300">
+                                    <span className="text-xs font-bold text-indigo-600 uppercase tracking-wider">Admin Reply</span>
+                                    <p className="text-sm text-slate-700 mt-0.5">{existingReview.admin_reply}</p>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Review Form */}
+                            {reviewingItem?.orderId === o.id && reviewingItem?.menuItemId === menuItem.id && (
+                              <form onSubmit={handleSubmitReview} className="mt-2 bg-white p-4 rounded-xl border border-indigo-200 shadow-sm animate-in fade-in slide-in-from-top-2">
+                                <div className="flex justify-between items-center mb-3">
+                                  <h4 className="font-bold text-slate-800 text-sm">Reviewing {reviewingItem.itemName}</h4>
+                                  <button type="button" onClick={() => setReviewingItem(null)} className="text-slate-400 hover:text-slate-600">✕</button>
+                                </div>
+                                <div className="mb-3">
+                                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Rating</label>
+                                  <div className="flex gap-2">
+                                    {[1, 2, 3, 4, 5].map(star => (
+                                      <button
+                                        key={star}
+                                        type="button"
+                                        onClick={() => setReviewRating(star)}
+                                        className={`text-2xl hover:scale-110 transition-transform ${star <= reviewRating ? 'text-yellow-400' : 'text-slate-200'}`}
+                                      >
+                                        ★
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                                <div className="mb-3">
+                                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Feedback (Optional)</label>
+                                  <textarea
+                                    value={reviewText}
+                                    onChange={(e) => setReviewText(e.target.value)}
+                                    placeholder="How was the food?"
+                                    className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    rows={2}
+                                  />
+                                </div>
+                                <button
+                                  type="submit"
+                                  disabled={submittingReview}
+                                  className="w-full bg-indigo-600 text-white font-semibold py-2 rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                                >
+                                  {submittingReview ? 'Submitting...' : 'Submit Review'}
+                                </button>
+                              </form>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
