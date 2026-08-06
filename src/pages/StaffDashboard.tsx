@@ -73,17 +73,42 @@ export default function StaffDashboard() {
   };
 
   const updateOrderStatus = async (orderId: string, status: string) => {
-    await supabase.rpc('update_order_status', {
+    // Optimistic update for instant UI feedback
+    setOrders(prev => prev.map(order => 
+      order.id === orderId ? { ...order, status: status as any } : order
+    ));
+
+    const { error } = await supabase.rpc('update_order_status', {
       p_order_id: orderId,
       p_status: status as any
     });
+
+    if (error) {
+      console.error("Failed to update order status:", error);
+      alert("Failed to update order status: " + error.message);
+      // Revert by re-fetching orders
+      fetchOrders();
+    }
   };
 
   const handleToggleSoldOut = async (id: string, currentStatus: boolean) => {
-    await supabase.rpc('toggle_sold_out', {
+    // Optimistic update for instant UI feedback
+    setMenuItems(prev => prev.map(item => 
+      item.id === id ? { ...item, is_sold_out: !currentStatus } : item
+    ));
+
+    const { error } = await supabase.rpc('toggle_sold_out', {
       item_id: id,
       new_status: !currentStatus
     });
+
+    if (error) {
+      // Revert on error
+      setMenuItems(prev => prev.map(item => 
+        item.id === id ? { ...item, is_sold_out: currentStatus } : item
+      ));
+      console.error("Failed to toggle sold out status", error);
+    }
   };
 
   const handleVerifyOtp = async (orderId: string, expectedOtp: string) => {
@@ -153,7 +178,7 @@ export default function StaffDashboard() {
       </div>
 
       {/* Live Order Queue */}
-      <div className="col-span-8 space-y-4">
+      <div className="col-span-12 space-y-4">
         <h2 className="text-xl font-bold text-slate-800 mb-2">Live Order Queue</h2>
         {loading && orders.length === 0 ? (
           <div className="text-slate-500">Loading orders...</div>
@@ -224,15 +249,15 @@ export default function StaffDashboard() {
       </div>
 
       {/* Quick Menu Toggles */}
-      <div className="col-span-4 bg-white border border-slate-200 rounded-[2rem] p-6 shadow-sm h-fit">
-        <h3 className="font-bold text-slate-800 mb-4">Quick Availability</h3>
-        <div className="space-y-2 max-h-[500px] overflow-y-auto pr-2">
+      <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-8 shadow-sm mt-4">
+        <h3 className="font-extrabold text-2xl text-slate-800 mb-6 text-center">Quick Availability</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-h-[500px] overflow-y-auto pr-2 place-items-stretch">
           {menuItems.map(item => (
-            <div key={item.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
-              <span className={`text-sm font-medium ${item.is_sold_out ? 'text-slate-400 line-through' : 'text-slate-700'}`}>{item.name}</span>
+            <div key={item.id} className="flex flex-col items-center justify-center p-6 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm text-center">
+              <span className={`text-base font-bold mb-4 ${item.is_sold_out ? 'text-slate-400 line-through' : 'text-slate-700'}`}>{item.name}</span>
               <button 
                 onClick={() => handleToggleSoldOut(item.id, item.is_sold_out)}
-                className={`text-xs px-2 py-1 rounded-md font-bold ${item.is_sold_out ? 'bg-slate-200 text-slate-600 hover:bg-slate-300' : 'bg-red-100 text-red-600 hover:bg-red-200'}`}
+                className={`w-full max-w-[120px] text-sm px-4 py-2 rounded-xl font-bold transition-transform active:scale-95 ${item.is_sold_out ? 'bg-slate-200 text-slate-600 hover:bg-slate-300' : 'bg-red-100 text-red-600 hover:bg-red-200'}`}
               >
                 {item.is_sold_out ? 'Available' : 'Sold Out'}
               </button>
