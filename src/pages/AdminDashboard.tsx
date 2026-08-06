@@ -63,7 +63,34 @@ export default function AdminDashboard() {
   useEffect(() => {
     fetchMenu();
     fetchStats();
-  }, []);
+
+    const orderSub = supabase
+      .channel('admin:orders')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
+        fetchStats();
+      })
+      .subscribe();
+
+    const menuSub = supabase
+      .channel('admin:menu_items')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items' }, () => {
+        fetchMenu();
+      })
+      .subscribe();
+
+    const reviewSub = supabase
+      .channel('admin:item_reviews')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'item_reviews' }, () => {
+        queryClient.invalidateQueries({ queryKey: ['adminReviews'] });
+      })
+      .subscribe();
+
+    return () => {
+      orderSub.unsubscribe();
+      menuSub.unsubscribe();
+      reviewSub.unsubscribe();
+    };
+  }, [queryClient]);
 
   const fetchStats = async () => {
     const today = new Date();

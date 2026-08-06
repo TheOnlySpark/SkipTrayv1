@@ -31,29 +31,55 @@ export default function StudentDashboard() {
   const [submittingReview, setSubmittingReview] = useState(false);
 
   useEffect(() => {
-    // Listen to changes on our active order
-    const subscription = supabase
+    if (!profile?.id) return;
+
+    // Listen to changes on our active order and past orders
+    const orderSub = supabase
       .channel('public:orders')
       .on('postgres_changes', { 
         event: '*', 
         schema: 'public', 
         table: 'orders',
-        filter: `user_id=eq.${profile?.id}`
+        filter: `user_id=eq.${profile.id}`
       }, (payload) => {
         const updatedOrder = payload.new as Order;
         if (['PLACED', 'ACCEPTED', 'PREPARING', 'READY'].includes(updatedOrder.status)) {
           setActiveOrder(updatedOrder);
         } else {
-          // If collected or rejected, clear active order
+          // If collected or rejected, clear active order and refresh history
           setActiveOrder(null);
+          queryClient.invalidateQueries({ queryKey: ['pastOrders'] });
         }
       })
       .subscribe();
 
+    // Listen to changes on menu items (e.g. sold out status)
+    const menuSub = supabase
+      .channel('public:menu_items')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items' }, () => {
+        queryClient.invalidateQueries({ queryKey: ['menuItems'] });
+      })
+      .subscribe();
+
+    // Listen to changes on item reviews (e.g. admin reply)
+    const reviewSub = supabase
+      .channel('public:item_reviews')
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'item_reviews',
+        filter: `user_id=eq.${profile.id}`
+      }, () => {
+        queryClient.invalidateQueries({ queryKey: ['pastOrders'] });
+      })
+      .subscribe();
+
     return () => {
-      subscription.unsubscribe();
+      orderSub.unsubscribe();
+      menuSub.unsubscribe();
+      reviewSub.unsubscribe();
     };
-  }, [profile?.id]);
+  }, [profile?.id, queryClient]);
 
   const { data: menuItems = [], isLoading: menuLoading } = useQuery({
     queryKey: ['menuItems'],
