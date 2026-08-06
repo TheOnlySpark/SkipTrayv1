@@ -73,10 +73,22 @@ export default function StaffDashboard() {
   };
 
   const updateOrderStatus = async (orderId: string, status: string) => {
-    await supabase.rpc('update_order_status', {
+    // Optimistic update for instant UI feedback
+    setOrders(prev => prev.map(order => 
+      order.id === orderId ? { ...order, status: status as any } : order
+    ));
+
+    const { error } = await supabase.rpc('update_order_status', {
       p_order_id: orderId,
       p_status: status as any
     });
+
+    if (error) {
+      console.error("Failed to update order status:", error);
+      alert("Failed to update order status: " + error.message);
+      // Revert by re-fetching orders
+      fetchOrders();
+    }
   };
 
   const handleToggleSoldOut = async (id: string, currentStatus: boolean) => {
