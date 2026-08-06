@@ -4,6 +4,23 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
+/**
+ * Derives a unique per-user password from their phone number and an app secret.
+ * This ensures each user has a distinct password rather than a shared hardcoded one.
+ */
+async function derivePassword(phone: string): Promise<string> {
+  const secret = import.meta.env.VITE_AUTH_SECRET || '';
+  if (!secret) {
+    console.warn('VITE_AUTH_SECRET is not set. Authentication security is degraded.');
+  }
+  const data = new TextEncoder().encode(phone + secret);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  // Append special chars to meet Supabase password policy (uppercase, lowercase, digit, symbol)
+  return hashHex.slice(0, 24) + 'Aa1!';
+}
+
 export default function Login() {
   const [phone, setPhone] = useState('');
   const [step, setStep] = useState<'PHONE' | 'PROFILE'>('PHONE');
@@ -13,7 +30,6 @@ export default function Login() {
   // Profile completion state
   const [idNumber, setIdNumber] = useState('');
   const [name, setName] = useState('');
-  const [role, setRole] = useState<'STUDENT' | 'TEACHER' | 'STAFF' | 'ADMIN'>('STUDENT');
 
   const { user, profile, refreshProfile } = useAuth();
   const navigate = useNavigate();
@@ -36,7 +52,7 @@ export default function Login() {
     try {
       const formattedPhone = phone.replace(/[^0-9+]/g, '');
       const email = `user${formattedPhone.replace('+', '')}@skiptray.local`;
-      const password = 'SkipTrayUser123!';
+      const password = await derivePassword(formattedPhone);
       
       const { data: { user }, error: signInError } = await supabase.auth.signInWithPassword({
         email,
@@ -81,7 +97,7 @@ export default function Login() {
     if (!currentUserId) {
       const formattedPhone = phone.replace(/[^0-9+]/g, '');
       const email = `user${formattedPhone.replace('+', '')}@skiptray.local`;
-      const password = 'SkipTrayUser123!';
+      const password = await derivePassword(formattedPhone);
 
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email,
@@ -105,8 +121,7 @@ export default function Login() {
         .from('profiles')
         .update({
           name,
-          id_number: idNumber,
-          role
+          id_number: idNumber
         })
         .eq('id', currentUserId);
         
@@ -185,27 +200,6 @@ export default function Login() {
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-900"
                 required
               />
-            </div>
-            <div>
-              <label className="block text-sm font-bold text-slate-800 mb-2">Role</label>
-              <div className="grid grid-cols-2 gap-3">
-                <label>
-                  <input type="radio" name="role" value="STUDENT" checked={role === 'STUDENT'} onChange={(e) => setRole(e.target.value as any)} className="sr-only peer" />
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-center cursor-pointer peer-checked:bg-indigo-50 peer-checked:border-indigo-200 peer-checked:text-indigo-700 text-slate-600 font-semibold text-sm transition-all">Student</div>
-                </label>
-                <label>
-                  <input type="radio" name="role" value="TEACHER" checked={role === 'TEACHER'} onChange={(e) => setRole(e.target.value as any)} className="sr-only peer" />
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-center cursor-pointer peer-checked:bg-indigo-50 peer-checked:border-indigo-200 peer-checked:text-indigo-700 text-slate-600 font-semibold text-sm transition-all">Teacher</div>
-                </label>
-                <label>
-                  <input type="radio" name="role" value="STAFF" checked={role === 'STAFF'} onChange={(e) => setRole(e.target.value as any)} className="sr-only peer" />
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-center cursor-pointer peer-checked:bg-indigo-50 peer-checked:border-indigo-200 peer-checked:text-indigo-700 text-slate-600 font-semibold text-sm transition-all">Staff</div>
-                </label>
-                <label>
-                  <input type="radio" name="role" value="ADMIN" checked={role === 'ADMIN'} onChange={(e) => setRole(e.target.value as any)} className="sr-only peer" />
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-center cursor-pointer peer-checked:bg-indigo-50 peer-checked:border-indigo-200 peer-checked:text-indigo-700 text-slate-600 font-semibold text-sm transition-all">Admin</div>
-                </label>
-              </div>
             </div>
             <button
               type="submit"
