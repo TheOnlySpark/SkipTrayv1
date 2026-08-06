@@ -22,6 +22,15 @@ export function ProtectedRoute({ children, allowedRoles }: { children: React.Rea
     return <Navigate to="/login" replace />; 
   }
 
+  // Wait for profile to load before checking roles — prevents brief unauthorized render
+  if (allowedRoles && !profile) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
   if (allowedRoles && profile && !allowedRoles.includes(profile.role)) {
     return <Navigate to="/" replace />;
   }

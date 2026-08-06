@@ -64,9 +64,11 @@ export default function Login() {
           // User doesn't exist, go to profile step to collect details for signup
           setStep('PROFILE');
         } else if (signInError.message.toLowerCase().includes('email not confirmed')) {
-          setError('Error: "Confirm email" is enabled in Supabase. FIX: Go to Supabase Dashboard > Authentication > Providers > Email, turn OFF "Confirm email". You may need to delete the unconfirmed user from the dashboard and try again.');
+          console.error('Auth config issue: email confirmation is enabled.', signInError);
+          setError('Account setup incomplete. Please contact the administrator.');
         } else {
-          setError(signInError.message);
+          console.error('Sign in error:', signInError);
+          setError('Unable to sign in. Please check your details and try again.');
         }
         return;
       }
@@ -77,11 +79,13 @@ export default function Login() {
         // Double check if the database profile was actually created by the trigger
         const { data: checkProfile } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
         if (!checkProfile) {
-          setError("Your account exists but your profile is missing! This usually happens if you created the account before running the SQL migrations. Please delete your user from the Supabase Authentication dashboard and try again.");
+          console.error('Profile missing for authenticated user:', user.id);
+          setError('Account setup incomplete. Please contact support.');
         }
       }
     } catch (err: any) {
-      setError(err.message || 'An unexpected error occurred during login. Check your internet or Supabase URL.');
+      console.error('Login error:', err);
+      setError('An unexpected error occurred. Please check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -105,10 +109,11 @@ export default function Login() {
       });
 
       if (signUpError) {
+        console.error('Sign up error:', signUpError);
         if (signUpError.message.toLowerCase().includes('rate limit')) {
-          setError('Supabase Rate Limit! Go to Dashboard > Auth > Providers > Email, turn OFF "Confirm email".');
+          setError('Too many attempts. Please wait a moment and try again.');
         } else {
-          setError(signUpError.message);
+          setError('Unable to create account. Please try again later.');
         }
         setLoading(false);
         return;
@@ -126,7 +131,8 @@ export default function Login() {
         .eq('id', currentUserId);
         
       if (updateError) {
-        setError(updateError.message);
+        console.error('Profile update error:', updateError);
+        setError('Unable to save profile. Please try again.');
         setLoading(false);
       } else {
         // Manually trigger a hard navigation or wait for context
@@ -163,6 +169,8 @@ export default function Login() {
                 placeholder="+1234567890"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
+                autoComplete="off"
+                maxLength={15}
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-900"
                 required
               />
@@ -186,6 +194,7 @@ export default function Login() {
                 placeholder="John Doe"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
+                maxLength={100}
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-900"
                 required
               />
@@ -197,6 +206,7 @@ export default function Login() {
                 placeholder="Student / Staff ID"
                 value={idNumber}
                 onChange={(e) => setIdNumber(e.target.value)}
+                maxLength={20}
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-900"
                 required
               />

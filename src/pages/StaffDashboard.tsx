@@ -84,8 +84,8 @@ export default function StaffDashboard() {
     });
 
     if (error) {
-      console.error("Failed to update order status:", error);
-      alert("Failed to update order status: " + error.message);
+      if (import.meta.env.DEV) console.error("Failed to update order status:", error);
+      alert("Failed to update order status. Please try again.");
       // Revert by re-fetching orders
       fetchOrders();
     }
@@ -107,27 +107,18 @@ export default function StaffDashboard() {
       setMenuItems(prev => prev.map(item => 
         item.id === id ? { ...item, is_sold_out: currentStatus } : item
       ));
-      console.error("Failed to toggle sold out status", error);
+      if (import.meta.env.DEV) console.error("Failed to toggle sold out status", error);
     }
   };
 
-  const handleVerifyOtp = async (orderId: string, expectedOtp: string) => {
-    // In Phase 6, we use an RPC to enforce attempt limits securely, but as a fallback
-    // for this prototype, if the RPC fails (e.g. not deployed), we can fallback to standard check
+  const handleVerifyOtp = async (orderId: string) => {
     const { data, error } = await supabase.rpc('verify_pickup_otp', {
       p_order_id: orderId,
       p_otp: otpInput
     });
 
     if (error) {
-      // Fallback for when RPC is not applied to the remote DB yet
-      if (otpInput === expectedOtp) {
-        await updateOrderStatus(orderId, 'COLLECTED');
-        setSelectedOrderForOtp(null);
-        setOtpInput('');
-      } else {
-        alert("Invalid OTP");
-      }
+      alert('Verification failed. Please try again.');
       return;
     }
 
@@ -135,6 +126,7 @@ export default function StaffDashboard() {
     if (result.success) {
       setSelectedOrderForOtp(null);
       setOtpInput('');
+      fetchOrders();
     } else {
       if (result.requires_override) {
         if (window.confirm(result.message + "\n\nDo you want to manually override?")) {
@@ -145,6 +137,7 @@ export default function StaffDashboard() {
           });
           setSelectedOrderForOtp(null);
           setOtpInput('');
+          fetchOrders();
         }
       } else {
         alert(result.message);
@@ -232,9 +225,11 @@ export default function StaffDashboard() {
                           placeholder="OTP" 
                           value={otpInput}
                           onChange={(e) => setOtpInput(e.target.value)}
+                          autoComplete="off"
+                          maxLength={6}
                           className="w-24 px-3 py-2 border border-slate-300 rounded-xl text-center font-mono tracking-widest focus:ring-2 focus:ring-indigo-500 text-slate-900"
                         />
-                        <button onClick={() => handleVerifyOtp(order.id, order.otp_code)} className="flex-1 bg-slate-900 text-white py-2 rounded-xl text-sm font-semibold hover:bg-slate-800">Verify & Collect</button>
+                        <button onClick={() => handleVerifyOtp(order.id)} className="flex-1 bg-slate-900 text-white py-2 rounded-xl text-sm font-semibold hover:bg-slate-800">Verify & Collect</button>
                         <button onClick={() => { setSelectedOrderForOtp(null); setOtpInput(''); }} className="px-3 bg-slate-100 text-slate-500 rounded-xl hover:bg-slate-200">X</button>
                       </div>
                     ) : (

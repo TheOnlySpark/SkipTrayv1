@@ -48,7 +48,7 @@ export default function AdminDashboard() {
       .eq('id', reviewId);
       
     if (error) {
-      alert(error.message);
+      alert('Failed to submit reply. Please try again.');
     } else {
       setReplyingTo(null);
       setReplyText('');
@@ -199,6 +199,7 @@ export default function AdminDashboard() {
             placeholder="Item Name" 
             value={newItemName}
             onChange={(e) => setNewItemName(e.target.value)}
+            maxLength={100}
             className="flex-1 min-w-[120px] px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm text-slate-800"
           />
           <select 
@@ -298,6 +299,7 @@ export default function AdminDashboard() {
                         value={replyText}
                         onChange={(e) => setReplyText(e.target.value)}
                         placeholder="Write a reply..."
+                        maxLength={500}
                         className="w-full text-sm bg-white border border-indigo-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                         rows={2}
                       />

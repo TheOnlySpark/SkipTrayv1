@@ -17,7 +17,7 @@ export default function Dashboard() {
   return (
     <div className="flex flex-col items-center justify-center min-h-[50vh] space-y-4">
       <div className="text-xl font-semibold text-slate-700">
-        Unknown role: {profile === null ? 'null (Profile missing)' : String(profile.role)}
+        Account configuration error. Please contact an administrator.
       </div>
       <button 
         onClick={signOut} 

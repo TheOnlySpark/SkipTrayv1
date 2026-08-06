@@ -192,7 +192,7 @@ export default function StudentDashboard() {
     });
     
     if (error) {
-      alert(error.message);
+      alert('Unable to cancel order. ' + (error.message.includes('5 minutes') ? 'Cancellation window has passed.' : 'Please try again.'));
     } else {
       setActiveOrder(null);
       queryClient.invalidateQueries({ queryKey: ['pastOrders'] });
@@ -213,7 +213,7 @@ export default function StudentDashboard() {
     });
     
     if (error) {
-      alert(error.message);
+      alert('Failed to submit review. Please try again.');
     } else {
       setReviewingItem(null);
       setReviewRating(5);
@@ -343,6 +343,7 @@ export default function StudentDashboard() {
                                     value={reviewText}
                                     onChange={(e) => setReviewText(e.target.value)}
                                     placeholder="How was the food?"
+                                    maxLength={1000}
                                     className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                                     rows={2}
                                   />
