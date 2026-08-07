@@ -31,29 +31,55 @@ export default function StudentDashboard() {
   const [submittingReview, setSubmittingReview] = useState(false);
 
   useEffect(() => {
-    // Listen to changes on our active order
-    const subscription = supabase
+    if (!profile?.id) return;
+
+    // Listen to changes on our active order and past orders
+    const orderSub = supabase
       .channel('public:orders')
       .on('postgres_changes', { 
         event: '*', 
         schema: 'public', 
         table: 'orders',
-        filter: `user_id=eq.${profile?.id}`
+        filter: `user_id=eq.${profile.id}`
       }, (payload) => {
         const updatedOrder = payload.new as Order;
         if (['PLACED', 'ACCEPTED', 'PREPARING', 'READY'].includes(updatedOrder.status)) {
           setActiveOrder(updatedOrder);
         } else {
-          // If collected or rejected, clear active order
+          // If collected or rejected, clear active order and refresh history
           setActiveOrder(null);
+          queryClient.invalidateQueries({ queryKey: ['pastOrders'] });
         }
       })
       .subscribe();
 
+    // Listen to changes on menu items (e.g. sold out status)
+    const menuSub = supabase
+      .channel('public:menu_items')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items' }, () => {
+        queryClient.invalidateQueries({ queryKey: ['menuItems'] });
+      })
+      .subscribe();
+
+    // Listen to changes on item reviews (e.g. admin reply)
+    const reviewSub = supabase
+      .channel('public:item_reviews')
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'item_reviews',
+        filter: `user_id=eq.${profile.id}`
+      }, () => {
+        queryClient.invalidateQueries({ queryKey: ['pastOrders'] });
+      })
+      .subscribe();
+
     return () => {
-      subscription.unsubscribe();
+      orderSub.unsubscribe();
+      menuSub.unsubscribe();
+      reviewSub.unsubscribe();
     };
-  }, [profile?.id]);
+  }, [profile?.id, queryClient]);
 
   const { data: menuItems = [], isLoading: menuLoading } = useQuery({
     queryKey: ['menuItems'],
@@ -166,7 +192,7 @@ export default function StudentDashboard() {
     });
     
     if (error) {
-      alert(error.message);
+      alert('Unable to cancel order. ' + (error.message.includes('5 minutes') ? 'Cancellation window has passed.' : 'Please try again.'));
     } else {
       setActiveOrder(null);
       queryClient.invalidateQueries({ queryKey: ['pastOrders'] });
@@ -187,7 +213,7 @@ export default function StudentDashboard() {
     });
     
     if (error) {
-      alert(error.message);
+      alert('Failed to submit review. Please try again.');
     } else {
       setReviewingItem(null);
       setReviewRating(5);
@@ -318,6 +344,7 @@ export default function StudentDashboard() {
                                     value={reviewText}
                                     onChange={(e) => setReviewText(e.target.value)}
                                     placeholder="How was the food?"
+                                    maxLength={1000}
                                     className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                                     rows={2}
                                   />

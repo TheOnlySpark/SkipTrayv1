@@ -4,6 +4,23 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
+/**
+ * Derives a unique per-user password from their phone number and an app secret.
+ * This ensures each user has a distinct password rather than a shared hardcoded one.
+ */
+async function derivePassword(phone: string): Promise<string> {
+  const secret = import.meta.env.VITE_AUTH_SECRET || '';
+  if (!secret) {
+    console.warn('VITE_AUTH_SECRET is not set. Authentication security is degraded.');
+  }
+  const data = new TextEncoder().encode(phone + secret);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  // Append special chars to meet Supabase password policy (uppercase, lowercase, digit, symbol)
+  return hashHex.slice(0, 24) + 'Aa1!';
+}
+
 export default function Login() {
   const [phone, setPhone] = useState('');
   const [step, setStep] = useState<'PHONE' | 'PROFILE'>('PHONE');
@@ -13,7 +30,6 @@ export default function Login() {
   // Profile completion state
   const [idNumber, setIdNumber] = useState('');
   const [name, setName] = useState('');
-  const [role, setRole] = useState<'STUDENT' | 'TEACHER' | 'STAFF' | 'ADMIN'>('STUDENT');
 
   const { user, profile, refreshProfile } = useAuth();
   const navigate = useNavigate();
@@ -36,7 +52,7 @@ export default function Login() {
     try {
       const formattedPhone = phone.replace(/[^0-9+]/g, '');
       const email = `user${formattedPhone.replace('+', '')}@skiptray.local`;
-      const password = 'SkipTrayUser123!';
+      const password = await derivePassword(formattedPhone);
       
       const { data: { user }, error: signInError } = await supabase.auth.signInWithPassword({
         email,
@@ -48,9 +64,11 @@ export default function Login() {
           // User doesn't exist, go to profile step to collect details for signup
           setStep('PROFILE');
         } else if (signInError.message.toLowerCase().includes('email not confirmed')) {
-          setError('Error: "Confirm email" is enabled in Supabase. FIX: Go to Supabase Dashboard > Authentication > Providers > Email, turn OFF "Confirm email". You may need to delete the unconfirmed user from the dashboard and try again.');
+          console.error('Auth config issue: email confirmation is enabled.', signInError);
+          setError('Account setup incomplete. Please contact the administrator.');
         } else {
-          setError(signInError.message);
+          console.error('Sign in error:', signInError);
+          setError('Unable to sign in. Please check your details and try again.');
         }
         return;
       }
@@ -61,11 +79,13 @@ export default function Login() {
         // Double check if the database profile was actually created by the trigger
         const { data: checkProfile } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
         if (!checkProfile) {
-          setError("Your account exists but your profile is missing! This usually happens if you created the account before running the SQL migrations. Please delete your user from the Supabase Authentication dashboard and try again.");
+          console.error('Profile missing for authenticated user:', user.id);
+          setError('Account setup incomplete. Please contact support.');
         }
       }
     } catch (err: any) {
-      setError(err.message || 'An unexpected error occurred during login. Check your internet or Supabase URL.');
+      console.error('Login error:', err);
+      setError('An unexpected error occurred. Please check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -81,7 +101,7 @@ export default function Login() {
     if (!currentUserId) {
       const formattedPhone = phone.replace(/[^0-9+]/g, '');
       const email = `user${formattedPhone.replace('+', '')}@skiptray.local`;
-      const password = 'SkipTrayUser123!';
+      const password = await derivePassword(formattedPhone);
 
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email,
@@ -89,10 +109,11 @@ export default function Login() {
       });
 
       if (signUpError) {
+        console.error('Sign up error:', signUpError);
         if (signUpError.message.toLowerCase().includes('rate limit')) {
-          setError('Supabase Rate Limit! Go to Dashboard > Auth > Providers > Email, turn OFF "Confirm email".');
+          setError('Too many attempts. Please wait a moment and try again.');
         } else {
-          setError(signUpError.message);
+          setError('Unable to create account. Please try again later.');
         }
         setLoading(false);
         return;
@@ -105,13 +126,13 @@ export default function Login() {
         .from('profiles')
         .update({
           name,
-          id_number: idNumber,
-          role
+          id_number: idNumber
         })
         .eq('id', currentUserId);
         
       if (updateError) {
-        setError(updateError.message);
+        console.error('Profile update error:', updateError);
+        setError('Unable to save profile. Please try again.');
         setLoading(false);
       } else {
         // Manually trigger a hard navigation or wait for context
@@ -148,6 +169,8 @@ export default function Login() {
                 placeholder="+1234567890"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
+                autoComplete="off"
+                maxLength={15}
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-900"
                 required
               />
@@ -171,6 +194,7 @@ export default function Login() {
                 placeholder="John Doe"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
+                maxLength={100}
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-900"
                 required
               />
@@ -182,30 +206,10 @@ export default function Login() {
                 placeholder="Student / Staff ID"
                 value={idNumber}
                 onChange={(e) => setIdNumber(e.target.value)}
+                maxLength={20}
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-900"
                 required
               />
-            </div>
-            <div>
-              <label className="block text-sm font-bold text-slate-800 mb-2">Role</label>
-              <div className="grid grid-cols-2 gap-3">
-                <label>
-                  <input type="radio" name="role" value="STUDENT" checked={role === 'STUDENT'} onChange={(e) => setRole(e.target.value as any)} className="sr-only peer" />
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-center cursor-pointer peer-checked:bg-indigo-50 peer-checked:border-indigo-200 peer-checked:text-indigo-700 text-slate-600 font-semibold text-sm transition-all">Student</div>
-                </label>
-                <label>
-                  <input type="radio" name="role" value="TEACHER" checked={role === 'TEACHER'} onChange={(e) => setRole(e.target.value as any)} className="sr-only peer" />
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-center cursor-pointer peer-checked:bg-indigo-50 peer-checked:border-indigo-200 peer-checked:text-indigo-700 text-slate-600 font-semibold text-sm transition-all">Teacher</div>
-                </label>
-                <label>
-                  <input type="radio" name="role" value="STAFF" checked={role === 'STAFF'} onChange={(e) => setRole(e.target.value as any)} className="sr-only peer" />
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-center cursor-pointer peer-checked:bg-indigo-50 peer-checked:border-indigo-200 peer-checked:text-indigo-700 text-slate-600 font-semibold text-sm transition-all">Staff</div>
-                </label>
-                <label>
-                  <input type="radio" name="role" value="ADMIN" checked={role === 'ADMIN'} onChange={(e) => setRole(e.target.value as any)} className="sr-only peer" />
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-center cursor-pointer peer-checked:bg-indigo-50 peer-checked:border-indigo-200 peer-checked:text-indigo-700 text-slate-600 font-semibold text-sm transition-all">Admin</div>
-                </label>
-              </div>
             </div>
             <button
               type="submit"
