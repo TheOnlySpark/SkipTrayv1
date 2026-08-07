@@ -266,8 +266,9 @@ export default function StudentDashboard() {
                 <div key={o.id} className="p-4 rounded-xl border border-slate-200 flex flex-col gap-4 shadow-sm">
                   <div className="flex justify-between items-center border-b border-slate-100 pb-3">
                     <div>
-                      <div className="font-semibold text-slate-800">Placed on: {new Date(o.created_at).toLocaleDateString()}</div>
-                      <div className="text-sm text-slate-500">Pickup: {o.pickup_time}</div>
+                      <div className="font-bold text-slate-800 text-lg">Order #{o.order_number}</div>
+                      <div className="text-xs text-slate-500 font-medium mb-1">Placed on: {new Date(o.created_at).toLocaleDateString()}</div>
+                      <div className="text-sm text-slate-600 mt-1">Pickup: {o.pickup_time}</div>
                     </div>
                     <div className={`px-3 py-1 rounded-full text-xs font-bold border ${o.status === 'COLLECTED' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
                       {o.status}
@@ -380,8 +381,10 @@ export default function StudentDashboard() {
             </button>
           )}
 
-          <h2 className="text-2xl font-bold mb-2">Your Order Status</h2>
-          <div className={`mt-4 px-6 py-2 rounded-full font-bold text-sm tracking-wider uppercase ${getStatusColor(activeOrder.status).replace('100', '900').replace('600', '100')}`}>
+          <h2 className="text-3xl font-extrabold mb-1 shadow-sm">Order #{activeOrder.order_number}</h2>
+          <p className="text-indigo-200 font-medium tracking-wide mb-4 text-sm">Your Order Status</p>
+          
+          <div className={`mt-2 px-6 py-2 rounded-full font-bold text-sm tracking-wider uppercase ${getStatusColor(activeOrder.status).replace('100', '900').replace('600', '100')}`}>
             {activeOrder.status}
           </div>
           

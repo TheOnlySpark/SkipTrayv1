@@ -128,6 +128,7 @@ export interface Database {
           collected_at: string | null
           created_at: string
           id: string
+          order_number: number
           otp_attempts: number
           otp_code: string
           pickup_time: string
@@ -140,6 +141,7 @@ export interface Database {
           collected_at?: string | null
           created_at?: string
           id?: string
+          order_number?: number
           otp_attempts?: number
           otp_code: string
           pickup_time: string
@@ -152,6 +154,7 @@ export interface Database {
           collected_at?: string | null
           created_at?: string
           id?: string
+          order_number?: number
           otp_attempts?: number
           otp_code?: string
           pickup_time?: string
