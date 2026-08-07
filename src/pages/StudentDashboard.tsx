@@ -236,17 +236,17 @@ export default function StudentDashboard() {
   return (
     <div className="w-full max-w-4xl grid grid-cols-12 gap-4">
       {/* Header */}
-      <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-8 flex flex-col justify-between shadow-sm relative overflow-hidden mb-4">
-        <div className="z-10 flex justify-between items-start">
+      <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-6 sm:p-8 flex flex-col justify-between shadow-sm relative overflow-hidden mb-4">
+        <div className="z-10 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 sm:gap-4">
           <div>
             <span className="px-3 py-1 bg-indigo-50 text-indigo-600 text-xs font-bold uppercase tracking-wider rounded-full">{profile?.role || 'Student'}</span>
-            <h1 className="text-3xl font-extrabold text-slate-900 mt-4 leading-tight">Welcome, {profile?.name || 'User'}</h1>
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-4 leading-tight">Welcome, {profile?.name || 'User'}</h1>
           </div>
-          <div className="flex flex-col gap-2">
-            <button onClick={() => setShowHistory(!showHistory)} className="text-sm font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 px-4 py-2 rounded-xl border border-indigo-100 transition-colors">
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            <button onClick={() => setShowHistory(!showHistory)} className="flex-1 text-center text-sm font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 px-4 py-3 sm:py-2 rounded-xl border border-indigo-100 transition-colors">
               {showHistory ? 'Back to Order' : 'Order History'}
             </button>
-            <button onClick={signOut} className="text-sm font-semibold text-slate-500 hover:text-slate-800 bg-slate-50 px-4 py-2 rounded-xl border border-slate-200 transition-colors">
+            <button onClick={signOut} className="flex-1 text-center text-sm font-semibold text-slate-500 hover:text-slate-800 bg-slate-50 px-4 py-3 sm:py-2 rounded-xl border border-slate-200 transition-colors">
               Sign Out
             </button>
           </div>
@@ -398,7 +398,7 @@ export default function StudentDashboard() {
       ) : (
         <>
           {/* Menu */}
-          <div className="col-span-8 bg-white border border-slate-200 rounded-[2rem] p-8 shadow-sm">
+          <div className="col-span-12 lg:col-span-8 bg-white border border-slate-200 rounded-[2rem] p-6 sm:p-8 shadow-sm">
             <h2 className="text-xl font-bold text-slate-800 mb-6">Menu</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {menuItems.map(item => (
@@ -430,7 +430,7 @@ export default function StudentDashboard() {
           </div>
 
           {/* Cart */}
-          <div className="col-span-4 bg-slate-900 rounded-[2rem] p-8 text-white flex flex-col shadow-sm">
+          <div className="col-span-12 lg:col-span-4 bg-slate-900 rounded-[2rem] p-6 sm:p-8 text-white flex flex-col shadow-sm">
             <h3 className="font-bold text-lg mb-6 text-slate-100">Your Order</h3>
             
             <div className="space-y-4 mb-8">
