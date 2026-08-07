@@ -140,7 +140,7 @@ export default function Login() {
         // Since refreshProfile uses state 'user' which might be null for brand new signups, 
         // we can force a session refresh or just redirect and let the ProtectedRoute re-evaluate when session arrives.
         // Actually, if we just reload the page, AuthContext handles it perfectly.
-        window.location.href = '/dashboard';
+        navigate('/dashboard');
       }
     } else {
       setError("Failed to get user ID.");
