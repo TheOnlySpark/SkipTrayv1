@@ -158,7 +158,7 @@ export default function AdminDashboard() {
   return (
     <div className="w-full max-w-4xl grid grid-cols-12 gap-4">
       {/* Header */}
-      <div className="col-span-12 bg-indigo-600 border border-indigo-500 rounded-[2rem] p-8 flex flex-col justify-between shadow-sm relative overflow-hidden text-white mb-4">
+      <div className="col-span-12 bg-indigo-600 border border-indigo-500 rounded-[2rem] p-5 md:p-8 flex flex-col justify-between shadow-sm relative overflow-hidden text-white mb-4">
         <div className="z-10 flex justify-between items-start">
           <div>
             <span className="px-3 py-1 bg-indigo-500 text-indigo-100 text-xs font-bold uppercase tracking-wider rounded-full border border-indigo-400">Admin Console</span>
@@ -171,9 +171,9 @@ export default function AdminDashboard() {
       </div>
 
       {/* Daily Summary */}
-      <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-8 shadow-sm">
+      <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 shadow-sm">
         <h2 className="text-xl font-bold text-slate-800 mb-6">Today's Summary</h2>
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="p-6 bg-blue-50 border border-blue-100 rounded-2xl flex flex-col items-center">
             <span className="text-3xl font-bold text-blue-700">{stats.placed}</span>
             <span className="text-sm font-semibold text-blue-600 uppercase tracking-wide mt-1">Total Orders</span>
@@ -190,11 +190,11 @@ export default function AdminDashboard() {
       </div>
 
       {/* Menu Management */}
-      <div className="col-span-12 md:col-span-6 bg-white border border-slate-200 rounded-[2rem] p-8 shadow-sm flex flex-col">
+      <div className="col-span-12 md:col-span-6 bg-white border border-slate-200 rounded-[2rem] p-5 sm:p-8 shadow-sm flex flex-col">
         <h2 className="text-xl font-bold text-slate-800 mb-6">Manage Menu</h2>
         
         {/* Add Item Form */}
-        <form onSubmit={handleAddItem} className="flex gap-4 mb-8 bg-slate-50 p-4 rounded-xl border border-slate-100 flex-wrap">
+        <form onSubmit={handleAddItem} className="flex flex-col sm:flex-row gap-4 mb-8 bg-slate-50 p-4 rounded-xl border border-slate-100">
           <input 
             type="text" 
             placeholder="Item Name" 
@@ -252,7 +252,7 @@ export default function AdminDashboard() {
       </div>
 
       {/* Feedback & Reviews */}
-      <div className="col-span-12 md:col-span-6 bg-white border border-slate-200 rounded-[2rem] p-8 shadow-sm flex flex-col">
+      <div className="col-span-12 md:col-span-6 bg-white border border-slate-200 rounded-[2rem] p-5 sm:p-8 shadow-sm flex flex-col">
         <h2 className="text-xl font-bold text-slate-800 mb-6">Student Feedback & Reviews</h2>
         
         {reviewsLoading ? (

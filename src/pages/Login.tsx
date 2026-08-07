@@ -149,7 +149,7 @@ export default function Login() {
   };
 
   return (
-    <div className="bg-white border border-slate-200 rounded-[2rem] p-8 flex flex-col justify-between shadow-sm relative overflow-hidden w-full max-w-md mx-auto">
+    <div className="bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 flex flex-col justify-between shadow-sm relative overflow-hidden w-full max-w-md mx-auto">
       <div className="z-10 relative">
         <h2 className="text-2xl font-extrabold text-slate-900 leading-tight mb-2">Welcome to SkipTray</h2>
         <p className="text-slate-500 mb-6 text-sm">Sign in to pre-order from the canteen.</p>

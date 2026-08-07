@@ -158,7 +158,7 @@ export default function StaffDashboard() {
   return (
     <div className="w-full max-w-5xl grid grid-cols-12 gap-4">
       {/* Header */}
-      <div className="col-span-12 bg-slate-900 rounded-[2rem] p-6 sm:p-8 text-white flex flex-col relative overflow-hidden mb-4">
+      <div className="col-span-12 bg-slate-900 rounded-[2rem] p-5 sm:p-8 text-white flex flex-col relative overflow-hidden mb-4">
         <div className="z-10 flex flex-col sm:flex-row justify-between items-start gap-6 sm:gap-4">
           <div>
             <span className="px-3 py-1 bg-indigo-500/20 text-indigo-300 text-xs font-bold uppercase tracking-wider rounded-full border border-indigo-500/30">Staff Portal</span>
@@ -176,13 +176,13 @@ export default function StaffDashboard() {
         {loading && orders.length === 0 ? (
           <div className="text-slate-500">Loading orders...</div>
         ) : orders.length === 0 ? (
-          <div className="bg-white border border-slate-200 rounded-[2rem] p-8 text-center text-slate-500 shadow-sm">
+          <div className="bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 text-center text-slate-500 shadow-sm">
             No active orders.
           </div>
         ) : (
           orders.map(order => (
             <div key={order.id} className="bg-white border border-slate-200 rounded-[2rem] p-6 shadow-sm flex flex-col">
-              <div className="flex justify-between items-start mb-4 border-b border-slate-100 pb-4">
+              <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-2 mb-4 border-b border-slate-100 pb-4">
                 <div>
                   <h3 className="font-bold text-lg text-slate-900">Order #{order.order_number} - {order.profiles?.name} <span className="text-sm font-normal text-slate-500">({order.profiles?.id_number})</span></h3>
                   <div className="text-sm font-semibold text-indigo-600 mt-1">Pickup: {order.pickup_time}</div>
@@ -244,7 +244,7 @@ export default function StaffDashboard() {
       </div>
 
       {/* Quick Menu Toggles */}
-      <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-8 shadow-sm mt-4">
+      <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 shadow-sm mt-4">
         <h3 className="font-extrabold text-2xl text-slate-800 mb-6 text-center">Quick Availability</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-h-[500px] overflow-y-auto pr-2 place-items-stretch">
           {menuItems.map(item => (
