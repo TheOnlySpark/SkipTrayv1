@@ -14,7 +14,7 @@ import AdminDashboard from './pages/AdminDashboard';
 
 function NavigationHeader() {
   const { user } = useAuth();
-  
+
   return (
     <header className="flex items-center justify-between w-full max-w-4xl mb-8 px-4">
       <div className="flex items-center gap-2">
@@ -40,14 +40,13 @@ function NavigationHeader() {
 function Landing() {
   const { user } = useAuth();
   if (user) return <Navigate to="/dashboard" replace />;
-  
+
   return (
     <div className="w-full max-w-4xl">
       <div className="bg-white border border-slate-200 rounded-[2rem] p-8 flex flex-col justify-between shadow-sm relative overflow-hidden">
         <div className="z-10">
-          <h1 className="text-4xl font-extrabold text-slate-900 mt-4 leading-tight">Skip the wait.<br/>Pre-order your meal.</h1>
-          <p className="text-slate-500 mt-4 max-w-md mb-8">Auth implemented with Supabase Phone OTP. Roles are supported.</p>
-          
+          <h1 className="text-4xl font-extrabold text-slate-900 mt-4 leading-tight">Skip the wait.<br />Pre-order your meal.</h1>
+
           <div className="flex gap-4">
             <Link to="/login" className="px-6 py-3 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition-colors shadow-sm">
               Get Started
@@ -98,7 +97,7 @@ export default function App() {
                 } />
               </Routes>
             </main>
-            
+
             <footer className="w-full max-w-4xl mt-12 py-4 border-t border-slate-200 flex justify-between items-center text-[10px] text-slate-400 uppercase tracking-widest">
               <span>&copy; 2026 SkipTray</span>
             </footer>
