@@ -371,19 +371,22 @@ export default function StudentDashboard() {
         </div>
       ) : activeOrder ? (
         // Active Order View
-        <div className="col-span-12 bg-indigo-600 rounded-[2rem] p-8 text-white flex flex-col items-center justify-center min-h-[300px] shadow-sm relative overflow-hidden">
-          {/* Cancel button if within 5 mins and not preparing */}
-          {['PLACED', 'ACCEPTED'].includes(activeOrder.status) && (new Date().getTime() - new Date(activeOrder.created_at).getTime()) < 5 * 60 * 1000 && (
-            <button 
-              onClick={handleCancelOrder}
-              className="absolute top-6 right-6 bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-xl text-sm font-semibold transition-colors"
-            >
-              Cancel Order
-            </button>
-          )}
+        <div className="col-span-12 bg-indigo-600 rounded-[2rem] p-5 md:p-8 text-white flex flex-col shadow-sm relative overflow-hidden min-h-[300px]">
+          <div className="w-full flex justify-end h-10 mb-2">
+            {/* Cancel button if within 5 mins and not preparing */}
+            {['PLACED', 'ACCEPTED'].includes(activeOrder.status) && (new Date().getTime() - new Date(activeOrder.created_at).getTime()) < 5 * 60 * 1000 && (
+              <button 
+                onClick={handleCancelOrder}
+                className="bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-xl text-sm font-semibold transition-colors"
+              >
+                Cancel Order
+              </button>
+            )}
+          </div>
 
-          <h2 className="text-3xl font-extrabold mb-1 shadow-sm">Order #{activeOrder.order_number}</h2>
-          <p className="text-indigo-200 font-medium tracking-wide mb-4 text-sm">Your Order Status</p>
+          <div className="flex flex-col items-center justify-center flex-1 pb-12">
+            <h2 className="text-3xl font-extrabold mb-1 shadow-sm">Order #{activeOrder.order_number}</h2>
+            <p className="text-indigo-200 font-medium tracking-wide mb-4 text-sm">Your Order Status</p>
           
           <div className={`mt-2 px-6 py-2 rounded-full font-bold text-sm tracking-wider uppercase ${getStatusColor(activeOrder.status).replace('100', '900').replace('600', '100')}`}>
             {activeOrder.status}
@@ -395,6 +398,7 @@ export default function StudentDashboard() {
           </div>
           
           <p className="mt-6 text-indigo-200">Requested Pickup Time: <span className="font-semibold text-white">{activeOrder.pickup_time}</span></p>
+          </div>
         </div>
       ) : (
         <>
