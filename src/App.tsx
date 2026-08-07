@@ -45,7 +45,6 @@ function Landing() {
     <div className="w-full max-w-4xl">
       <div className="bg-white border border-slate-200 rounded-[2rem] p-8 flex flex-col justify-between shadow-sm relative overflow-hidden">
         <div className="z-10">
-          <span className="px-3 py-1 bg-indigo-50 text-indigo-600 text-xs font-bold uppercase tracking-wider rounded-full">Phase 1 Complete</span>
           <h1 className="text-4xl font-extrabold text-slate-900 mt-4 leading-tight">Skip the wait.<br/>Pre-order your meal.</h1>
           <p className="text-slate-500 mt-4 max-w-md mb-8">Auth implemented with Supabase Phone OTP. Roles are supported.</p>
           

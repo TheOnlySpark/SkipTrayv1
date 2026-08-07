@@ -186,7 +186,7 @@ export default function StudentDashboard() {
     if (!activeOrder) return;
     if (!window.confirm("Are you sure you want to cancel this order?")) return;
     
-    // In Phase 7, we use an RPC to enforce the 5 min rule securely
+    // We use an RPC to enforce the 5 min rule securely
     const { error } = await supabase.rpc('cancel_order', {
       p_order_id: activeOrder.id
     });
