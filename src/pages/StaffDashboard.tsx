@@ -158,13 +158,13 @@ export default function StaffDashboard() {
   return (
     <div className="w-full max-w-5xl grid grid-cols-12 gap-4">
       {/* Header */}
-      <div className="col-span-12 bg-slate-900 rounded-[2rem] p-8 text-white flex flex-col relative overflow-hidden mb-4">
-        <div className="z-10 flex justify-between items-start">
+      <div className="col-span-12 bg-slate-900 rounded-[2rem] p-6 sm:p-8 text-white flex flex-col relative overflow-hidden mb-4">
+        <div className="z-10 flex flex-col sm:flex-row justify-between items-start gap-6 sm:gap-4">
           <div>
             <span className="px-3 py-1 bg-indigo-500/20 text-indigo-300 text-xs font-bold uppercase tracking-wider rounded-full border border-indigo-500/30">Staff Portal</span>
-            <h1 className="text-3xl font-extrabold text-white mt-4 leading-tight">Welcome, {profile?.name || 'Staff'}</h1>
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-white mt-4 leading-tight">Welcome, {profile?.name || 'Staff'}</h1>
           </div>
-          <button onClick={signOut} className="text-sm font-semibold text-slate-300 hover:text-white bg-slate-800 px-4 py-2 rounded-xl border border-slate-700 transition-colors">
+          <button onClick={signOut} className="w-full sm:w-auto text-center text-sm font-semibold text-slate-300 hover:text-white bg-slate-800 px-4 py-3 sm:py-2 rounded-xl border border-slate-700 transition-colors">
             Sign Out
           </button>
         </div>
