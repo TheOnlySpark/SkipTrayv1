@@ -54,6 +54,46 @@ export default function AdminDashboard() {
     }
   });
 
+  const { data: analytics = { mostSold: [] }, isLoading: analyticsLoading } = useQuery({
+    queryKey: ['adminAnalytics'],
+    queryFn: async () => {
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - 7);
+
+      const { data } = await supabase
+        .from('orders')
+        .select(`
+          status,
+          order_items (
+            quantity,
+            menu_items (name)
+          )
+        `)
+        .gte('created_at', startDate.toISOString())
+        .neq('status', 'REJECTED');
+      
+      const itemCounts: Record<string, number> = {};
+      
+      if (data) {
+        data.forEach(order => {
+          order.order_items?.forEach((item: any) => {
+            const name = item.menu_items?.name;
+            if (name) {
+              itemCounts[name] = (itemCounts[name] || 0) + item.quantity;
+            }
+          });
+        });
+      }
+
+      const mostSold = Object.entries(itemCounts)
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5);
+
+      return { mostSold };
+    }
+  });
+
   const { data: reviews = [], isLoading: reviewsLoading } = useQuery({
     queryKey: ['adminReviews'],
     queryFn: async () => {
@@ -101,6 +141,7 @@ export default function AdminDashboard() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
         fetchStats();
         queryClient.invalidateQueries({ queryKey: ['adminOrders'] });
+        queryClient.invalidateQueries({ queryKey: ['adminAnalytics'] });
       })
       .subscribe();
 
@@ -435,6 +476,64 @@ export default function AdminDashboard() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      {/* Analytics Section */}
+      <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 shadow-sm flex flex-col">
+        <h2 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2">
+          Weekly Analytics
+        </h2>
+        
+        {analyticsLoading ? (
+          <div className="text-slate-500 text-sm">Loading analytics...</div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-slate-50 rounded-2xl p-6 shadow-sm border border-slate-200">
+              <h3 className="font-bold text-slate-800 mb-4 uppercase tracking-wider text-xs">Most Sold This Week</h3>
+              {analytics.mostSold.length === 0 ? (
+                <div className="text-slate-500 text-sm">No sales data for this week.</div>
+              ) : (
+                <div className="space-y-4 mt-2">
+                  {analytics.mostSold.map((item, idx) => {
+                    const maxCount = Math.max(...analytics.mostSold.map(i => i.count), 1);
+                    const percentage = Math.round((item.count / maxCount) * 100);
+                    return (
+                      <div key={idx} className="flex flex-col gap-1.5">
+                        <div className="flex justify-between text-xs font-semibold">
+                          <span className="text-slate-700 flex items-center gap-2">
+                            <span className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold bg-slate-200 text-slate-600">
+                              {idx + 1}
+                            </span>
+                            {item.name}
+                          </span>
+                          <span className="text-indigo-600">{item.count} sold</span>
+                        </div>
+                        <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden border border-slate-200/50">
+                          <div 
+                            className={`h-2.5 rounded-full transition-all duration-1000 ease-out ${
+                              idx === 0 ? 'bg-indigo-600' : 
+                              idx === 1 ? 'bg-indigo-500' : 
+                              idx === 2 ? 'bg-indigo-400' : 'bg-indigo-300'
+                            }`}
+                            style={{ width: `${percentage}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            
+            <div className="bg-indigo-600 rounded-2xl p-6 shadow-sm flex flex-col items-center justify-center text-white text-center">
+              <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center mb-4">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20v-6M6 20V10M18 20V4"></path></svg>
+              </div>
+              <h3 className="font-bold text-xl mb-1">Great Job!</h3>
+              <p className="text-indigo-200 text-sm">Keep up the good work managing orders.</p>
+            </div>
           </div>
         )}
       </div>
