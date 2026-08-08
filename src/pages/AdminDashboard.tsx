@@ -23,6 +23,36 @@ export default function AdminDashboard() {
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
   const [submittingReply, setSubmittingReply] = useState(false);
+  const [orderFilter, setOrderFilter] = useState<'TODAY' | 'WEEK' | 'MONTH'>('TODAY');
+
+  const { data: allOrders = [], isLoading: ordersLoading } = useQuery({
+    queryKey: ['adminOrders', orderFilter],
+    queryFn: async () => {
+      let startDate = new Date();
+      if (orderFilter === 'TODAY') {
+        startDate.setHours(0, 0, 0, 0);
+      } else if (orderFilter === 'WEEK') {
+        startDate.setDate(startDate.getDate() - 7);
+      } else if (orderFilter === 'MONTH') {
+        startDate.setMonth(startDate.getMonth() - 1);
+      }
+
+      const { data } = await supabase
+        .from('orders')
+        .select(`
+          *,
+          profiles (name, id_number),
+          order_items (
+            id, quantity,
+            menu_items (name)
+          )
+        `)
+        .gte('created_at', startDate.toISOString())
+        .order('created_at', { ascending: false });
+
+      return (data as any[]) || [];
+    }
+  });
 
   const { data: reviews = [], isLoading: reviewsLoading } = useQuery({
     queryKey: ['adminReviews'],
@@ -70,6 +100,7 @@ export default function AdminDashboard() {
       .channel('admin:orders')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
         fetchStats();
+        queryClient.invalidateQueries({ queryKey: ['adminOrders'] });
       })
       .subscribe();
 
@@ -187,6 +218,74 @@ export default function AdminDashboard() {
             <span className="text-sm font-semibold text-red-600 uppercase tracking-wide mt-1">Rejected/Cancelled</span>
           </div>
         </div>
+      </div>
+
+      {/* Order List */}
+      <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 shadow-sm">
+        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-6">
+          <h2 className="text-xl font-bold text-slate-800">Order List</h2>
+          <div className="flex gap-2">
+            {(['TODAY', 'WEEK', 'MONTH'] as const).map(filter => (
+              <button
+                key={filter}
+                onClick={() => setOrderFilter(filter)}
+                className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-colors ${
+                  orderFilter === filter 
+                    ? 'bg-indigo-600 text-white' 
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {filter === 'TODAY' ? "Today" : filter === 'WEEK' ? "Past Week" : "Past Month"}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {ordersLoading ? (
+          <div className="text-slate-500 text-sm">Loading orders...</div>
+        ) : allOrders.length === 0 ? (
+          <div className="text-slate-500 text-sm py-8 text-center bg-slate-50 rounded-2xl border border-slate-100">
+            No orders found for this period.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[400px] overflow-y-auto pr-2">
+            {allOrders.map(order => (
+              <div key={order.id} className="p-5 rounded-2xl border border-slate-200 bg-slate-50 flex flex-col gap-3 hover:border-indigo-200 transition-colors">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h3 className="font-bold text-slate-800">Order #{order.order_number}</h3>
+                    <div className="text-xs text-slate-500 font-mono mt-0.5">ID: {order.id.split('-')[0].toUpperCase()}</div>
+                  </div>
+                  <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${
+                    order.status === 'COLLECTED' ? 'bg-green-100 text-green-700' : 
+                    order.status === 'REJECTED' ? 'bg-red-100 text-red-700' : 
+                    'bg-amber-100 text-amber-700'
+                  }`}>
+                    {order.status}
+                  </span>
+                </div>
+                
+                <div className="text-sm text-slate-600">
+                  <span className="font-semibold">{order.profiles?.name || 'Unknown'}</span> ({order.profiles?.id_number || 'No ID'})
+                </div>
+                
+                <div className="text-xs text-slate-500">
+                  Pickup: {order.pickup_time} • {new Date(order.created_at).toLocaleDateString()}
+                </div>
+
+                <div className="mt-2 pt-3 border-t border-slate-200">
+                  <ul className="space-y-1">
+                    {order.order_items?.map((item: any) => (
+                      <li key={item.id} className="text-xs text-slate-700">
+                        <span className="font-semibold">{item.quantity}x</span> {item.menu_items?.name}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Menu Management */}
