@@ -268,6 +268,7 @@ export default function StudentDashboard() {
                   <div className="flex justify-between items-center border-b border-slate-100 pb-3">
                     <div>
                       <div className="font-bold text-slate-800 text-lg">Order #{o.order_number}</div>
+                      <div className="text-xs text-slate-500 font-mono font-medium mb-1">ID: {o.id.split('-')[0].toUpperCase()}</div>
                       <div className="text-xs text-slate-500 font-medium mb-1">Placed on: {new Date(o.created_at).toLocaleDateString()}</div>
                       <div className="text-sm text-slate-600 mt-1">Pickup: {o.pickup_time}</div>
                     </div>
@@ -385,7 +386,12 @@ export default function StudentDashboard() {
           </div>
 
           <div className="flex flex-col items-center justify-center flex-1 pb-12">
-            <h2 className="text-3xl font-extrabold mb-1 shadow-sm">Order #{activeOrder.order_number}</h2>
+            <div className="flex items-center justify-center gap-3 mb-1 shadow-sm">
+              <h2 className="text-3xl font-extrabold">Order #{activeOrder.order_number}</h2>
+              <span className="text-indigo-200 bg-white/10 px-2 py-1 rounded text-xs font-mono tracking-wider border border-white/20">
+                ID: {activeOrder.id.split('-')[0].toUpperCase()}
+              </span>
+            </div>
             <p className="text-indigo-200 font-medium tracking-wide mb-4 text-sm">Your Order Status</p>
           
           <div className={`mt-2 px-6 py-2 rounded-full font-bold text-sm tracking-wider uppercase ${getStatusColor(activeOrder.status).replace('100', '900').replace('600', '100')}`}>

@@ -10,7 +10,7 @@ type FoodType = Database['public']['Enums']['food_type'];
 type Review = Database['public']['Tables']['item_reviews']['Row'] & {
   menu_items: { name: string } | null;
   profiles: { name: string | null; id_number: string | null } | null;
-  orders: { order_number: number } | null;
+  orders: { id: string; order_number: number } | null;
 };
 
 export default function AdminDashboard() {
@@ -33,7 +33,7 @@ export default function AdminDashboard() {
           *,
           menu_items (name),
           profiles (name, id_number),
-          orders (order_number)
+          orders (id, order_number)
         `)
         .order('created_at', { ascending: false });
       return (data as unknown as Review[]) || [];
@@ -270,6 +270,7 @@ export default function AdminDashboard() {
                       {review.menu_items?.name || 'Unknown Item'}
                     </h3>
                     <div className="text-xs text-slate-500 mt-0.5">
+                      {review.orders?.id && <span className="font-mono">ID: {review.orders.id.split('-')[0].toUpperCase()} • </span>}
                       By {review.profiles?.name || 'Unknown'} ({review.profiles?.id_number || 'No ID'})
                     </div>
                   </div>

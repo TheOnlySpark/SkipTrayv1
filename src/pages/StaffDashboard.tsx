@@ -185,6 +185,7 @@ export default function StaffDashboard() {
               <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-2 mb-4 border-b border-slate-100 pb-4">
                 <div>
                   <h3 className="font-bold text-lg text-slate-900">Order #{order.order_number} - {order.profiles?.name} <span className="text-sm font-normal text-slate-500">({order.profiles?.id_number})</span></h3>
+                  <div className="text-xs text-slate-500 font-mono mt-0.5">ID: {order.id.split('-')[0].toUpperCase()}</div>
                   <div className="text-sm font-semibold text-indigo-600 mt-1">Pickup: {order.pickup_time}</div>
                 </div>
                 <div className={`px-3 py-1 rounded-full text-xs font-bold border ${getStatusColor(order.status)}`}>
