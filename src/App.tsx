@@ -74,7 +74,7 @@ function Landing() {
     <div className="w-full max-w-4xl">
       <div className="bg-white border border-slate-200 rounded-[2rem] p-8 flex flex-col justify-between shadow-sm relative overflow-hidden">
         <div className="z-10">
-          <h1 className="text-4xl font-extrabold text-slate-900 mt-4 leading-tight">Skip the wait.<br />Pre-order your meal.</h1>
+          <h1 className="text-4xl font-extrabold text-slate-900 mt-4 mb-8 leading-tight">Skip the wait.<br />Pre-order your meal.</h1>
 
           <div className="flex gap-4">
             <Link to="/login" className="px-6 py-3 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition-colors shadow-sm">
