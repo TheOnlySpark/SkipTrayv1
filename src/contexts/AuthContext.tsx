@@ -40,25 +40,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     // Initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
-      const loginDate = localStorage.getItem('skip_tray_login_date');
-      const today = new Date().toDateString();
-      
-      if (session && loginDate && loginDate !== today) {
-        // Session was created on a previous day, expire it
-        supabase.auth.signOut().then(() => {
-          localStorage.removeItem('skip_tray_login_date');
-          setSession(null);
-          setUser(null);
-          setProfile(null);
-          setLoading(false);
-        });
-        return;
-      }
-
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
-        if (!loginDate) localStorage.setItem('skip_tray_login_date', today);
         fetchProfile(session.user.id).finally(() => setLoading(false));
       } else {
         setLoading(false);
@@ -66,12 +50,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     });
 
     // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN') {
-        localStorage.setItem('skip_tray_login_date', new Date().toDateString());
-      } else if (event === 'SIGNED_OUT') {
-        localStorage.removeItem('skip_tray_login_date');
-      }
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
 
       setSession(session);
       setUser(session?.user ?? null);
