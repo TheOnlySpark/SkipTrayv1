@@ -46,12 +46,18 @@ export default function Login() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (phone.length !== 10) {
+      setError('Phone number must be exactly 10 digits.');
+      return;
+    }
+
     setLoading(true);
     setError('');
     
     try {
-      const formattedPhone = phone.replace(/[^0-9+]/g, '');
-      const email = `user${formattedPhone.replace('+', '')}@skiptray.local`;
+      const formattedPhone = phone;
+      const email = `user${formattedPhone}@skiptray.local`;
       const password = await derivePassword(formattedPhone);
       
       const { data: { user }, error: signInError } = await supabase.auth.signInWithPassword({
@@ -99,8 +105,8 @@ export default function Login() {
     let currentUserId = user?.id;
 
     if (!currentUserId) {
-      const formattedPhone = phone.replace(/[^0-9+]/g, '');
-      const email = `user${formattedPhone.replace('+', '')}@skiptray.local`;
+      const formattedPhone = phone;
+      const email = `user${formattedPhone}@skiptray.local`;
       const password = await derivePassword(formattedPhone);
 
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
@@ -135,12 +141,8 @@ export default function Login() {
         setError('Unable to save profile. Please try again.');
         setLoading(false);
       } else {
-        // Manually trigger a hard navigation or wait for context
-        await refreshProfile();
-        // Since refreshProfile uses state 'user' which might be null for brand new signups, 
-        // we can force a session refresh or just redirect and let the ProtectedRoute re-evaluate when session arrives.
-        // Actually, if we just reload the page, AuthContext handles it perfectly.
-        navigate('/dashboard');
+        // Manually trigger a hard navigation
+        window.location.href = '/dashboard';
       }
     } else {
       setError("Failed to get user ID.");
@@ -166,11 +168,17 @@ export default function Login() {
               <label className="block text-sm font-bold text-slate-800 mb-2">Phone Number</label>
               <input
                 type="tel"
-                placeholder="+1234567890"
+                placeholder="1234567890"
                 value={phone}
-                onChange={(e) => setPhone(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value.replace(/[^0-9]/g, '');
+                  if (val.length <= 10) setPhone(val);
+                }}
                 autoComplete="off"
-                maxLength={15}
+                maxLength={10}
+                minLength={10}
+                pattern="\d{10}"
+                title="Phone number must be exactly 10 digits"
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-900"
                 required
               />
@@ -203,7 +211,7 @@ export default function Login() {
               <label className="block text-sm font-bold text-slate-800 mb-2">ID Number</label>
               <input
                 type="text"
-                placeholder="Student / Staff ID"
+                placeholder="ID"
                 value={idNumber}
                 onChange={(e) => setIdNumber(e.target.value)}
                 maxLength={20}
