@@ -400,7 +400,7 @@ export default function AdminDashboard() {
         ) : reviews.length === 0 ? (
           <div className="text-slate-500 text-sm py-4">No reviews yet.</div>
         ) : (
-          <div className="grid grid-cols-1 gap-4 flex-1 overflow-y-auto min-h-[300px]">
+          <div className="flex flex-col gap-4 flex-1 overflow-y-auto min-h-[300px]">
             {reviews.map(review => (
               <div key={review.id} className="p-5 rounded-2xl border border-slate-200 bg-slate-50 flex flex-col gap-3 hover:shadow-md transition-shadow">
                 <div className="flex justify-between items-start">
