@@ -357,8 +357,8 @@ export default function AdminDashboard() {
         </form>
 
         {/* Menu List */}
-        {loading ? (
-          <div className="text-slate-500 text-sm">Loading menu...</div>
+        {loading && menuItems.length === 0 ? (
+          <div className="text-slate-500 text-sm flex-1 min-h-[300px] flex items-center justify-center">Loading menu...</div>
         ) : (
           <div className="space-y-3 flex-1 overflow-y-auto min-h-[300px]">
             {menuItems.map(item => (
