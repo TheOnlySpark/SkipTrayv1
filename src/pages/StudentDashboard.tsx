@@ -493,11 +493,14 @@ export default function StudentDashboard() {
                               justifyContent: 'space-between',
                               alignItems: 'center',
                               borderBottom: `1px solid ${isSoldOut ? 'rgba(239,68,68,0.2)' : '#1e293b'}`,
+                              borderLeft: `3px solid ${liveItem?.veg_non_veg === 'VEG' ? '#22c55e' : '#ef4444'}`,
+                              paddingLeft: '0.75rem',
                               paddingBottom: '0.75rem',
                               marginBottom: '0.75rem',
                             }}>
                               <div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                  <div style={{ width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: liveItem?.veg_non_veg === 'VEG' ? '#22c55e' : '#ef4444' }}></div>
                                   <span style={{ fontSize: '0.875rem', fontWeight: 500, color: isSoldOut ? '#f87171' : '#e2e8f0', textDecoration: isSoldOut ? 'line-through' : 'none' }}>
                                     {c.item.name}
                                   </span>
