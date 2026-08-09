@@ -14,3 +14,8 @@ coverage/
 .env.local*
 .local
 .env.local
+
+# Agent and Local Tooling Metadata
+.agents/
+skills-lock.json
+metadata.json
