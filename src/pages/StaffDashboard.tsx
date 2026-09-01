@@ -18,10 +18,41 @@ export default function StaffDashboard() {
   const [orders, setOrders] = useState<OrderWithDetails[]>([]);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [currentTime, setCurrentTime] = useState(Date.now());
 
   // OTP Verification state
   const [selectedOrderForOtp, setSelectedOrderForOtp] = useState<string | null>(null);
   const [otpInput, setOtpInput] = useState('');
+
+  // 30-second interval to dynamically re-check 10-minute pickup overdue timers
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(Date.now()), 30000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Helper to determine if an order is overdue past its pickup slot + 10 mins
+  const getOrderOverdueInfo = (order: OrderWithDetails) => {
+    if (order.status !== 'READY') return { isOverdue: false, minutesOverdue: 0 };
+    try {
+      const createdDate = new Date(order.created_at);
+      const [hours, minutes] = order.pickup_time.split(':').map(Number);
+      if (isNaN(hours) || isNaN(minutes)) return { isOverdue: false, minutesOverdue: 0 };
+
+      const pickupDate = new Date(createdDate);
+      pickupDate.setHours(hours, minutes, 0, 0);
+
+      const diffMs = currentTime - pickupDate.getTime();
+      const gracePeriodMs = 10 * 60 * 1000; // 10 minutes
+
+      if (diffMs >= gracePeriodMs) {
+        const minutesOverdue = Math.floor(diffMs / (60 * 1000));
+        return { isOverdue: true, minutesOverdue };
+      }
+    } catch {
+      // ignore parsing error
+    }
+    return { isOverdue: false, minutesOverdue: 0 };
+  };
 
   useEffect(() => {
     fetchOrders();
@@ -159,6 +190,36 @@ export default function StaffDashboard() {
     }
   };
 
+  const handleMarkNoShow = async (order: OrderWithDetails) => {
+    const studentName = order.profiles?.name || 'the student';
+    const confirmed = window.confirm(
+      `Mark Order #${order.order_number} for ${studentName} as a No-Show?\n\n` +
+      `• The order will be cancelled (REJECTED).\n` +
+      `• ${studentName} will receive 1 Strike.\n` +
+      `• If this is their 2nd strike, their account will be deactivated for 3 days.`
+    );
+    if (!confirmed) return;
+
+    const { data, error } = await supabase.rpc('mark_order_no_show', {
+      p_order_id: order.id
+    });
+
+    if (error) {
+      if (import.meta.env.DEV) console.error("Failed to mark order as no-show:", error);
+      alert(`Failed to cancel order: ${error.message}`);
+      return;
+    }
+
+    const result = data as any;
+    if (result.is_suspended) {
+      alert(`Order cancelled. ${studentName} has reached 2 strikes and their account is now DEACTIVATED for 3 days.`);
+    } else {
+      alert(`Order cancelled. Strike added to ${studentName} (Total strikes: ${result.strike_count}/2).`);
+    }
+
+    fetchOrders();
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'PLACED': return 'bg-slate-800 text-slate-300 border-slate-700';
@@ -194,78 +255,102 @@ export default function StaffDashboard() {
             No active orders.
           </div>
         ) : (
-          orders.map(order => (
-            <div key={order.id} className="bg-white border border-slate-200 rounded-[2rem] p-6 shadow-sm flex flex-col">
-              <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-2 mb-4 border-b border-slate-100 pb-4">
-                <div>
-                  <h3 className="font-bold text-lg text-slate-900">Order #{order.order_number} - {order.profiles?.name} <span className="text-sm font-normal text-slate-500">({order.profiles?.id_number})</span></h3>
-                  <div className="text-xs text-slate-500 font-mono mt-0.5">ID: {order.id.split('-')[0].toUpperCase()}</div>
-                  <div className="text-sm font-semibold text-indigo-600 mt-1">Pickup: {order.pickup_time}</div>
-                </div>
-                <div className={`px-3 py-1 rounded-full text-xs font-bold border ${getStatusColor(order.status)}`}>
-                  {order.status}
-                </div>
-              </div>
-              
-              <div className="flex-grow mb-4">
-                <ul className="space-y-2">
-                  {order.order_items.map(item => (
-                    <li key={item.id} className="text-sm flex justify-between items-center">
-                      <span className="text-slate-700"><span className="font-bold text-slate-900">{item.quantity}x</span> {item.menu_items?.name}</span>
-                      {item.menu_items?.price !== undefined && item.menu_items?.price !== null && (
-                        <span className="text-xs font-semibold text-slate-500">
-                          ₹{(Number(item.menu_items.price) * item.quantity).toFixed(2)}
-                        </span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-                <div className="mt-3 pt-2 border-t border-dashed border-slate-200 flex justify-between items-center text-xs font-bold text-slate-700">
-                  <span>Total Value</span>
-                  <span className="text-indigo-600 font-extrabold text-sm">
-                    ₹{order.order_items.reduce((sum, item) => sum + (Number(item.menu_items?.price || 0) * item.quantity), 0).toFixed(2)}
-                  </span>
-                </div>
-              </div>
-
-              {/* Action Buttons based on status */}
-              <div className="flex gap-2 mt-auto pt-4 border-t border-slate-100">
-                {order.status === 'PLACED' && (
-                  <>
-                    <button onClick={() => updateOrderStatus(order.id, 'ACCEPTED')} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-xl text-sm font-semibold transition-colors">Accept</button>
-                    <button onClick={() => updateOrderStatus(order.id, 'REJECTED')} className="flex-1 bg-red-50 hover:bg-red-100 text-red-600 py-2 rounded-xl text-sm font-semibold transition-colors">Reject</button>
-                  </>
-                )}
-                {order.status === 'ACCEPTED' && (
-                  <button onClick={() => updateOrderStatus(order.id, 'PREPARING')} className="flex-1 bg-orange-500 hover:bg-orange-600 text-white py-2 rounded-xl text-sm font-semibold transition-colors">Mark Preparing</button>
-                )}
-                {order.status === 'PREPARING' && (
-                  <button onClick={() => updateOrderStatus(order.id, 'READY')} className="flex-1 bg-green-500 hover:bg-green-600 text-white py-2 rounded-xl text-sm font-semibold transition-colors">Mark Ready</button>
-                )}
-                {order.status === 'READY' && (
-                  <div className="flex-1 flex gap-2">
-                    {selectedOrderForOtp === order.id ? (
-                      <div className="flex flex-1 gap-2">
-                        <input 
-                          type="text" 
-                          placeholder="OTP" 
-                          value={otpInput}
-                          onChange={(e) => setOtpInput(e.target.value)}
-                          autoComplete="off"
-                          maxLength={6}
-                          className="w-24 px-3 py-2 border border-slate-300 rounded-xl text-center font-mono tracking-widest focus:ring-2 focus:ring-indigo-500 text-slate-900"
-                        />
-                        <button onClick={() => handleVerifyOtp(order.id)} className="flex-1 bg-slate-900 text-white py-2 rounded-xl text-sm font-semibold hover:bg-slate-800">Verify & Collect</button>
-                        <button onClick={() => { setSelectedOrderForOtp(null); setOtpInput(''); }} className="px-3 bg-slate-100 text-slate-500 rounded-xl hover:bg-slate-200">X</button>
-                      </div>
-                    ) : (
-                      <button onClick={() => setSelectedOrderForOtp(order.id)} className="flex-1 bg-slate-900 hover:bg-slate-800 text-white py-2 rounded-xl text-sm font-semibold transition-colors">Verify OTP</button>
-                    )}
+          orders.map(order => {
+            const overdueInfo = getOrderOverdueInfo(order);
+            return (
+              <div key={order.id} className={`bg-white border rounded-[2rem] p-6 shadow-sm flex flex-col transition-all ${overdueInfo.isOverdue ? 'border-amber-300 ring-2 ring-amber-100 bg-amber-50/20' : 'border-slate-200'}`}>
+                {/* Overdue No-Show Warning Banner */}
+                {overdueInfo.isOverdue && (
+                  <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse shrink-0"></span>
+                      <span>⚠️ <strong>No-Show Alert:</strong> {overdueInfo.minutesOverdue}m past pickup slot ({order.pickup_time})</span>
+                    </div>
+                    <span className="text-[11px] bg-amber-200/70 text-amber-900 px-2 py-0.5 rounded-md font-bold shrink-0">10m grace period exceeded</span>
                   </div>
                 )}
+
+                <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-2 mb-4 border-b border-slate-100 pb-4">
+                  <div>
+                    <h3 className="font-bold text-lg text-slate-900">Order #{order.order_number} - {order.profiles?.name} <span className="text-sm font-normal text-slate-500">({order.profiles?.id_number})</span></h3>
+                    <div className="text-xs text-slate-500 font-mono mt-0.5">ID: {order.id.split('-')[0].toUpperCase()}</div>
+                    <div className="text-sm font-semibold text-indigo-600 mt-1">Pickup: {order.pickup_time}</div>
+                  </div>
+                  <div className={`px-3 py-1 rounded-full text-xs font-bold border ${getStatusColor(order.status)}`}>
+                    {order.status}
+                  </div>
+                </div>
+                
+                <div className="flex-grow mb-4">
+                  <ul className="space-y-2">
+                    {order.order_items.map(item => (
+                      <li key={item.id} className="text-sm flex justify-between items-center">
+                        <span className="text-slate-700"><span className="font-bold text-slate-900">{item.quantity}x</span> {item.menu_items?.name}</span>
+                        {item.menu_items?.price !== undefined && item.menu_items?.price !== null && (
+                          <span className="text-xs font-semibold text-slate-500">
+                            ₹{(Number(item.menu_items.price) * item.quantity).toFixed(2)}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="mt-3 pt-2 border-t border-dashed border-slate-200 flex justify-between items-center text-xs font-bold text-slate-700">
+                    <span>Total Value</span>
+                    <span className="text-indigo-600 font-extrabold text-sm">
+                      ₹{order.order_items.reduce((sum, item) => sum + (Number(item.menu_items?.price || 0) * item.quantity), 0).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Action Buttons based on status */}
+                <div className="flex flex-col sm:flex-row gap-2 mt-auto pt-4 border-t border-slate-100">
+                  {order.status === 'PLACED' && (
+                    <>
+                      <button onClick={() => updateOrderStatus(order.id, 'ACCEPTED')} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-xl text-sm font-semibold transition-colors">Accept</button>
+                      <button onClick={() => updateOrderStatus(order.id, 'REJECTED')} className="flex-1 bg-red-50 hover:bg-red-100 text-red-600 py-2 rounded-xl text-sm font-semibold transition-colors">Reject</button>
+                    </>
+                  )}
+                  {order.status === 'ACCEPTED' && (
+                    <button onClick={() => updateOrderStatus(order.id, 'PREPARING')} className="flex-1 bg-orange-500 hover:bg-orange-600 text-white py-2 rounded-xl text-sm font-semibold transition-colors">Mark Preparing</button>
+                  )}
+                  {order.status === 'PREPARING' && (
+                    <button onClick={() => updateOrderStatus(order.id, 'READY')} className="flex-1 bg-green-500 hover:bg-green-600 text-white py-2 rounded-xl text-sm font-semibold transition-colors">Mark Ready</button>
+                  )}
+                  {order.status === 'READY' && (
+                    <div className="flex-1 flex flex-col sm:flex-row gap-2">
+                      {selectedOrderForOtp === order.id ? (
+                        <div className="flex flex-1 gap-2">
+                          <input 
+                            type="text" 
+                            placeholder="OTP" 
+                            value={otpInput}
+                            onChange={(e) => setOtpInput(e.target.value)}
+                            autoComplete="off"
+                            maxLength={6}
+                            className="w-24 px-3 py-2 border border-slate-300 rounded-xl text-center font-mono tracking-widest focus:ring-2 focus:ring-indigo-500 text-slate-900"
+                          />
+                          <button onClick={() => handleVerifyOtp(order.id)} className="flex-1 bg-slate-900 text-white py-2 rounded-xl text-sm font-semibold hover:bg-slate-800">Verify & Collect</button>
+                          <button onClick={() => { setSelectedOrderForOtp(null); setOtpInput(''); }} className="px-3 bg-slate-100 text-slate-500 rounded-xl hover:bg-slate-200">X</button>
+                        </div>
+                      ) : (
+                        <button onClick={() => setSelectedOrderForOtp(order.id)} className="flex-1 bg-slate-900 hover:bg-slate-800 text-white py-2 rounded-xl text-sm font-semibold transition-colors">Verify OTP</button>
+                      )}
+
+                      {overdueInfo.isOverdue && (
+                        <button 
+                          onClick={() => handleMarkNoShow(order)} 
+                          className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 py-2 px-4 rounded-xl text-sm font-bold transition-colors shrink-0"
+                          title="Cancel order and add 1 strike to student"
+                        >
+                          Cancel & Strike (No-Show)
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 

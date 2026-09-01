@@ -141,10 +141,17 @@ export default function StudentDashboard() {
     fetchActive();
   }, [profile?.id]);
 
+  const isSuspended = !!(profile?.suspended_until && new Date(profile.suspended_until) > new Date());
+  const strikeCount = profile?.strike_count || 0;
+
   const cartTotalItems = cart.reduce((acc, c) => acc + c.quantity, 0);
   const cartTotalPrice = cart.reduce((acc, c) => acc + (Number(c.item.price || 0) * c.quantity), 0);
 
   const addToCart = (item: MenuItem) => {
+    if (isSuspended) {
+      alert("Your account is currently deactivated for 3 days due to 2 missed pickups.");
+      return;
+    }
     if (item.is_sold_out) return;
     if (cartTotalItems >= 5) return;
     
@@ -249,11 +256,29 @@ export default function StudentDashboard() {
   return (
     <div className="w-full max-w-4xl grid grid-cols-12 gap-4 pb-24">
       {/* Header */}
-      <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-6 sm:p-8 flex flex-col justify-between shadow-sm relative overflow-hidden mb-4">
+      <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-6 sm:p-8 flex flex-col justify-between shadow-sm relative overflow-hidden mb-2">
         <div className="z-10 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 sm:gap-4">
           <div>
-            <span className="px-3 py-1 bg-indigo-50 text-indigo-600 text-xs font-bold uppercase tracking-wider rounded-full">{profile?.role || 'Student'}</span>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-4 leading-tight">Welcome, {profile?.name || 'User'}</h1>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="px-3 py-1 bg-indigo-50 text-indigo-600 text-xs font-bold uppercase tracking-wider rounded-full">{profile?.role || 'Student'}</span>
+              {strikeCount === 1 && !isSuspended && (
+                <span className="px-3 py-1 bg-amber-50 text-amber-700 border border-amber-200 text-xs font-bold rounded-full flex items-center gap-1">
+                  ⚠️ Strike 1/2 (No-Show Warning)
+                </span>
+              )}
+              {isSuspended && (
+                <span className="px-3 py-1 bg-red-50 text-red-700 border border-red-200 text-xs font-bold rounded-full flex items-center gap-1">
+                  🚫 Account Deactivated (3-Day Penalty)
+                </span>
+              )}
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-3 leading-tight">Welcome, {profile?.name || 'User'}</h1>
+            
+            {strikeCount === 1 && !isSuspended && (
+              <p className="text-xs text-amber-700 bg-amber-50/80 border border-amber-200/60 p-2.5 rounded-xl mt-3 font-medium">
+                ⚠️ <strong>Notice:</strong> You missed an order pickup and received 1 strike. If you miss 1 more pickup, your account will be deactivated for 3 days.
+              </p>
+            )}
           </div>
           <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
             <button onClick={() => setShowHistory(!showHistory)} className="flex-1 text-center text-sm font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 px-4 py-3 sm:py-2 rounded-xl border border-indigo-100 transition-colors">
@@ -265,6 +290,24 @@ export default function StudentDashboard() {
           </div>
         </div>
       </div>
+
+      {/* Deactivation Banner */}
+      {isSuspended && (
+        <div className="col-span-12 bg-red-50 border-2 border-red-200 rounded-[2rem] p-6 sm:p-8 text-center flex flex-col items-center justify-center gap-3 mb-2 shadow-sm">
+          <div className="w-12 h-12 rounded-2xl bg-red-100 border border-red-200 flex items-center justify-center text-red-600 text-2xl">
+            🚫
+          </div>
+          <div>
+            <h2 className="text-xl sm:text-2xl font-black text-red-800">Account Temporarily Deactivated</h2>
+            <p className="text-sm text-slate-600 max-w-lg mt-1.5 leading-relaxed">
+              Your ordering privileges are suspended for <strong>3 days</strong> due to repeated uncollected orders (2 no-show strikes).
+            </p>
+          </div>
+          <div className="bg-white px-4 py-2 rounded-xl border border-red-200 text-xs font-bold text-red-700 font-mono mt-1">
+            Reactivates on: {new Date(profile!.suspended_until!).toLocaleString()}
+          </div>
+        </div>
+      )}
 
       {menuLoading ? (
         <div className="col-span-12 text-center text-slate-500">Loading...</div>
@@ -612,23 +655,27 @@ export default function StudentDashboard() {
 
                       <button
                         type="submit"
-                        disabled={cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out)}
+                        disabled={isSuspended || cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out)}
                         style={{
                           width: '100%',
                           padding: '0.875rem',
-                          background: cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out)
-                            ? 'rgba(99,102,241,0.4)' : '#6366f1',
+                          background: isSuspended
+                            ? '#ef4444'
+                            : (cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out)
+                              ? 'rgba(99,102,241,0.4)' : '#6366f1'),
                           color: 'white',
                           borderRadius: '0.875rem',
                           fontWeight: 700,
                           fontSize: '0.875rem',
                           border: 'none',
-                          cursor: cart.length === 0 || !pickupTime || submitting ? 'not-allowed' : 'pointer',
+                          cursor: isSuspended || cart.length === 0 || !pickupTime || submitting ? 'not-allowed' : 'pointer',
                           transition: 'background 0.2s',
                           marginBottom: '1rem',
                         }}
                       >
-                        {submitting ? 'Placing...' : `Place Order (${cartTotalItems} items • ₹${cartTotalPrice.toFixed(2)})`}
+                        {isSuspended
+                          ? 'Account Deactivated (3-Day Penalty)'
+                          : (submitting ? 'Placing...' : `Place Order (${cartTotalItems} items • ₹${cartTotalPrice.toFixed(2)})`)}
                       </button>
                     </form>
                   </div>

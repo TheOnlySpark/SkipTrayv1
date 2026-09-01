@@ -181,6 +181,8 @@ export interface Database {
           id_number: string | null
           name: string | null
           role: Database["public"]["Enums"]["user_role"]
+          strike_count: number
+          suspended_until: string | null
         }
         Insert: {
           created_at?: string
@@ -188,6 +190,8 @@ export interface Database {
           id_number?: string | null
           name?: string | null
           role?: Database["public"]["Enums"]["user_role"]
+          strike_count?: number
+          suspended_until?: string | null
         }
         Update: {
           created_at?: string
@@ -195,6 +199,8 @@ export interface Database {
           id_number?: string | null
           name?: string | null
           role?: Database["public"]["Enums"]["user_role"]
+          strike_count?: number
+          suspended_until?: string | null
         }
         Relationships: [
           {
@@ -244,6 +250,18 @@ export interface Database {
           p_order_id: string
         }
         Returns: undefined
+      }
+      mark_order_no_show: {
+        Args: {
+          p_order_id: string
+        }
+        Returns: Json
+      }
+      admin_reset_student_strikes: {
+        Args: {
+          p_student_id: string
+        }
+        Returns: Json
       }
     }
     Enums: {

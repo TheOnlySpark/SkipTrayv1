@@ -129,6 +129,31 @@ export default function AdminDashboard() {
     setSubmittingReply(false);
   };
 
+  const { data: penalizedStudents = [], isLoading: penaltiesLoading } = useQuery({
+    queryKey: ['penalizedStudents'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('profiles')
+        .select('*')
+        .or('strike_count.gt.0,suspended_until.not.is.null')
+        .order('name');
+      return (data as any[]) || [];
+    }
+  });
+
+  const handleResetStudentStrikes = async (studentId: string, studentName: string) => {
+    if (!window.confirm(`Clear all strikes and lift suspension for ${studentName || 'this student'}?`)) return;
+    const { error } = await supabase.rpc('admin_reset_student_strikes', {
+      p_student_id: studentId
+    });
+    if (error) {
+      alert(`Failed to reset strikes: ${error.message}`);
+      return;
+    }
+    alert(`Strikes and suspension cleared for ${studentName || 'student'}.`);
+    queryClient.invalidateQueries({ queryKey: ['penalizedStudents'] });
+  };
+
   const [newItemName, setNewItemName] = useState('');
   const [newItemPrice, setNewItemPrice] = useState('');
   const [newItemType, setNewItemType] = useState<FoodType>('VEG');
@@ -567,6 +592,86 @@ export default function AdminDashboard() {
               <h3 className="font-bold text-xl mb-1">Great Job!</h3>
               <p className="text-indigo-200 text-sm">Keep up the good work managing orders.</p>
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* Student Penalties & Account Suspensions */}
+      <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 shadow-sm flex flex-col">
+        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 mb-6">
+          <div>
+            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+              <span>⚠️</span> Student No-Show Penalties & Suspensions
+            </h2>
+            <p className="text-xs text-slate-500 mt-1">
+              Students receive 1 strike per missed pickup. 2 strikes trigger an automatic 3-day account deactivation.
+            </p>
+          </div>
+          <span className="text-xs font-semibold px-3 py-1 bg-slate-100 text-slate-600 rounded-full w-fit">
+            {penalizedStudents.length} {penalizedStudents.length === 1 ? 'Student' : 'Students'} with records
+          </span>
+        </div>
+
+        {penaltiesLoading ? (
+          <div className="text-slate-500 text-sm py-4">Loading student penalty records...</div>
+        ) : penalizedStudents.length === 0 ? (
+          <div className="bg-slate-50 border border-slate-100 rounded-2xl p-6 text-center text-slate-500 text-sm">
+            🎉 All clean! No students currently have active strikes or suspensions.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  <th className="py-3 px-4">Student</th>
+                  <th className="py-3 px-4">ID Number</th>
+                  <th className="py-3 px-4">Active Strikes</th>
+                  <th className="py-3 px-4">Account Status</th>
+                  <th className="py-3 px-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-sm">
+                {penalizedStudents.map(student => {
+                  const isSuspended = !!(student.suspended_until && new Date(student.suspended_until) > new Date());
+                  return (
+                    <tr key={student.id} className="hover:bg-slate-50/80 transition-colors">
+                      <td className="py-3 px-4 font-semibold text-slate-800">{student.name || 'Unnamed'}</td>
+                      <td className="py-3 px-4 text-slate-500 text-xs font-mono">{student.id_number || 'N/A'}</td>
+                      <td className="py-3 px-4">
+                        <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${student.strike_count > 0 ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'}`}>
+                          {student.strike_count} / 2 Strikes
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        {isSuspended ? (
+                          <div className="flex flex-col">
+                            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-red-100 text-red-700 w-fit">
+                              🚫 Suspended (3-Day Penalty)
+                            </span>
+                            <span className="text-[11px] text-slate-400 mt-0.5">
+                              Until: {new Date(student.suspended_until).toLocaleDateString()} {new Date(student.suspended_until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 w-fit">
+                            Active
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 text-right">
+                        <button
+                          onClick={() => handleResetStudentStrikes(student.id, student.name || 'Student')}
+                          className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition-colors active:scale-95"
+                          title="Clear strikes and lift any active suspension"
+                        >
+                          Clear & Unsuspend
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
