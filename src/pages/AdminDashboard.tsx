@@ -19,7 +19,7 @@ export default function AdminDashboard() {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({ placed: 0, collected: 0, rejected: 0 });
-  
+
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
   const [submittingReply, setSubmittingReply] = useState(false);
@@ -71,9 +71,9 @@ export default function AdminDashboard() {
         `)
         .gte('created_at', startDate.toISOString())
         .neq('status', 'REJECTED');
-      
+
       const itemCounts: Record<string, number> = {};
-      
+
       if (data) {
         data.forEach(order => {
           order.order_items?.forEach((item: any) => {
@@ -113,12 +113,12 @@ export default function AdminDashboard() {
   const handleReplyToReview = async (reviewId: string) => {
     if (!replyText.trim()) return;
     setSubmittingReply(true);
-    
+
     const { error } = await supabase
       .from('item_reviews')
       .update({ admin_reply: replyText })
       .eq('id', reviewId);
-      
+
     if (error) {
       alert('Failed to submit reply. Please try again.');
     } else {
@@ -128,7 +128,7 @@ export default function AdminDashboard() {
     }
     setSubmittingReply(false);
   };
-  
+
   const [newItemName, setNewItemName] = useState('');
   const [newItemPrice, setNewItemPrice] = useState('');
   const [newItemType, setNewItemType] = useState<FoodType>('VEG');
@@ -190,36 +190,22 @@ export default function AdminDashboard() {
 
   const fetchMenu = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('menu_items')
-      .select('*')
-      .order('veg_non_veg', { ascending: false })
-      .order('name');
-    if (data) {
-      const sorted = [...data].sort((a, b) => {
-        if (a.veg_non_veg !== b.veg_non_veg) {
-          return a.veg_non_veg === 'VEG' ? -1 : 1;
-        }
-        if (a.name.toLowerCase() === 'veg meals') return -1;
-        if (b.name.toLowerCase() === 'veg meals') return 1;
-        return a.name.localeCompare(b.name);
-      });
-      setMenuItems(sorted);
-    }
+    const { data, error } = await supabase.from('menu_items').select('*').order('created_at', { ascending: false });
+    if (data) setMenuItems(data);
     setLoading(false);
   };
 
   const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newItemName.trim()) return;
-    
+
     const parsedPrice = parseFloat(newItemPrice) || 0;
     const { data, error } = await supabase.from('menu_items').insert({
       name: newItemName,
       veg_non_veg: newItemType,
       price: parsedPrice
     }).select().single();
-    
+
     if (data) {
       setMenuItems([data, ...menuItems]);
       setNewItemName('');
@@ -239,7 +225,7 @@ export default function AdminDashboard() {
       item_id: id,
       new_status: !currentStatus
     });
-    
+
     if (!error) {
       setMenuItems(menuItems.map(item => item.id === id ? { ...item, is_sold_out: !currentStatus } : item));
     }
@@ -288,11 +274,10 @@ export default function AdminDashboard() {
               <button
                 key={filter}
                 onClick={() => setOrderFilter(filter)}
-                className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-colors ${
-                  orderFilter === filter 
-                    ? 'bg-indigo-600 text-white' 
+                className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-colors ${orderFilter === filter
+                    ? 'bg-indigo-600 text-white'
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
+                  }`}
               >
                 {filter === 'TODAY' ? "Today" : filter === 'WEEK' ? "Past Week" : "Past Month"}
               </button>
@@ -315,19 +300,18 @@ export default function AdminDashboard() {
                     <h3 className="font-bold text-slate-800">Order #{order.order_number}</h3>
                     <div className="text-xs text-slate-500 font-mono mt-0.5">ID: {order.id.split('-')[0].toUpperCase()}</div>
                   </div>
-                  <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${
-                    order.status === 'COLLECTED' ? 'bg-green-100 text-green-700' : 
-                    order.status === 'REJECTED' ? 'bg-red-100 text-red-700' : 
-                    'bg-amber-100 text-amber-700'
-                  }`}>
+                  <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${order.status === 'COLLECTED' ? 'bg-green-100 text-green-700' :
+                      order.status === 'REJECTED' ? 'bg-red-100 text-red-700' :
+                        'bg-amber-100 text-amber-700'
+                    }`}>
                     {order.status}
                   </span>
                 </div>
-                
+
                 <div className="text-sm text-slate-600">
                   <span className="font-semibold">{order.profiles?.name || 'Unknown'}</span> ({order.profiles?.id_number || 'No ID'})
                 </div>
-                
+
                 <div className="text-xs text-slate-500">
                   Pickup: {order.pickup_time} • {new Date(order.created_at).toLocaleDateString()}
                 </div>
@@ -350,37 +334,41 @@ export default function AdminDashboard() {
       {/* Menu Management */}
       <div className="col-span-12 md:col-span-6 bg-white border border-slate-200 rounded-[2rem] p-5 sm:p-8 shadow-sm flex flex-col">
         <h2 className="text-xl font-bold text-slate-800 mb-6">Manage Menu</h2>
-        
         {/* Add Item Form */}
-        <form onSubmit={handleAddItem} className="flex flex-col sm:flex-row gap-3 mb-8 bg-slate-50 p-4 rounded-xl border border-slate-100">
+        <form onSubmit={handleAddItem} className="flex flex-col gap-3 mb-8 bg-slate-50 p-4 rounded-xl border border-slate-100">
           <input 
             type="text" 
             placeholder="Item Name" 
             value={newItemName}
             onChange={(e) => setNewItemName(e.target.value)}
             maxLength={100}
-            className="flex-1 min-w-[120px] px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm text-slate-800"
+            className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm text-slate-800"
           />
-          <input 
-            type="number" 
-            placeholder="Price (₹)" 
-            value={newItemPrice}
-            onChange={(e) => setNewItemPrice(e.target.value)}
-            min="0"
-            step="any"
-            className="w-full sm:w-28 px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm text-slate-800"
-          />
-          <select 
-            value={newItemType} 
-            onChange={(e) => setNewItemType(e.target.value as FoodType)}
-            className="px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm text-slate-800"
-          >
-            <option value="VEG">Veg</option>
-            <option value="NON_VEG">Non-Veg</option>
-          </select>
-          <button type="submit" className="w-full sm:w-auto px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 transition-colors">
-            Add
-          </button>
+          <div className="flex gap-2 items-center">
+            <input 
+              type="number" 
+              placeholder="Price (₹)" 
+              value={newItemPrice}
+              onChange={(e) => setNewItemPrice(e.target.value)}
+              min="0"
+              step="any"
+              className="w-28 px-3.5 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm text-slate-800"
+            />
+            <select 
+              value={newItemType} 
+              onChange={(e) => setNewItemType(e.target.value as FoodType)}
+              className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm text-slate-800"
+            >
+              <option value="VEG">Veg</option>
+              <option value="NON_VEG">Non-Veg</option>
+            </select>
+            <button 
+              type="submit" 
+              className="px-5 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 active:scale-95 transition-all shrink-0"
+            >
+              Add Item
+            </button>
+          </div>
         </form>
 
         {/* Menu List */}
@@ -401,13 +389,13 @@ export default function AdminDashboard() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-                  <button 
+                  <button
                     onClick={() => handleToggleSoldOut(item.id, item.is_sold_out)}
                     className="text-[10px] sm:text-xs font-semibold text-slate-500 bg-slate-100 px-2 sm:px-3 py-1.5 rounded-lg hover:bg-slate-200 transition-colors"
                   >
                     {item.is_sold_out ? 'Mark Available' : 'Mark Sold Out'}
                   </button>
-                  <button 
+                  <button
                     onClick={() => handleDeleteItem(item.id)}
                     className="text-[10px] sm:text-xs font-semibold text-red-500 bg-red-50 px-2 sm:px-3 py-1.5 rounded-lg hover:bg-red-100 transition-colors"
                   >
@@ -426,7 +414,7 @@ export default function AdminDashboard() {
       {/* Feedback & Reviews */}
       <div className="col-span-12 md:col-span-6 bg-white border border-slate-200 rounded-[2rem] p-5 sm:p-8 shadow-sm flex flex-col">
         <h2 className="text-xl font-bold text-slate-800 mb-6">Student Feedback & Reviews</h2>
-        
+
         {reviewsLoading ? (
           <div className="text-slate-500 text-sm">Loading reviews...</div>
         ) : reviews.length === 0 ? (
@@ -452,13 +440,13 @@ export default function AdminDashboard() {
                     ))}
                   </div>
                 </div>
-                
+
                 {review.feedback_text && (
                   <div className="bg-white p-3 rounded-xl border border-slate-100 text-sm text-slate-700 italic">
                     "{review.feedback_text}"
                   </div>
                 )}
-                
+
                 <div className="text-xs text-slate-400">
                   Reviewed on: {new Date(review.created_at).toLocaleString()}
                 </div>
@@ -481,13 +469,13 @@ export default function AdminDashboard() {
                         rows={2}
                       />
                       <div className="flex justify-end gap-2">
-                        <button 
+                        <button
                           onClick={() => { setReplyingTo(null); setReplyText(''); }}
                           className="px-3 py-1.5 text-xs font-semibold text-slate-500 hover:text-slate-700 transition-colors"
                         >
                           Cancel
                         </button>
-                        <button 
+                        <button
                           onClick={() => handleReplyToReview(review.id)}
                           disabled={submittingReply || !replyText.trim()}
                           className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
@@ -497,7 +485,7 @@ export default function AdminDashboard() {
                       </div>
                     </div>
                   ) : (
-                    <button 
+                    <button
                       onClick={() => setReplyingTo(review.id)}
                       className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
                     >
@@ -517,7 +505,7 @@ export default function AdminDashboard() {
         <h2 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2">
           Weekly Analytics
         </h2>
-        
+
         {analyticsLoading ? (
           <div className="text-slate-500 text-sm">Loading analytics...</div>
         ) : (
@@ -543,12 +531,11 @@ export default function AdminDashboard() {
                           <span className="text-indigo-600">{item.count} sold</span>
                         </div>
                         <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden border border-slate-200/50">
-                          <div 
-                            className={`h-2.5 rounded-full transition-all duration-1000 ease-out ${
-                              idx === 0 ? 'bg-indigo-600' : 
-                              idx === 1 ? 'bg-indigo-500' : 
-                              idx === 2 ? 'bg-indigo-400' : 'bg-indigo-300'
-                            }`}
+                          <div
+                            className={`h-2.5 rounded-full transition-all duration-1000 ease-out ${idx === 0 ? 'bg-indigo-600' :
+                                idx === 1 ? 'bg-indigo-500' :
+                                  idx === 2 ? 'bg-indigo-400' : 'bg-indigo-300'
+                              }`}
                             style={{ width: `${percentage}%` }}
                           ></div>
                         </div>
@@ -558,7 +545,7 @@ export default function AdminDashboard() {
                 </div>
               )}
             </div>
-            
+
             <div className="bg-indigo-600 rounded-2xl p-6 shadow-sm flex flex-col items-center justify-center text-white text-center">
               <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center mb-4">
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20v-6M6 20V10M18 20V4"></path></svg>
