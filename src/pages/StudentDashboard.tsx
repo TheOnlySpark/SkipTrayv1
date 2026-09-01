@@ -65,16 +65,22 @@ export default function StudentDashboard() {
     return () => clearInterval(timer);
   }, []);
 
-  const isSunday = new Date(currentTime).getDay() === 0;
+  const [bypassTimeForTesting, setBypassTimeForTesting] = useState(true);
+
+  const isSunday = !bypassTimeForTesting && new Date(currentTime).getDay() === 0;
 
   // Check if current time is before 9:30 AM opening time
   const nowObj = new Date(currentTime);
   const currentHour = nowObj.getHours();
   const currentMinute = nowObj.getMinutes();
-  const isBeforeOpeningTime = !isSunday && (currentHour < 9 || (currentHour === 9 && currentMinute < 30));
+  const isBeforeOpeningTime = !bypassTimeForTesting && !isSunday && (currentHour < 9 || (currentHour === 9 && currentMinute < 30));
 
   // Helper to determine slot availability (must be placed >= 30 mins before pickup slot today)
   const getSlotAvailability = (slotValue: string) => {
+    if (bypassTimeForTesting) {
+      return { isAvailable: true, diffMinutes: 60, reason: '' };
+    }
+
     const now = new Date(currentTime);
     const [hours, minutes] = slotValue.split(':').map(Number);
     const slotDate = new Date(now);
@@ -98,7 +104,7 @@ export default function StudentDashboard() {
   };
 
   const availableLunchSlots = LUNCH_SLOTS.filter(s => getSlotAvailability(s.value).isAvailable);
-  const isLunchClosedForToday = !isSunday && !isBeforeOpeningTime && availableLunchSlots.length === 0;
+  const isLunchClosedForToday = !bypassTimeForTesting && !isSunday && !isBeforeOpeningTime && availableLunchSlots.length === 0;
 
   const [reviewingItem, setReviewingItem] = useState<{ orderId: string, menuItemId: string, itemName: string } | null>(null);
   const [reviewRating, setReviewRating] = useState(5);
@@ -390,7 +396,18 @@ export default function StudentDashboard() {
               </div>
             )}
           </div>
-          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto items-stretch sm:items-center">
+            <button 
+              onClick={() => setBypassTimeForTesting(!bypassTimeForTesting)}
+              className={`text-center text-xs font-bold px-3 py-2.5 rounded-xl border transition-all ${
+                bypassTimeForTesting 
+                  ? 'bg-amber-500 text-white border-amber-600 shadow-sm' 
+                  : 'bg-slate-100 text-slate-600 border-slate-200'
+              }`}
+              title="Toggle Testing Mode (Bypasses lunch clock cutoffs for testing)"
+            >
+              🧪 {bypassTimeForTesting ? 'Test Mode: ON' : 'Test Mode: OFF'}
+            </button>
             <button onClick={() => setShowHistory(!showHistory)} className="flex-1 text-center text-sm font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 px-4 py-3 sm:py-2 rounded-xl border border-indigo-100 transition-colors">
               {showHistory ? 'Back to Order' : 'Order History'}
             </button>
