@@ -3,6 +3,11 @@ import React from 'react';
 export interface IconProps extends React.SVGProps<SVGSVGElement> {
   className?: string;
   size?: number | string;
+  key?: React.Key;
+}
+
+export interface IconStarProps extends IconProps {
+  filled?: boolean;
 }
 
 // Warning / Alert Triangle
@@ -96,7 +101,7 @@ export function IconHourglass({ className = 'w-4 h-4', size = 16, ...props }: Ic
 }
 
 // Star (Rating / Reviews)
-export function IconStar({ className = 'w-4 h-4', size = 16, filled = false, ...props }: IconProps & { filled?: boolean }) {
+export function IconStar({ className = 'w-4 h-4', size = 16, filled = false, ...props }: IconStarProps) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
