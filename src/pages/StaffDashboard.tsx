@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Database } from '../types/supabase';
+import { formatPickupTime } from './StudentDashboard';
 
 type Order = Database['public']['Tables']['orders']['Row'];
 type OrderItem = Database['public']['Tables']['order_items']['Row'];
@@ -264,7 +265,7 @@ export default function StaffDashboard() {
                   <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 mb-4">
                     <div className="flex items-center gap-2">
                       <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse shrink-0"></span>
-                      <span>⚠️ <strong>No-Show Alert:</strong> {overdueInfo.minutesOverdue}m past pickup slot ({order.pickup_time})</span>
+                      <span>⚠️ <strong>No-Show Alert:</strong> {overdueInfo.minutesOverdue}m past pickup slot ({formatPickupTime(order.pickup_time)})</span>
                     </div>
                     <span className="text-[11px] bg-amber-200/70 text-amber-900 px-2 py-0.5 rounded-md font-bold shrink-0">10m grace period exceeded</span>
                   </div>
@@ -274,7 +275,7 @@ export default function StaffDashboard() {
                   <div>
                     <h3 className="font-bold text-lg text-slate-900">Order #{order.order_number} - {order.profiles?.name} <span className="text-sm font-normal text-slate-500">({order.profiles?.id_number})</span></h3>
                     <div className="text-xs text-slate-500 font-mono mt-0.5">ID: {order.id.split('-')[0].toUpperCase()}</div>
-                    <div className="text-sm font-semibold text-indigo-600 mt-1">Pickup: {order.pickup_time}</div>
+                    <div className="text-sm font-semibold text-indigo-600 mt-1">Pickup: {formatPickupTime(order.pickup_time)} (Lunch)</div>
                   </div>
                   <div className={`px-3 py-1 rounded-full text-xs font-bold border ${getStatusColor(order.status)}`}>
                     {order.status}

@@ -13,6 +13,26 @@ type PastOrder = Order & {
   item_reviews: ItemReview[];
 };
 
+export const LUNCH_SLOTS = [
+  { value: '12:30', label: '12:30 PM' },
+  { value: '12:40', label: '12:40 PM' },
+  { value: '12:50', label: '12:50 PM' },
+  { value: '13:00', label: '1:00 PM' },
+  { value: '13:10', label: '1:10 PM' },
+  { value: '13:20', label: '1:20 PM' },
+  { value: '13:30', label: '1:30 PM' },
+  { value: '13:40', label: '1:40 PM' },
+];
+
+export const formatPickupTime = (timeStr?: string | null) => {
+  if (!timeStr) return '';
+  const [h, m] = timeStr.split(':').map(Number);
+  if (isNaN(h) || isNaN(m)) return timeStr;
+  const period = h >= 12 ? 'PM' : 'AM';
+  const displayHour = h > 12 ? h - 12 : h === 0 ? 12 : h;
+  return `${displayHour}:${String(m).padStart(2, '0')} ${period}`;
+};
+
 export default function StudentDashboard() {
   const { profile, signOut } = useAuth();
   const queryClient = useQueryClient();
@@ -25,6 +45,40 @@ export default function StudentDashboard() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [cartOpen, setCartOpen] = useState(false);
+  const [currentTime, setCurrentTime] = useState(Date.now());
+
+  // Periodically refresh current time every 30s to dynamically update slot cutoffs
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(Date.now()), 30000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const isSunday = new Date(currentTime).getDay() === 0;
+
+  // Helper to determine slot availability (must be placed >= 30 mins before pickup slot today)
+  const getSlotAvailability = (slotValue: string) => {
+    const now = new Date(currentTime);
+    const [hours, minutes] = slotValue.split(':').map(Number);
+    const slotDate = new Date(now);
+    slotDate.setHours(hours, minutes, 0, 0);
+
+    const diffMinutes = (slotDate.getTime() - now.getTime()) / (1000 * 60);
+    const isAvailable = diffMinutes >= 30;
+    
+    let reason = '';
+    if (!isAvailable) {
+      if (diffMinutes <= 0) {
+        reason = 'Passed';
+      } else {
+        reason = 'Cutoff (<30m notice)';
+      }
+    }
+
+    return { isAvailable, diffMinutes, reason };
+  };
+
+  const availableLunchSlots = LUNCH_SLOTS.filter(s => getSlotAvailability(s.value).isAvailable);
+  const isLunchClosedForToday = !isSunday && availableLunchSlots.length === 0;
 
   const [reviewingItem, setReviewingItem] = useState<{ orderId: string, menuItemId: string, itemName: string } | null>(null);
   const [reviewRating, setReviewRating] = useState(5);
@@ -152,6 +206,14 @@ export default function StudentDashboard() {
       alert("Your account is currently deactivated for 3 days due to 2 missed pickups.");
       return;
     }
+    if (isSunday) {
+      alert("Orders cannot be placed on Sundays. The canteen is closed.");
+      return;
+    }
+    if (isLunchClosedForToday) {
+      alert("Lunch ordering for today is closed. Orders must be placed at least 30 minutes in advance of Lunch slots (12:30 PM – 1:40 PM).");
+      return;
+    }
     if (item.is_sold_out) return;
     if (cartTotalItems >= 5) return;
     
@@ -174,7 +236,22 @@ export default function StudentDashboard() {
 
   const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSunday) {
+      setError('Orders cannot be placed on Sundays. The canteen is closed.');
+      return;
+    }
+    if (isLunchClosedForToday) {
+      setError('Lunch ordering for today is closed. Orders must be placed at least 30 minutes before the pickup slot.');
+      return;
+    }
     if (cart.length === 0 || !pickupTime) return;
+
+    const slotAvail = getSlotAvailability(pickupTime);
+    if (!slotAvail.isAvailable) {
+      setError(`Selected pickup slot is no longer available (${slotAvail.reason}). Please select another Lunch slot.`);
+      return;
+    }
+
     setSubmitting(true);
     setError('');
 
@@ -325,7 +402,7 @@ export default function StudentDashboard() {
                       <div className="font-bold text-slate-800 text-lg">Order #{o.order_number}</div>
                       <div className="text-xs text-slate-500 font-mono font-medium mb-1">ID: {o.id.split('-')[0].toUpperCase()}</div>
                       <div className="text-xs text-slate-500 font-medium mb-1">Placed on: {new Date(o.created_at).toLocaleDateString()}</div>
-                      <div className="text-sm text-slate-600 mt-1">Pickup: {o.pickup_time}</div>
+                      <div className="text-sm text-slate-600 mt-1">Pickup: {formatPickupTime(o.pickup_time)} (Lunch)</div>
                     </div>
                     <div className={`px-3 py-1 rounded-full text-xs font-bold border ${o.status === 'COLLECTED' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
                       {o.status}
@@ -463,14 +540,33 @@ export default function StudentDashboard() {
             <p className="text-5xl font-mono font-bold tracking-[0.2em]">{activeOrder.otp_code}</p>
           </div>
           
-          <p className="mt-6 text-indigo-200">Requested Pickup Time: <span className="font-semibold text-white">{activeOrder.pickup_time}</span></p>
+          <p className="mt-6 text-indigo-200">Requested Pickup Time: <span className="font-semibold text-white">{formatPickupTime(activeOrder.pickup_time)} (Lunch)</span></p>
           </div>
         </div>
       ) : (
         <>
           {/* Menu — full width now that cart is a floating bar */}
           <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-6 sm:p-8 shadow-sm">
-            <h2 className="text-xl font-bold text-slate-800 mb-6">Menu</h2>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+              <div>
+                <h2 className="text-xl font-bold text-slate-800">Menu</h2>
+                <p className="text-xs text-slate-500 mt-0.5">Lunch Pickup Slots: 12:30 PM – 1:40 PM • Closed on Sundays</p>
+              </div>
+              {isSunday ? (
+                <span className="self-start sm:self-auto px-3 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm">
+                  <span>🚫</span> Closed on Sundays
+                </span>
+              ) : isLunchClosedForToday ? (
+                <span className="self-start sm:self-auto px-3 py-1 bg-rose-50 text-rose-700 border border-rose-200 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm">
+                  <span>⏳</span> Lunch Ordering Closed Today
+                </span>
+              ) : (
+                <span className="self-start sm:self-auto px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> Lunch Slots Open (12:30 PM – 1:40 PM)
+                </span>
+              )}
+            </div>
+
             <div className="grid grid-cols-3 gap-2 sm:gap-4">
               {menuItems.map(item => (
                 <div key={item.id} className={`flex flex-col justify-between p-5 rounded-2xl border transition-all ${item.is_sold_out ? 'bg-slate-50 border-slate-100 opacity-60' : 'bg-white border-slate-200 hover:border-indigo-300 hover:shadow-md'}`}>
@@ -488,7 +584,7 @@ export default function StudentDashboard() {
                     {!item.is_sold_out ? (
                       <button 
                         onClick={() => addToCart(item)}
-                        disabled={cartTotalItems >= 5}
+                        disabled={isSuspended || isSunday || isLunchClosedForToday || cartTotalItems >= 5}
                         className="w-10 h-10 flex items-center justify-center bg-indigo-50 text-indigo-600 rounded-xl font-bold hover:bg-indigo-600 hover:text-white transition-colors disabled:opacity-50 disabled:hover:bg-indigo-50 disabled:hover:text-indigo-600 shadow-sm"
                       >
                         +
@@ -541,6 +637,28 @@ export default function StudentDashboard() {
                       <h3 style={{ color: '#f1f5f9', fontWeight: 700, fontSize: '1.1rem' }}>Your Order</h3>
                       <span style={{ color: '#64748b', fontSize: '0.75rem', fontWeight: 600 }}>Max 5 items</span>
                     </div>
+
+                    {/* Sunday closure banner in cart */}
+                    {isSunday && (
+                      <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: '0.75rem', display: 'flex', gap: '0.625rem', alignItems: 'center' }}>
+                        <span style={{ fontSize: '1.25rem' }}>🚫</span>
+                        <div>
+                          <div style={{ color: '#fbbf24', fontSize: '0.8125rem', fontWeight: 700 }}>Canteen Closed on Sundays</div>
+                          <div style={{ color: '#fde68a', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders are not accepted on Sundays.</div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Lunch cutoff banner in cart */}
+                    {!isSunday && isLunchClosedForToday && (
+                      <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '0.75rem', display: 'flex', gap: '0.625rem', alignItems: 'center' }}>
+                        <span style={{ fontSize: '1.25rem' }}>⏳</span>
+                        <div>
+                          <div style={{ color: '#f87171', fontSize: '0.8125rem', fontWeight: 700 }}>Lunch Ordering Closed Today</div>
+                          <div style={{ color: '#fca5a5', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders must be placed at least 30 mins before pickup (Lunch: 12:30 PM – 1:40 PM).</div>
+                        </div>
+                      </div>
+                    )}
 
                     <div style={{ marginBottom: '1rem' }}>
                       {cart.length === 0 ? (
@@ -611,40 +729,50 @@ export default function StudentDashboard() {
                     <form onSubmit={handlePlaceOrder} style={{ paddingTop: '1rem', borderTop: '1px solid #1e293b' }}>
                       {error && <div style={{ color: '#f87171', fontSize: '0.75rem', marginBottom: '0.75rem', fontWeight: 600 }}>{error}</div>}
                       <div style={{ marginBottom: '1rem' }}>
-                        <label style={{ display: 'block', fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Pickup Time (9 AM – 6 PM)</label>
-                        <div style={{ display: 'flex', gap: '0.5rem' }}>
-                          <select
-                            value={pickupTime.split(':')[0] || ''}
-                            onChange={e => {
-                              const hour = e.target.value;
-                              const minute = pickupTime.split(':')[1] || '00';
-                              setPickupTime(hour ? `${hour}:${minute}` : '');
-                            }}
-                            style={{ flex: 1, background: '#1e293b', border: '1px solid #334155', color: 'white', padding: '0.5rem 0.75rem', borderRadius: '0.75rem', fontSize: '0.875rem', cursor: 'pointer', appearance: 'none' as const }}
-                          >
-                            <option value="">Hour</option>
-                            {Array.from({ length: 10 }, (_, i) => i + 9).map(h => (
-                              <option key={h} value={String(h).padStart(2, '0')}>
-                                {h > 12 ? `${h - 12} PM` : h === 12 ? '12 PM' : `${h} AM`}
-                              </option>
-                            ))}
-                          </select>
-                          <select
-                            value={pickupTime.split(':')[1] || ''}
-                            onChange={e => {
-                              const hour = pickupTime.split(':')[0] || '09';
-                              setPickupTime(`${hour}:${e.target.value}`);
-                            }}
-                            disabled={!pickupTime.split(':')[0]}
-                            style={{ flex: 1, background: '#1e293b', border: '1px solid #334155', color: 'white', padding: '0.5rem 0.75rem', borderRadius: '0.75rem', fontSize: '0.875rem', cursor: 'pointer', appearance: 'none' as const, opacity: !pickupTime.split(':')[0] ? 0.5 : 1 }}
-                          >
-                            <option value="">Min</option>
-                            {['00', '10', '20', '30', '40', '50'].map(m => (
-                              <option key={m} value={m}>{m}</option>
-                            ))}
-                          </select>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                          <label style={{ fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em' }}>
+                            Lunch Pickup Slot (12:30 PM – 1:40 PM)
+                          </label>
+                          <span style={{ fontSize: '0.65rem', color: '#818cf8', fontWeight: 600, background: 'rgba(99,102,241,0.15)', padding: '2px 6px', borderRadius: '4px' }}>
+                            Min 30m notice
+                          </span>
                         </div>
+
+                        <select
+                          value={pickupTime}
+                          onChange={e => setPickupTime(e.target.value)}
+                          disabled={isSuspended || isSunday || isLunchClosedForToday}
+                          style={{
+                            width: '100%',
+                            background: '#1e293b',
+                            border: '1px solid #334155',
+                            color: 'white',
+                            padding: '0.625rem 0.875rem',
+                            borderRadius: '0.75rem',
+                            fontSize: '0.875rem',
+                            cursor: (isSuspended || isSunday || isLunchClosedForToday) ? 'not-allowed' : 'pointer',
+                            opacity: (isSuspended || isSunday || isLunchClosedForToday) ? 0.6 : 1,
+                            appearance: 'none' as const,
+                          }}
+                        >
+                          <option value="">
+                            {isSunday 
+                              ? 'Closed on Sundays' 
+                              : isLunchClosedForToday 
+                                ? 'Lunch Ordering Closed for Today' 
+                                : 'Select a Lunch Slot (10-min intervals)...'}
+                          </option>
+                          {LUNCH_SLOTS.map(slot => {
+                            const { isAvailable, reason } = getSlotAvailability(slot.value);
+                            return (
+                              <option key={slot.value} value={slot.value} disabled={!isAvailable}>
+                                {slot.label} {!isAvailable ? `(${reason})` : ''}
+                              </option>
+                            );
+                          })}
+                        </select>
                       </div>
+
                       {/* Total Amount Summary */}
                       {cart.length > 0 && (
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', padding: '0.75rem 1rem', background: '#1e293b', borderRadius: '0.75rem' }}>
@@ -655,27 +783,35 @@ export default function StudentDashboard() {
 
                       <button
                         type="submit"
-                        disabled={isSuspended || cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out)}
+                        disabled={isSuspended || isSunday || isLunchClosedForToday || cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out)}
                         style={{
                           width: '100%',
                           padding: '0.875rem',
                           background: isSuspended
                             ? '#ef4444'
-                            : (cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out)
-                              ? 'rgba(99,102,241,0.4)' : '#6366f1'),
+                            : isSunday
+                              ? '#64748b'
+                              : isLunchClosedForToday
+                                ? '#64748b'
+                                : (cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out))
+                                  ? 'rgba(99,102,241,0.4)' : '#6366f1',
                           color: 'white',
                           borderRadius: '0.875rem',
                           fontWeight: 700,
                           fontSize: '0.875rem',
                           border: 'none',
-                          cursor: isSuspended || cart.length === 0 || !pickupTime || submitting ? 'not-allowed' : 'pointer',
+                          cursor: isSuspended || isSunday || isLunchClosedForToday || cart.length === 0 || !pickupTime || submitting ? 'not-allowed' : 'pointer',
                           transition: 'background 0.2s',
                           marginBottom: '1rem',
                         }}
                       >
                         {isSuspended
                           ? 'Account Deactivated (3-Day Penalty)'
-                          : (submitting ? 'Placing...' : `Place Order (${cartTotalItems} items • ₹${cartTotalPrice.toFixed(2)})`)}
+                          : isSunday
+                            ? 'Closed on Sundays'
+                            : isLunchClosedForToday
+                              ? 'Lunch Ordering Closed Today'
+                              : (submitting ? 'Placing...' : `Place Order (${cartTotalItems} items • ₹${cartTotalPrice.toFixed(2)})`)}
                       </button>
                     </form>
                   </div>

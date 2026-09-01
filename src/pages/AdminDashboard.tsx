@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Database } from '../types/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { formatPickupTime } from './StudentDashboard';
 
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 type FoodType = Database['public']['Enums']['food_type'];
@@ -352,7 +353,7 @@ export default function AdminDashboard() {
                 </div>
 
                 <div className="text-xs text-slate-500">
-                  Pickup: {order.pickup_time} • {new Date(order.created_at).toLocaleDateString()}
+                  Pickup: {formatPickupTime(order.pickup_time)} (Lunch) • {new Date(order.created_at).toLocaleDateString()}
                 </div>
 
                 <div className="mt-2 pt-3 border-t border-slate-200">
