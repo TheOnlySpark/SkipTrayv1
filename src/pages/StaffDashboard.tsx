@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useDialog } from '../contexts/ModalDialogContext';
 import { supabase } from '../lib/supabase';
 import { Database } from '../types/supabase';
 import { formatPickupTime, LUNCH_SLOTS } from './StudentDashboard';
@@ -156,14 +157,24 @@ export default function StaffDashboard() {
 
     if (error) {
       if (import.meta.env.DEV) console.error("Failed to update order status:", error);
-      alert("Failed to update order status. Please try again.");
+      showAlert({
+        title: 'Status Update Failed',
+        message: 'Failed to update order status. Please try again.',
+        type: 'error'
+      });
       fetchOrders();
     }
   };
 
   const bulkAcceptOrders = async (orderIds: string[]) => {
     if (orderIds.length === 0) return;
-    if (!window.confirm(`Accept all ${orderIds.length} incoming orders?`)) return;
+    const confirmed = await showConfirm({
+      title: 'Batch Accept Orders',
+      message: `Accept all ${orderIds.length} incoming orders?`,
+      confirmText: 'Accept All',
+      cancelText: 'Cancel'
+    });
+    if (!confirmed) return;
 
     // Optimistic update
     setOrders(prev => prev.map(order => 
@@ -205,7 +216,11 @@ export default function StaffDashboard() {
     });
 
     if (error) {
-      alert('Verification failed. Please try again.');
+      showAlert({
+        title: 'Verification Error',
+        message: 'Verification failed. Please try again.',
+        type: 'error'
+      });
       return false;
     }
 
@@ -217,7 +232,14 @@ export default function StaffDashboard() {
       return true;
     } else {
       if (result.requires_override) {
-        if (window.confirm(result.message + "\n\nDo you want to manually override?")) {
+        const overrideConfirmed = await showConfirm({
+          title: 'Manual Override',
+          message: result.message + "\n\nDo you want to manually override?",
+          confirmText: 'Override',
+          cancelText: 'Cancel',
+          isDangerous: true
+        });
+        if (overrideConfirmed) {
           await supabase.rpc('verify_pickup_otp', {
             p_order_id: orderId,
             p_otp: '',
@@ -229,7 +251,11 @@ export default function StaffDashboard() {
           return true;
         }
       } else {
-        alert(result.message);
+        showAlert({
+          title: 'Verification Rejected',
+          message: result.message,
+          type: 'warning'
+        });
       }
       return false;
     }
@@ -348,12 +374,13 @@ export default function StaffDashboard() {
 
   const handleMarkNoShow = async (order: OrderWithDetails) => {
     const studentName = order.profiles?.name || 'the student';
-    const confirmed = window.confirm(
-      `Mark Order #${order.order_number} for ${studentName} as a No-Show?\n\n` +
-      `• The order will be cancelled (REJECTED).\n` +
-      `• ${studentName} will receive 1 Strike.\n` +
-      `• If this is their 2nd strike, their account will be deactivated for 3 days.`
-    );
+    const confirmed = await showConfirm({
+      title: 'Mark No-Show & Issue Strike',
+      message: `Mark Order #${order.order_number} for ${studentName} as a No-Show?\n\n• The order will be cancelled (REJECTED).\n• ${studentName} will receive 1 Strike.\n• If this is their 2nd strike, their account will be deactivated for 3 days.`,
+      confirmText: 'Confirm Strike',
+      cancelText: 'Keep Order',
+      isDangerous: true
+    });
     if (!confirmed) return;
 
     const { data, error } = await supabase.rpc('mark_order_no_show', {
@@ -362,15 +389,27 @@ export default function StaffDashboard() {
 
     if (error) {
       if (import.meta.env.DEV) console.error("Failed to mark order as no-show:", error);
-      alert(`Failed to cancel order: ${error.message}`);
+      showAlert({
+        title: 'Action Failed',
+        message: `Failed to cancel order: ${error.message}`,
+        type: 'error'
+      });
       return;
     }
 
     const result = data as any;
     if (result.is_suspended) {
-      alert(`Order cancelled. ${studentName} has reached 2 strikes and their account is now DEACTIVATED for 3 days.`);
+      showAlert({
+        title: 'Account Deactivated (2 Strikes)',
+        message: `Order cancelled. ${studentName} has reached 2 strikes and their account is now DEACTIVATED for 3 days.`,
+        type: 'danger'
+      });
     } else {
-      alert(`Order cancelled. Strike added to ${studentName} (Total strikes: ${result.strike_count}/2).`);
+      showAlert({
+        title: 'Strike Issued',
+        message: `Order cancelled. Strike added to ${studentName} (Total strikes: ${result.strike_count}/2).`,
+        type: 'warning'
+      });
     }
 
     fetchOrders();

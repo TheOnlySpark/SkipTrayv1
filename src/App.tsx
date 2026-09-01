@@ -89,6 +89,7 @@ function Landing() {
 }
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ModalDialogProvider } from './contexts/ModalDialogContext';
 
 const queryClient = new QueryClient();
 
@@ -96,42 +97,44 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <Router>
-          <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center font-sans text-slate-900 p-4 pt-6 md:p-6 md:pt-12">
-            <NavigationHeader />
+        <ModalDialogProvider>
+          <Router>
+            <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center font-sans text-slate-900 p-4 pt-6 md:p-6 md:pt-12">
+              <NavigationHeader />
 
-            <main className="w-full flex-grow flex flex-col items-center justify-center">
-              <Routes>
-                <Route path="/" element={<Landing />} />
-                <Route path="/login" element={<Login />} />
-                <Route path="/dashboard" element={
-                  <ProtectedRoute>
-                    <Dashboard />
-                  </ProtectedRoute>
-                } />
-                <Route path="/student" element={
-                  <ProtectedRoute allowedRoles={['STUDENT', 'TEACHER']}>
-                    <StudentDashboard />
-                  </ProtectedRoute>
-                } />
-                <Route path="/staff" element={
-                  <ProtectedRoute allowedRoles={['STAFF', 'ADMIN']}>
-                    <StaffDashboard />
-                  </ProtectedRoute>
-                } />
-                <Route path="/admin" element={
-                  <ProtectedRoute allowedRoles={['ADMIN']}>
-                    <AdminDashboard />
-                  </ProtectedRoute>
-                } />
-              </Routes>
-            </main>
+              <main className="w-full flex-grow flex flex-col items-center justify-center">
+                <Routes>
+                  <Route path="/" element={<Landing />} />
+                  <Route path="/login" element={<Login />} />
+                  <Route path="/dashboard" element={
+                    <ProtectedRoute>
+                      <Dashboard />
+                    </ProtectedRoute>
+                  } />
+                  <Route path="/student" element={
+                    <ProtectedRoute allowedRoles={['STUDENT', 'TEACHER']}>
+                      <StudentDashboard />
+                    </ProtectedRoute>
+                  } />
+                  <Route path="/staff" element={
+                    <ProtectedRoute allowedRoles={['STAFF', 'ADMIN']}>
+                      <StaffDashboard />
+                    </ProtectedRoute>
+                  } />
+                  <Route path="/admin" element={
+                    <ProtectedRoute allowedRoles={['ADMIN']}>
+                      <AdminDashboard />
+                    </ProtectedRoute>
+                  } />
+                </Routes>
+              </main>
 
-            <footer className="w-full max-w-4xl mt-12 py-4 border-t border-slate-200 flex justify-between items-center text-[10px] text-slate-400 uppercase tracking-widest">
-              <span>&copy; 2026 SkipTray</span>
-            </footer>
-          </div>
-        </Router>
+              <footer className="w-full max-w-4xl mt-12 py-4 border-t border-slate-200 flex justify-between items-center text-[10px] text-slate-400 uppercase tracking-widest">
+                <span>&copy; 2026 SkipTray</span>
+              </footer>
+            </div>
+          </Router>
+        </ModalDialogProvider>
       </AuthProvider>
     </QueryClientProvider>
   );

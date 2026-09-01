@@ -1,6 +1,7 @@
 import React from "react";
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useDialog } from '../contexts/ModalDialogContext';
 import { supabase } from '../lib/supabase';
 import { Database } from '../types/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -22,6 +23,7 @@ type Review = Database['public']['Tables']['item_reviews']['Row'] & {
 
 export default function AdminDashboard() {
   const { profile, signOut } = useAuth();
+  const { showAlert, showConfirm } = useDialog();
   const queryClient = useQueryClient();
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -127,11 +129,20 @@ export default function AdminDashboard() {
       .eq('id', reviewId);
 
     if (error) {
-      alert('Failed to submit reply. Please try again.');
+      showAlert({
+        title: 'Reply Failed',
+        message: 'Failed to submit reply. Please try again.',
+        type: 'error'
+      });
     } else {
       setReplyingTo(null);
       setReplyText('');
       queryClient.invalidateQueries({ queryKey: ['adminReviews'] });
+      showAlert({
+        title: 'Reply Published',
+        message: 'Your reply has been published to the student review.',
+        type: 'success'
+      });
     }
     setSubmittingReply(false);
   };
@@ -149,15 +160,31 @@ export default function AdminDashboard() {
   });
 
   const handleResetStudentStrikes = async (studentId: string, studentName: string) => {
-    if (!window.confirm(`Clear all strikes and lift suspension for ${studentName || 'this student'}?`)) return;
+    const confirmed = await showConfirm({
+      title: 'Reset Strikes & Lift Suspension',
+      message: `Clear all strikes and restore full ordering privileges for ${studentName || 'this student'}?`,
+      confirmText: 'Reset Strikes',
+      cancelText: 'Cancel',
+      type: 'info'
+    });
+    if (!confirmed) return;
+
     const { error } = await supabase.rpc('admin_reset_student_strikes', {
       p_student_id: studentId
     });
     if (error) {
-      alert(`Failed to reset strikes: ${error.message}`);
+      showAlert({
+        title: 'Reset Failed',
+        message: `Failed to reset strikes: ${error.message}`,
+        type: 'error'
+      });
       return;
     }
-    alert(`Strikes and suspension cleared for ${studentName || 'student'}.`);
+    showAlert({
+      title: 'Strikes Cleared',
+      message: `Strikes and suspension have been cleared for ${studentName || 'student'}.`,
+      type: 'success'
+    });
     queryClient.invalidateQueries({ queryKey: ['penalizedStudents'] });
   };
 

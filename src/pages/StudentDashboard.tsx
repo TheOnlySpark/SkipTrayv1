@@ -1,6 +1,7 @@
 import React from "react";
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useDialog } from '../contexts/ModalDialogContext';
 import { supabase } from '../lib/supabase';
 import { Database } from '../types/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -47,6 +48,7 @@ export const formatPickupTime = (timeStr?: string | null) => {
 
 export default function StudentDashboard() {
   const { profile, signOut } = useAuth();
+  const { showAlert, showConfirm } = useDialog();
   const queryClient = useQueryClient();
   const [activeOrder, setActiveOrder] = useState<Order | null>(null);
   const [pastOrders, setPastOrders] = useState<PastOrder[]>([]);
@@ -237,19 +239,35 @@ export default function StudentDashboard() {
 
   const addToCart = (item: MenuItem) => {
     if (isSuspended) {
-      alert("Your account is currently deactivated for 3 days due to 2 missed pickups.");
+      showAlert({
+        title: 'Account Deactivated',
+        message: 'Your account is currently deactivated for 3 days due to 2 missed pickups.',
+        type: 'danger'
+      });
       return;
     }
     if (isSunday) {
-      alert("Orders cannot be placed on Sundays. The canteen is closed.");
+      showAlert({
+        title: 'Canteen Closed',
+        message: 'Orders cannot be placed on Sundays. The canteen is closed.',
+        type: 'warning'
+      });
       return;
     }
     if (isBeforeOpeningTime) {
-      alert("Lunch booking opens at 9:30 AM in the morning.");
+      showAlert({
+        title: 'Ordering Not Open Yet',
+        message: 'Lunch booking opens at 9:30 AM in the morning.',
+        type: 'warning'
+      });
       return;
     }
     if (isLunchClosedForToday) {
-      alert("Lunch ordering for today is closed. Orders must be placed at least 30 minutes in advance of Lunch slots (12:30 PM – 1:40 PM).");
+      showAlert({
+        title: 'Booking Window Closed',
+        message: 'Lunch ordering for today is closed. Orders must be placed at least 30 minutes in advance of Lunch slots (12:30 PM – 1:40 PM).',
+        type: 'warning'
+      });
       return;
     }
     if (item.is_sold_out) return;
@@ -323,7 +341,14 @@ export default function StudentDashboard() {
 
   const handleCancelOrder = async () => {
     if (!activeOrder) return;
-    if (!window.confirm("Are you sure you want to cancel this order?")) return;
+    const confirmed = await showConfirm({
+      title: 'Cancel Order',
+      message: 'Are you sure you want to cancel this order? This action cannot be undone.',
+      confirmText: 'Yes, Cancel Order',
+      cancelText: 'Keep Order',
+      isDangerous: true
+    });
+    if (!confirmed) return;
     
     // In Phase 7, we use an RPC to enforce the 5 min rule securely
     const { error } = await supabase.rpc('cancel_order', {
@@ -331,10 +356,19 @@ export default function StudentDashboard() {
     });
     
     if (error) {
-      alert('Unable to cancel order. ' + (error.message.includes('5 minutes') ? 'Cancellation window has passed.' : 'Please try again.'));
+      showAlert({
+        title: 'Cancellation Failed',
+        message: 'Unable to cancel order. ' + (error.message.includes('5 minutes') ? 'Cancellation window has passed.' : 'Please try again.'),
+        type: 'error'
+      });
     } else {
       setActiveOrder(null);
       queryClient.invalidateQueries({ queryKey: ['pastOrders'] });
+      showAlert({
+        title: 'Order Cancelled',
+        message: 'Your order has been cancelled successfully.',
+        type: 'success'
+      });
     }
   };
 
@@ -352,12 +386,21 @@ export default function StudentDashboard() {
     });
     
     if (error) {
-      alert('Failed to submit review. Please try again.');
+      showAlert({
+        title: 'Submission Failed',
+        message: 'Failed to submit review. Please try again.',
+        type: 'error'
+      });
     } else {
       setReviewingItem(null);
       setReviewRating(5);
       setReviewText('');
       queryClient.invalidateQueries({ queryKey: ['pastOrders'] });
+      showAlert({
+        title: 'Thank You!',
+        message: 'Your review has been submitted successfully.',
+        type: 'success'
+      });
     }
     setSubmittingReview(false);
   };
