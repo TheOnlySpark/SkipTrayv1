@@ -131,6 +131,7 @@ export default function StudentDashboard() {
   }, [profile?.id]);
 
   const cartTotalItems = cart.reduce((acc, c) => acc + c.quantity, 0);
+  const cartTotalPrice = cart.reduce((acc, c) => acc + (Number(c.item.price || 0) * c.quantity), 0);
 
   const addToCart = (item: MenuItem) => {
     if (item.is_sold_out) return;
@@ -287,7 +288,12 @@ export default function StudentDashboard() {
                         return (
                           <div key={idx} className="flex flex-col gap-2 p-3 bg-slate-50 rounded-lg border border-slate-100">
                             <div className="flex justify-between items-center">
-                              <span className="font-medium text-slate-700">{menuItem.name}</span>
+                              <span className="font-medium text-slate-700">
+                                {menuItem.name}
+                                {menuItem.price !== undefined && menuItem.price !== null && (
+                                  <span className="text-xs text-indigo-600 font-bold ml-2">₹{Number(menuItem.price).toFixed(2)}</span>
+                                )}
+                              </span>
                               {o.status === 'COLLECTED' && !existingReview && reviewingItem?.menuItemId !== menuItem.id && (
                                 <button
                                   onClick={() => setReviewingItem({ orderId: o.id, menuItemId: menuItem.id, itemName: menuItem.name })}
@@ -420,9 +426,11 @@ export default function StudentDashboard() {
                       {item.is_sold_out && <span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full uppercase tracking-wider">Sold Out</span>}
                     </div>
                     <h3 className="font-bold text-slate-800 leading-tight">{item.name}</h3>
+                    <div className="text-sm font-extrabold text-indigo-600 mt-1.5">₹{Number(item.price || 0).toFixed(2)}</div>
                   </div>
                   
-                  <div className="mt-6 flex justify-end">
+                  <div className="mt-4 flex items-center justify-between">
+                    <span className="text-xs font-medium text-slate-400">{item.veg_non_veg === 'VEG' ? 'Veg' : 'Non-Veg'}</span>
                     {!item.is_sold_out ? (
                       <button 
                         onClick={() => addToCart(item)}
@@ -508,7 +516,11 @@ export default function StudentDashboard() {
                                     <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#f87171', background: 'rgba(239,68,68,0.15)', padding: '1px 6px', borderRadius: '9999px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Sold Out</span>
                                   )}
                                 </div>
-                                <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>Qty: {c.quantity}</div>
+                                <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                                  <span>Qty: {c.quantity}</span>
+                                  <span style={{ color: '#94a3b8' }}>• ₹{Number(c.item.price || 0).toFixed(2)}</span>
+                                  <span style={{ color: '#818cf8', fontWeight: 600 }}>= ₹{(Number(c.item.price || 0) * c.quantity).toFixed(2)}</span>
+                                </div>
                               </div>
                               <button
                                 onClick={() => removeFromCart(c.item.id)}
@@ -579,6 +591,14 @@ export default function StudentDashboard() {
                           </select>
                         </div>
                       </div>
+                      {/* Total Amount Summary */}
+                      {cart.length > 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', padding: '0.75rem 1rem', background: '#1e293b', borderRadius: '0.75rem' }}>
+                          <span style={{ color: '#94a3b8', fontSize: '0.875rem', fontWeight: 600 }}>Total Amount</span>
+                          <span style={{ color: '#38bdf8', fontSize: '1.125rem', fontWeight: 700 }}>₹{cartTotalPrice.toFixed(2)}</span>
+                        </div>
+                      )}
+
                       <button
                         type="submit"
                         disabled={cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out)}
@@ -597,7 +617,7 @@ export default function StudentDashboard() {
                           marginBottom: '1rem',
                         }}
                       >
-                        {submitting ? 'Placing...' : `Place Order (${cartTotalItems} items)`}
+                        {submitting ? 'Placing...' : `Place Order (${cartTotalItems} items • ₹${cartTotalPrice.toFixed(2)})`}
                       </button>
                     </form>
                   </div>
@@ -632,9 +652,7 @@ export default function StudentDashboard() {
                     <span style={{ color: '#f1f5f9', fontWeight: 700, fontSize: '0.95rem' }}>Your Order</span>
                     {cartTotalItems > 0 && (
                       <span style={{ color: '#818cf8', fontSize: '0.75rem', fontWeight: 600 }}>
-                        {cart.map(c => c.item.name).join(', ').length > 30
-                          ? cart.map(c => c.item.name).join(', ').substring(0, 30) + '…'
-                          : cart.map(c => c.item.name).join(', ')}
+                        ₹{cartTotalPrice.toFixed(2)} • {cartTotalItems} item{cartTotalItems > 1 ? 's' : ''}
                       </span>
                     )}
                   </div>

@@ -196,11 +196,22 @@ export default function StaffDashboard() {
               <div className="flex-grow mb-4">
                 <ul className="space-y-2">
                   {order.order_items.map(item => (
-                    <li key={item.id} className="text-sm flex justify-between">
+                    <li key={item.id} className="text-sm flex justify-between items-center">
                       <span className="text-slate-700"><span className="font-bold text-slate-900">{item.quantity}x</span> {item.menu_items?.name}</span>
+                      {item.menu_items?.price !== undefined && item.menu_items?.price !== null && (
+                        <span className="text-xs font-semibold text-slate-500">
+                          ₹{(Number(item.menu_items.price) * item.quantity).toFixed(2)}
+                        </span>
+                      )}
                     </li>
                   ))}
                 </ul>
+                <div className="mt-3 pt-2 border-t border-dashed border-slate-200 flex justify-between items-center text-xs font-bold text-slate-700">
+                  <span>Total Value</span>
+                  <span className="text-indigo-600 font-extrabold text-sm">
+                    ₹{order.order_items.reduce((sum, item) => sum + (Number(item.menu_items?.price || 0) * item.quantity), 0).toFixed(2)}
+                  </span>
+                </div>
               </div>
 
               {/* Action Buttons based on status */}
@@ -250,7 +261,8 @@ export default function StaffDashboard() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-h-[500px] overflow-y-auto pr-2 place-items-stretch">
           {menuItems.map(item => (
             <div key={item.id} className="flex flex-col items-center justify-center p-6 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm text-center">
-              <span className={`text-base font-bold mb-4 ${item.is_sold_out ? 'text-slate-400 line-through' : 'text-slate-700'}`}>{item.name}</span>
+              <span className={`text-base font-bold mb-1 ${item.is_sold_out ? 'text-slate-400 line-through' : 'text-slate-700'}`}>{item.name}</span>
+              <span className="text-xs font-bold text-indigo-600 mb-3">₹{Number(item.price || 0).toFixed(2)}</span>
               <button 
                 onClick={() => handleToggleSoldOut(item.id, item.is_sold_out)}
                 className={`w-full max-w-[120px] text-sm px-4 py-2 rounded-xl font-bold transition-transform active:scale-95 ${item.is_sold_out ? 'bg-slate-200 text-slate-600 hover:bg-slate-300' : 'bg-red-100 text-red-600 hover:bg-red-200'}`}

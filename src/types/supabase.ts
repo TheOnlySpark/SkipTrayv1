@@ -15,6 +15,7 @@ export interface Database {
           id: string
           is_sold_out: boolean
           name: string
+          price: number
           updated_at: string
           veg_non_veg: Database["public"]["Enums"]["food_type"]
         }
@@ -23,6 +24,7 @@ export interface Database {
           id?: string
           is_sold_out?: boolean
           name: string
+          price?: number
           updated_at?: string
           veg_non_veg: Database["public"]["Enums"]["food_type"]
         }
@@ -31,6 +33,7 @@ export interface Database {
           id?: string
           is_sold_out?: boolean
           name?: string
+          price?: number
           updated_at?: string
           veg_non_veg?: Database["public"]["Enums"]["food_type"]
         }

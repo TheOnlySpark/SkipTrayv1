@@ -130,6 +130,7 @@ export default function AdminDashboard() {
   };
   
   const [newItemName, setNewItemName] = useState('');
+  const [newItemPrice, setNewItemPrice] = useState('');
   const [newItemType, setNewItemType] = useState<FoodType>('VEG');
 
   useEffect(() => {
@@ -198,14 +199,17 @@ export default function AdminDashboard() {
     e.preventDefault();
     if (!newItemName.trim()) return;
     
+    const parsedPrice = parseFloat(newItemPrice) || 0;
     const { data, error } = await supabase.from('menu_items').insert({
       name: newItemName,
-      veg_non_veg: newItemType
+      veg_non_veg: newItemType,
+      price: parsedPrice
     }).select().single();
     
     if (data) {
       setMenuItems([data, ...menuItems]);
       setNewItemName('');
+      setNewItemPrice('');
     }
   };
 
@@ -334,7 +338,7 @@ export default function AdminDashboard() {
         <h2 className="text-xl font-bold text-slate-800 mb-6">Manage Menu</h2>
         
         {/* Add Item Form */}
-        <form onSubmit={handleAddItem} className="flex flex-col sm:flex-row gap-4 mb-8 bg-slate-50 p-4 rounded-xl border border-slate-100">
+        <form onSubmit={handleAddItem} className="flex flex-col sm:flex-row gap-3 mb-8 bg-slate-50 p-4 rounded-xl border border-slate-100">
           <input 
             type="text" 
             placeholder="Item Name" 
@@ -342,6 +346,15 @@ export default function AdminDashboard() {
             onChange={(e) => setNewItemName(e.target.value)}
             maxLength={100}
             className="flex-1 min-w-[120px] px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm text-slate-800"
+          />
+          <input 
+            type="number" 
+            placeholder="Price (₹)" 
+            value={newItemPrice}
+            onChange={(e) => setNewItemPrice(e.target.value)}
+            min="0"
+            step="any"
+            className="w-full sm:w-28 px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm text-slate-800"
           />
           <select 
             value={newItemType} 
@@ -365,8 +378,13 @@ export default function AdminDashboard() {
               <div key={item.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-white border border-slate-200 rounded-xl hover:border-slate-300 transition-colors shadow-sm gap-3">
                 <div className="flex items-center gap-3">
                   <div className={`w-3 h-3 rounded-full shrink-0 ${item.veg_non_veg === 'VEG' ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                  <span className={`font-semibold ${item.is_sold_out ? 'text-slate-400 line-through' : 'text-slate-800'}`}>{item.name}</span>
-                  {item.is_sold_out && <span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full shrink-0">Sold Out</span>}
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className={`font-semibold ${item.is_sold_out ? 'text-slate-400 line-through' : 'text-slate-800'}`}>{item.name}</span>
+                      {item.is_sold_out && <span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full shrink-0">Sold Out</span>}
+                    </div>
+                    <div className="text-xs font-bold text-slate-600 mt-0.5">₹{Number(item.price || 0).toFixed(2)}</div>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
                   <button 
