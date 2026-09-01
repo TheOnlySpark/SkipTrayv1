@@ -8,7 +8,7 @@ interface QRScannerModalProps {
 }
 
 // Synthesize pleasant pickup verification chime via Web Audio API
-function playSuccessBeep() {
+export function playSuccessBeep() {
   try {
     const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     if (!AudioCtx) return;
@@ -34,6 +34,32 @@ function playSuccessBeep() {
   } catch {
     // Ignore audio permission or autoplay restrictions silently
   }
+}
+
+// Low frequency buzz for replay attacks or errors
+export function playErrorBuzzer() {
+  try {
+    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'sawtooth';
+    const now = ctx.currentTime;
+    osc.frequency.setValueAtTime(220, now);
+    osc.frequency.setValueAtTime(180, now + 0.12);
+
+    gain.gain.setValueAtTime(0.2, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(now);
+    osc.stop(now + 0.3);
+  } catch {}
 }
 
 export function QRScannerModal({ isOpen, onClose, onScanSuccess }: QRScannerModalProps) {

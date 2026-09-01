@@ -16,7 +16,7 @@ import {
   IconX,
   IconCamera
 } from '../components/Icons';
-import { QRScannerModal } from '../components/QRScannerModal';
+import { QRScannerModal, playSuccessBeep, playErrorBuzzer } from '../components/QRScannerModal';
 
 type Order = Database['public']['Tables']['orders']['Row'];
 type OrderItem = Database['public']['Tables']['order_items']['Row'];
@@ -275,7 +275,7 @@ export default function StaffDashboard() {
     }, 5000);
   };
 
-  // QR Code Scanner Payload Handler
+  // QR Code Scanner Payload Handler (Hardened with Anti-Replay & Status Gate)
   const handleQrScanPayload = async (payload: string): Promise<boolean> => {
     let orderIdToVerify: string | null = null;
     let otpCodeToVerify: string = '';
@@ -295,6 +295,7 @@ export default function StaffDashboard() {
     }
 
     if (!orderIdToVerify) {
+      playErrorBuzzer();
       setQuickOtpToast({
         message: `Invalid or unrecognized QR code format: "${cleanPayload}".`,
         isError: true
@@ -303,18 +304,42 @@ export default function StaffDashboard() {
     }
 
     const matchingOrder = orders.find(o => o.id === orderIdToVerify);
+    const orderNum = matchingOrder?.order_number ? `#${matchingOrder.order_number}` : '';
+    const studentName = matchingOrder?.profiles?.name || 'Student';
+
+    // 1. Anti-Replay Attack Check (Already Collected)
+    if (matchingOrder && matchingOrder.status === 'COLLECTED') {
+      playErrorBuzzer();
+      setQuickOtpToast({
+        message: `⚠️ REPLAY BLOCKED: Order ${orderNum} for ${studentName} was ALREADY collected!`,
+        isError: true
+      });
+      return false;
+    }
+
+    // 2. Kitchen Readiness Check (Still Preparing / Placed)
+    if (matchingOrder && matchingOrder.status !== 'READY') {
+      playErrorBuzzer();
+      setQuickOtpToast({
+        message: `⚠️ NOT READY: Order ${orderNum} is currently in status "${matchingOrder.status}". Kitchen has not boxed it yet.`,
+        isError: true
+      });
+      return false;
+    }
+
+    // 3. Perform atomic verification via RPC
     const success = await handleVerifyOtp(orderIdToVerify, otpCodeToVerify);
     if (success) {
-      const studentName = matchingOrder?.profiles?.name || 'Student';
-      const orderNum = matchingOrder?.order_number ? `#${matchingOrder.order_number}` : '';
+      playSuccessBeep();
       setQuickOtpToast({
-        message: `QR Verified! Order ${orderNum} for ${studentName} collected successfully!`,
+        message: `✅ QR Verified! Order ${orderNum} for ${studentName} collected successfully!`,
         isError: false
       });
       return true;
     } else {
+      playErrorBuzzer();
       setQuickOtpToast({
-        message: `QR verification failed for order ${matchingOrder ? '#' + matchingOrder.order_number : ''}.`,
+        message: `❌ QR verification rejected for order ${orderNum}.`,
         isError: true
       });
       return false;

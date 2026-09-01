@@ -13,7 +13,6 @@ import Dashboard from './pages/Dashboard';
 import StudentDashboard from './pages/StudentDashboard';
 import StaffDashboard from './pages/StaffDashboard';
 import AdminDashboard from './pages/AdminDashboard';
-import QRTestBench from './pages/QRTestBench';
 
 function NavigationHeader() {
   const { user } = useAuth();
@@ -30,9 +29,6 @@ function NavigationHeader() {
 
         {/* Desktop Nav */}
         <div className="hidden md:flex gap-4 items-center">
-          <Link to="/qr-test" className="px-3 py-1.5 bg-amber-50 text-amber-800 text-xs font-bold rounded-lg border border-amber-200 hover:bg-amber-100 transition">
-            🧪 QR Lab
-          </Link>
           {!user && (
             <Link to="/login" className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition">
               Login
@@ -58,7 +54,6 @@ function NavigationHeader() {
       {isOpen && (
         <div className="md:hidden absolute top-full left-4 right-4 mt-2 p-4 bg-white rounded-2xl shadow-xl border border-slate-100 flex flex-col gap-2 z-50">
           <Link to="/" onClick={() => setIsOpen(false)} className="px-4 py-3 text-slate-700 font-medium hover:bg-slate-50 rounded-xl">Home</Link>
-          <Link to="/qr-test" onClick={() => setIsOpen(false)} className="px-4 py-3 bg-amber-50 text-amber-800 font-bold rounded-xl text-center">🧪 QR Lab</Link>
           {!user && (
             <Link to="/login" onClick={() => setIsOpen(false)} className="px-4 py-3 bg-indigo-50 text-indigo-700 font-semibold rounded-xl text-center mt-2">Login</Link>
           )}
@@ -109,7 +104,6 @@ export default function App() {
               <Routes>
                 <Route path="/" element={<Landing />} />
                 <Route path="/login" element={<Login />} />
-                <Route path="/qr-test" element={<QRTestBench />} />
                 <Route path="/dashboard" element={
                   <ProtectedRoute>
                     <Dashboard />

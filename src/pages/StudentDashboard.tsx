@@ -8,6 +8,7 @@ import {
   IconAlertTriangle, 
   IconBan, 
   IconClock, 
+  IconHourglass,
   IconStar, 
   IconX, 
   IconChevronUp,
@@ -63,6 +64,13 @@ export default function StudentDashboard() {
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(Date.now()), 30000);
     return () => clearInterval(timer);
+  }, []);
+
+  // Anti-Screenshot Live Security Watermark Ticker (1-second precision)
+  const [liveTickerTime, setLiveTickerTime] = useState(() => new Date().toLocaleTimeString());
+  useEffect(() => {
+    const ticker = setInterval(() => setLiveTickerTime(new Date().toLocaleTimeString()), 1000);
+    return () => clearInterval(ticker);
   }, []);
 
   const [bypassTimeForTesting, setBypassTimeForTesting] = useState(true);
@@ -596,39 +604,65 @@ export default function StudentDashboard() {
             {activeOrder.status}
           </div>
           
-          {/* Dual Verification: Dynamic QR Code + 6-Digit OTP Backup */}
-          <div className="mt-6 flex flex-col items-center gap-3 w-full max-w-xs">
-            {/* High-Contrast QR Code Card */}
-            <div 
-              onClick={() => setShowQrModal(true)}
-              className="bg-white p-4 rounded-3xl shadow-xl cursor-pointer hover:scale-105 transition-all relative group border-4 border-white/20"
-              title="Click to Enlarge QR Code"
-            >
-              <QRCodeSVG 
-                value={`SKIPTRAY:${activeOrder.id}:${activeOrder.otp_code}`} 
-                size={180}
-                className="rounded-xl"
-              />
-              <div className="absolute inset-0 bg-indigo-950/70 backdrop-blur-xs rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white gap-1.5 p-2">
-                <IconMaximize size={24} className="w-6 h-6 text-white" />
-                <span className="text-[11px] font-extrabold uppercase tracking-wider">Tap to Enlarge</span>
+          {/* Security Gatekeeper: Live Anti-Screenshot Pass only illuminates when READY */}
+          {activeOrder.status === 'READY' ? (
+            <div className="mt-6 flex flex-col items-center gap-3 w-full max-w-xs animate-in fade-in zoom-in-95 duration-300">
+              {/* Anti-Screenshot Live Security Watermark */}
+              <div className="flex items-center justify-center gap-2 bg-emerald-500/20 text-emerald-200 px-3.5 py-1.5 rounded-full text-xs font-extrabold border border-emerald-400/40 shadow-inner">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400"></span>
+                </span>
+                <span className="tracking-wide font-mono">🔴 LIVE PASS • {liveTickerTime}</span>
+              </div>
+
+              {/* High-Contrast QR Code Card with Pulsing Security Halo */}
+              <div 
+                onClick={() => setShowQrModal(true)}
+                className="bg-white p-4 rounded-3xl shadow-[0_0_30px_rgba(52,211,153,0.35)] cursor-pointer hover:scale-105 transition-all relative group border-4 border-emerald-400"
+                title="Click to Enlarge QR Code"
+              >
+                <QRCodeSVG 
+                  value={`SKIPTRAY:${activeOrder.id}:${activeOrder.otp_code}`} 
+                  size={180}
+                  className="rounded-xl"
+                />
+                <div className="absolute inset-0 bg-indigo-950/70 backdrop-blur-xs rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white gap-1.5 p-2">
+                  <IconMaximize size={24} className="w-6 h-6 text-white" />
+                  <span className="text-[11px] font-extrabold uppercase tracking-wider">Tap to Enlarge</span>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowQrModal(true)}
+                className="text-xs text-indigo-100 hover:text-white flex items-center gap-1.5 font-medium transition-colors"
+              >
+                <IconQrCode size={14} className="w-3.5 h-3.5" />
+                <span>Show QR at counter for instant scan</span>
+              </button>
+
+              {/* Manual 6-Digit OTP Box (Fallback / Backup) */}
+              <div className="bg-white/10 px-4 py-2.5 rounded-2xl border border-white/20 text-center w-full shadow-inner mt-1">
+                <p className="text-indigo-200 text-[10px] font-bold uppercase tracking-widest mb-0.5">Or Give 6-Digit OTP</p>
+                <p className="text-3xl font-mono font-black tracking-[0.25em] text-white">{activeOrder.otp_code}</p>
               </div>
             </div>
-
-            <button
-              onClick={() => setShowQrModal(true)}
-              className="text-xs text-indigo-100 hover:text-white flex items-center gap-1.5 font-medium transition-colors"
-            >
-              <IconQrCode size={14} className="w-3.5 h-3.5" />
-              <span>Show QR at counter for instant scan</span>
-            </button>
-
-            {/* Manual 6-Digit OTP Box (Fallback / Backup) */}
-            <div className="bg-white/10 px-4 py-2.5 rounded-2xl border border-white/20 text-center w-full shadow-inner mt-1">
-              <p className="text-indigo-200 text-[10px] font-bold uppercase tracking-widest mb-0.5">Or Give 6-Digit OTP</p>
-              <p className="text-3xl font-mono font-black tracking-[0.25em] text-white">{activeOrder.otp_code}</p>
+          ) : (
+            /* Kitchen Preparing State Card (QR Locked Until Ready) */
+            <div className="mt-6 flex flex-col items-center justify-center bg-white/10 border border-white/20 rounded-3xl p-6 text-center max-w-xs w-full backdrop-blur-xs">
+              <div className="w-14 h-14 rounded-full bg-white/15 flex items-center justify-center mb-3 text-amber-300">
+                <IconHourglass size={28} className="animate-spin" style={{ animationDuration: '4s' }} />
+              </div>
+              <h4 className="font-extrabold text-base text-white">Kitchen is preparing your meal</h4>
+              <p className="text-xs text-indigo-100 mt-1">
+                Your food is currently being cooked and boxed.
+              </p>
+              <div className="mt-4 px-3 py-2 bg-indigo-950/40 rounded-2xl border border-indigo-300/20 text-[11px] text-indigo-200 flex items-center gap-2">
+                <span className="text-amber-300 font-bold">🔒 Secure Pass</span>
+                <span>• Unlocks automatically when READY</span>
+              </div>
             </div>
-          </div>
+          )}
           
           <p className="mt-5 text-xs text-indigo-200">Requested Pickup Time: <span className="font-semibold text-white">{formatPickupTime(activeOrder.pickup_time)} (Lunch)</span></p>
           </div>
@@ -990,10 +1024,11 @@ export default function StudentDashboard() {
             </button>
 
             <div>
-              <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full uppercase tracking-wider">
-                Pickup Pass
-              </span>
-              <h3 className="text-2xl font-extrabold text-slate-900 mt-2">Order #{activeOrder.order_number}</h3>
+              <div className="inline-flex items-center justify-center gap-1.5 bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-[11px] font-extrabold border border-emerald-200 uppercase tracking-wider mb-1">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                <span>🔴 LIVE PASS • {liveTickerTime}</span>
+              </div>
+              <h3 className="text-2xl font-extrabold text-slate-900 mt-1">Order #{activeOrder.order_number}</h3>
               <p className="text-xs text-slate-500 font-mono mt-0.5">ID: {activeOrder.id.split('-')[0].toUpperCase()}</p>
             </div>
 
