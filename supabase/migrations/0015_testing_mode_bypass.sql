@@ -1,6 +1,8 @@
 -- 0015_testing_mode_bypass.sql
--- Relaxes strict same-day clock cutoff checks in place_order_with_otp
--- so developers & testers can place lunch orders at any time of day for testing.
+-- Fixes order_items columns (only order_id, menu_item_id, quantity exist)
+-- Relaxes strict time cutoff checks so developers & testers can place orders at any time.
+
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS is_test BOOLEAN DEFAULT false;
 
 CREATE OR REPLACE FUNCTION public.place_order_with_otp(
   p_pickup_time TEXT,
@@ -78,32 +80,32 @@ BEGIN
     user_id,
     pickup_time,
     otp_code,
-    status
+    status,
+    is_test
   ) VALUES (
     v_user_id,
     p_pickup_time,
     v_otp,
-    'PLACED'
+    'PLACED',
+    true
   ) RETURNING id INTO v_order_id;
 
-  -- Insert order items
+  -- Insert order items (order_id, menu_item_id, quantity)
   FOR v_item IN SELECT * FROM json_array_elements(p_items)
   LOOP
     INSERT INTO public.order_items (
       order_id,
       menu_item_id,
-      quantity,
-      price_at_order
-    )
-    SELECT
+      quantity
+    ) VALUES (
       v_order_id,
       (v_item->>'menu_item_id')::uuid,
-      (v_item->>'quantity')::int,
-      price
-    FROM public.menu_items
-    WHERE id = (v_item->>'menu_item_id')::uuid;
+      (v_item->>'quantity')::int
+    );
   END LOOP;
 
   RETURN v_order_id;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+GRANT EXECUTE ON FUNCTION public.place_order_with_otp(TEXT, JSON) TO authenticated;
