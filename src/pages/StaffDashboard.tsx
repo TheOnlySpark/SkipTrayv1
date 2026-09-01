@@ -31,6 +31,7 @@ type OrderWithDetails = Order & {
 
 export default function StaffDashboard() {
   const { profile, signOut } = useAuth();
+  const { showAlert, showConfirm } = useDialog();
   const [orders, setOrders] = useState<OrderWithDetails[]>([]);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
