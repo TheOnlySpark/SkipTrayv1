@@ -63,6 +63,12 @@ export default function StudentDashboard() {
 
   const isSunday = new Date(currentTime).getDay() === 0;
 
+  // Check if current time is before 9:30 AM opening time
+  const nowObj = new Date(currentTime);
+  const currentHour = nowObj.getHours();
+  const currentMinute = nowObj.getMinutes();
+  const isBeforeOpeningTime = !isSunday && (currentHour < 9 || (currentHour === 9 && currentMinute < 30));
+
   // Helper to determine slot availability (must be placed >= 30 mins before pickup slot today)
   const getSlotAvailability = (slotValue: string) => {
     const now = new Date(currentTime);
@@ -71,11 +77,13 @@ export default function StudentDashboard() {
     slotDate.setHours(hours, minutes, 0, 0);
 
     const diffMinutes = (slotDate.getTime() - now.getTime()) / (1000 * 60);
-    const isAvailable = diffMinutes >= 30;
+    const isAvailable = !isBeforeOpeningTime && diffMinutes >= 30;
     
     let reason = '';
     if (!isAvailable) {
-      if (diffMinutes <= 0) {
+      if (isBeforeOpeningTime) {
+        reason = 'Opens at 9:30 AM';
+      } else if (diffMinutes <= 0) {
         reason = 'Passed';
       } else {
         reason = 'Cutoff (<30m notice)';
@@ -86,7 +94,7 @@ export default function StudentDashboard() {
   };
 
   const availableLunchSlots = LUNCH_SLOTS.filter(s => getSlotAvailability(s.value).isAvailable);
-  const isLunchClosedForToday = !isSunday && availableLunchSlots.length === 0;
+  const isLunchClosedForToday = !isSunday && !isBeforeOpeningTime && availableLunchSlots.length === 0;
 
   const [reviewingItem, setReviewingItem] = useState<{ orderId: string, menuItemId: string, itemName: string } | null>(null);
   const [reviewRating, setReviewRating] = useState(5);
@@ -218,6 +226,10 @@ export default function StudentDashboard() {
       alert("Orders cannot be placed on Sundays. The canteen is closed.");
       return;
     }
+    if (isBeforeOpeningTime) {
+      alert("Lunch booking opens at 9:30 AM in the morning.");
+      return;
+    }
     if (isLunchClosedForToday) {
       alert("Lunch ordering for today is closed. Orders must be placed at least 30 minutes in advance of Lunch slots (12:30 PM – 1:40 PM).");
       return;
@@ -246,6 +258,10 @@ export default function StudentDashboard() {
     e.preventDefault();
     if (isSunday) {
       setError('Orders cannot be placed on Sundays. The canteen is closed.');
+      return;
+    }
+    if (isBeforeOpeningTime) {
+      setError('Lunch booking opens at 9:30 AM in the morning.');
       return;
     }
     if (isLunchClosedForToday) {
@@ -574,12 +590,17 @@ export default function StudentDashboard() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
               <div>
                 <h2 className="text-xl font-bold text-slate-800">Menu</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Lunch Pickup Slots: 12:30 PM – 1:40 PM • Closed on Sundays</p>
+                <p className="text-xs text-slate-500 mt-0.5">Lunch Pickup: 12:30 PM – 1:40 PM • Booking Opens: 9:30 AM (Min 30m Notice)</p>
               </div>
               {isSunday ? (
                 <span className="self-start sm:self-auto px-3 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm">
                   <IconBan size={14} className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                   <span>Closed on Sundays</span>
+                </span>
+              ) : isBeforeOpeningTime ? (
+                <span className="self-start sm:self-auto px-3 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm">
+                  <IconClock size={14} className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                  <span>Lunch Booking Opens at 9:30 AM</span>
                 </span>
               ) : isLunchClosedForToday ? (
                 <span className="self-start sm:self-auto px-3 py-1 bg-rose-50 text-rose-700 border border-rose-200 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm">
@@ -611,7 +632,7 @@ export default function StudentDashboard() {
                     {!item.is_sold_out ? (
                       <button 
                         onClick={() => addToCart(item)}
-                        disabled={isSuspended || isSunday || isLunchClosedForToday || cartTotalItems >= 5}
+                        disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cartTotalItems >= 5}
                         className="w-10 h-10 flex items-center justify-center bg-indigo-50 text-indigo-600 rounded-xl font-bold hover:bg-indigo-600 hover:text-white transition-colors disabled:opacity-50 disabled:hover:bg-indigo-50 disabled:hover:text-indigo-600 shadow-sm"
                       >
                         +
@@ -672,6 +693,17 @@ export default function StudentDashboard() {
                         <div>
                           <div style={{ color: '#fbbf24', fontSize: '0.8125rem', fontWeight: 700 }}>Canteen Closed on Sundays</div>
                           <div style={{ color: '#fde68a', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders are not accepted on Sundays.</div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Morning pre-opening banner in cart */}
+                    {!isSunday && isBeforeOpeningTime && (
+                      <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: '0.75rem', display: 'flex', gap: '0.625rem', alignItems: 'center' }}>
+                        <IconClock size={20} className="w-5 h-5 text-indigo-400 shrink-0" />
+                        <div>
+                          <div style={{ color: '#818cf8', fontSize: '0.8125rem', fontWeight: 700 }}>Lunch Booking Opens at 9:30 AM</div>
+                          <div style={{ color: '#c7d2fe', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders open at 9:30 AM today (Lunch Slots: 12:30 PM – 1:40 PM, Min 30m notice).</div>
                         </div>
                       </div>
                     )}
@@ -771,7 +803,7 @@ export default function StudentDashboard() {
                         <select
                           value={pickupTime}
                           onChange={e => setPickupTime(e.target.value)}
-                          disabled={isSuspended || isSunday || isLunchClosedForToday}
+                          disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday}
                           style={{
                             width: '100%',
                             background: '#1e293b',
@@ -780,17 +812,19 @@ export default function StudentDashboard() {
                             padding: '0.625rem 0.875rem',
                             borderRadius: '0.75rem',
                             fontSize: '0.875rem',
-                            cursor: (isSuspended || isSunday || isLunchClosedForToday) ? 'not-allowed' : 'pointer',
-                            opacity: (isSuspended || isSunday || isLunchClosedForToday) ? 0.6 : 1,
+                            cursor: (isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday) ? 'not-allowed' : 'pointer',
+                            opacity: (isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday) ? 0.6 : 1,
                             appearance: 'none' as const,
                           }}
                         >
                           <option value="">
                             {isSunday 
                               ? 'Closed on Sundays' 
-                              : isLunchClosedForToday 
-                                ? 'Lunch Ordering Closed for Today' 
-                                : 'Select a Lunch Slot (10-min intervals)...'}
+                              : isBeforeOpeningTime
+                                ? 'Lunch Booking Opens at 9:30 AM'
+                                : isLunchClosedForToday 
+                                  ? 'Lunch Ordering Closed for Today' 
+                                  : 'Select a Lunch Slot (10-min intervals)...'}
                           </option>
                           {LUNCH_SLOTS.map(slot => {
                             const { isAvailable, reason } = getSlotAvailability(slot.value);
@@ -813,7 +847,7 @@ export default function StudentDashboard() {
 
                       <button
                         type="submit"
-                        disabled={isSuspended || isSunday || isLunchClosedForToday || cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out)}
+                        disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out)}
                         style={{
                           width: '100%',
                           padding: '0.875rem',
@@ -821,16 +855,18 @@ export default function StudentDashboard() {
                             ? '#ef4444'
                             : isSunday
                               ? '#64748b'
-                              : isLunchClosedForToday
-                                ? '#64748b'
-                                : (cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out))
-                                  ? 'rgba(99,102,241,0.4)' : '#6366f1',
+                              : isBeforeOpeningTime
+                                ? '#4f46e5'
+                                : isLunchClosedForToday
+                                  ? '#64748b'
+                                  : (cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out))
+                                    ? 'rgba(99,102,241,0.4)' : '#6366f1',
                           color: 'white',
                           borderRadius: '0.875rem',
                           fontWeight: 700,
                           fontSize: '0.875rem',
                           border: 'none',
-                          cursor: isSuspended || isSunday || isLunchClosedForToday || cart.length === 0 || !pickupTime || submitting ? 'not-allowed' : 'pointer',
+                          cursor: isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cart.length === 0 || !pickupTime || submitting ? 'not-allowed' : 'pointer',
                           transition: 'background 0.2s',
                           marginBottom: '1rem',
                         }}
@@ -839,9 +875,11 @@ export default function StudentDashboard() {
                           ? 'Account Deactivated (3-Day Penalty)'
                           : isSunday
                             ? 'Closed on Sundays'
-                            : isLunchClosedForToday
-                              ? 'Lunch Ordering Closed Today'
-                              : (submitting ? 'Placing...' : `Place Order (${cartTotalItems} items • ₹${cartTotalPrice.toFixed(2)})`)}
+                            : isBeforeOpeningTime
+                              ? 'Lunch Booking Opens at 9:30 AM'
+                              : isLunchClosedForToday
+                                ? 'Lunch Ordering Closed Today'
+                                : (submitting ? 'Placing...' : `Place Order (${cartTotalItems} items • ₹${cartTotalPrice.toFixed(2)})`)}
                       </button>
                     </form>
                   </div>
