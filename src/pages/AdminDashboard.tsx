@@ -190,8 +190,22 @@ export default function AdminDashboard() {
 
   const fetchMenu = async () => {
     setLoading(true);
-    const { data, error } = await supabase.from('menu_items').select('*').order('created_at', { ascending: false });
-    if (data) setMenuItems(data);
+    const { data, error } = await supabase
+      .from('menu_items')
+      .select('*')
+      .order('veg_non_veg', { ascending: false })
+      .order('name');
+    if (data) {
+      const sorted = [...data].sort((a, b) => {
+        if (a.veg_non_veg !== b.veg_non_veg) {
+          return a.veg_non_veg === 'VEG' ? -1 : 1;
+        }
+        if (a.name.toLowerCase() === 'veg meals') return -1;
+        if (b.name.toLowerCase() === 'veg meals') return 1;
+        return a.name.localeCompare(b.name);
+      });
+      setMenuItems(sorted);
+    }
     setLoading(false);
   };
 

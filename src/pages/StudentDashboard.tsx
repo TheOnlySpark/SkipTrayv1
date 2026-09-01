@@ -85,8 +85,19 @@ export default function StudentDashboard() {
   const { data: menuItems = [], isLoading: menuLoading } = useQuery({
     queryKey: ['menuItems'],
     queryFn: async () => {
-      const { data } = await supabase.from('menu_items').select('*').order('name');
-      return data || [];
+      const { data } = await supabase
+        .from('menu_items')
+        .select('*')
+        .order('veg_non_veg', { ascending: false })
+        .order('name');
+      return (data || []).sort((a, b) => {
+        if (a.veg_non_veg !== b.veg_non_veg) {
+          return a.veg_non_veg === 'VEG' ? -1 : 1;
+        }
+        if (a.name.toLowerCase() === 'veg meals') return -1;
+        if (b.name.toLowerCase() === 'veg meals') return 1;
+        return a.name.localeCompare(b.name);
+      });
     },
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
