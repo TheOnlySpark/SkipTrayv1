@@ -215,7 +215,7 @@ function encodeQRCodeMatrix(text: string): { matrix: boolean[][]; size: number }
     if (matrix[8][i] === null) matrix[8][i] = false;
     if (matrix[i][8] === null) matrix[i][8] = false;
     if (matrix[8][size - 1 - i] === null) matrix[8][size - 1 - i] = false;
-    if (matrix[size - 1 - i][8] === null) matrix[size - 1 - i] = false;
+    if (matrix[size - 1 - i][8] === null) matrix[size - 1 - i][8] = false;
   }
 
   // Fill data codewords in zigzag pattern
