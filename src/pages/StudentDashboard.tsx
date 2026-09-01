@@ -4,6 +4,14 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Database } from '../types/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { 
+  IconAlertTriangle, 
+  IconBan, 
+  IconClock, 
+  IconStar, 
+  IconX, 
+  IconChevronUp 
+} from '../components/Icons';
 
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 type Order = Database['public']['Tables']['orders']['Row'];
@@ -339,22 +347,27 @@ export default function StudentDashboard() {
             <div className="flex items-center gap-2 flex-wrap">
               <span className="px-3 py-1 bg-indigo-50 text-indigo-600 text-xs font-bold uppercase tracking-wider rounded-full">{profile?.role || 'Student'}</span>
               {strikeCount === 1 && !isSuspended && (
-                <span className="px-3 py-1 bg-amber-50 text-amber-700 border border-amber-200 text-xs font-bold rounded-full flex items-center gap-1">
-                  ⚠️ Strike 1/2 (No-Show Warning)
+                <span className="px-3 py-1 bg-amber-50 text-amber-700 border border-amber-200 text-xs font-bold rounded-full flex items-center gap-1.5 shadow-sm">
+                  <IconAlertTriangle size={14} className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                  <span>Strike 1/2 (No-Show Warning)</span>
                 </span>
               )}
               {isSuspended && (
-                <span className="px-3 py-1 bg-red-50 text-red-700 border border-red-200 text-xs font-bold rounded-full flex items-center gap-1">
-                  🚫 Account Deactivated (3-Day Penalty)
+                <span className="px-3 py-1 bg-red-50 text-red-700 border border-red-200 text-xs font-bold rounded-full flex items-center gap-1.5 shadow-sm">
+                  <IconBan size={14} className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                  <span>Account Deactivated (3-Day Penalty)</span>
                 </span>
               )}
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-3 leading-tight">Welcome, {profile?.name || 'User'}</h1>
             
             {strikeCount === 1 && !isSuspended && (
-              <p className="text-xs text-amber-700 bg-amber-50/80 border border-amber-200/60 p-2.5 rounded-xl mt-3 font-medium">
-                ⚠️ <strong>Notice:</strong> You missed an order pickup and received 1 strike. If you miss 1 more pickup, your account will be deactivated for 3 days.
-              </p>
+              <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50/80 border border-amber-200/60 p-2.5 rounded-xl mt-3 font-medium">
+                <IconAlertTriangle size={16} className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <strong>Notice:</strong> You missed an order pickup and received 1 strike. If you miss 1 more pickup, your account will be deactivated for 3 days.
+                </div>
+              </div>
             )}
           </div>
           <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
@@ -371,8 +384,8 @@ export default function StudentDashboard() {
       {/* Deactivation Banner */}
       {isSuspended && (
         <div className="col-span-12 bg-red-50 border-2 border-red-200 rounded-[2rem] p-6 sm:p-8 text-center flex flex-col items-center justify-center gap-3 mb-2 shadow-sm">
-          <div className="w-12 h-12 rounded-2xl bg-red-100 border border-red-200 flex items-center justify-center text-red-600 text-2xl">
-            🚫
+          <div className="w-12 h-12 rounded-2xl bg-red-100 border border-red-200 flex items-center justify-center text-red-600">
+            <IconBan size={28} className="w-7 h-7 text-red-600" />
           </div>
           <div>
             <h2 className="text-xl sm:text-2xl font-black text-red-800">Account Temporarily Deactivated</h2>
@@ -440,7 +453,12 @@ export default function StudentDashboard() {
                               <div className="mt-1 bg-white p-3 rounded-lg border border-indigo-100 shadow-sm">
                                 <div className="flex items-center gap-1 mb-1">
                                   {Array.from({ length: 5 }).map((_, i) => (
-                                    <span key={i} className={`text-sm ${i < existingReview.rating ? 'text-yellow-400' : 'text-slate-200'}`}>★</span>
+                                    <IconStar 
+                                      key={i} 
+                                      size={14} 
+                                      className={`w-3.5 h-3.5 ${i < existingReview.rating ? 'text-yellow-400 fill-yellow-400' : 'text-slate-200'}`} 
+                                      filled={i < existingReview.rating} 
+                                    />
                                   ))}
                                 </div>
                                 {existingReview.feedback_text && (
@@ -460,7 +478,9 @@ export default function StudentDashboard() {
                               <form onSubmit={handleSubmitReview} className="mt-2 bg-white p-4 rounded-xl border border-indigo-200 shadow-sm animate-in fade-in slide-in-from-top-2">
                                 <div className="flex justify-between items-center mb-3">
                                   <h4 className="font-bold text-slate-800 text-sm">Reviewing {reviewingItem.itemName}</h4>
-                                  <button type="button" onClick={() => setReviewingItem(null)} className="text-slate-400 hover:text-slate-600">✕</button>
+                                  <button type="button" onClick={() => setReviewingItem(null)} className="text-slate-400 hover:text-slate-600 p-1">
+                                    <IconX size={14} className="w-3.5 h-3.5" />
+                                  </button>
                                 </div>
                                 <div className="mb-3">
                                   <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Rating</label>
@@ -470,9 +490,13 @@ export default function StudentDashboard() {
                                         key={star}
                                         type="button"
                                         onClick={() => setReviewRating(star)}
-                                        className={`text-2xl hover:scale-110 transition-transform ${star <= reviewRating ? 'text-yellow-400' : 'text-slate-200'}`}
+                                        className="p-0.5 transition-transform hover:scale-110 focus:outline-none"
                                       >
-                                        ★
+                                        <IconStar 
+                                          size={22} 
+                                          className={`w-5.5 h-5.5 ${star <= reviewRating ? 'text-yellow-400 fill-yellow-400' : 'text-slate-200'}`} 
+                                          filled={star <= reviewRating} 
+                                        />
                                       </button>
                                     ))}
                                   </div>
@@ -554,15 +578,18 @@ export default function StudentDashboard() {
               </div>
               {isSunday ? (
                 <span className="self-start sm:self-auto px-3 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm">
-                  <span>🚫</span> Closed on Sundays
+                  <IconBan size={14} className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                  <span>Closed on Sundays</span>
                 </span>
               ) : isLunchClosedForToday ? (
                 <span className="self-start sm:self-auto px-3 py-1 bg-rose-50 text-rose-700 border border-rose-200 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm">
-                  <span>⏳</span> Lunch Ordering Closed Today
+                  <IconClock size={14} className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                  <span>Lunch Ordering Closed Today</span>
                 </span>
               ) : (
                 <span className="self-start sm:self-auto px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> Lunch Slots Open (12:30 PM – 1:40 PM)
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span>Lunch Slots Open (12:30 PM – 1:40 PM)</span>
                 </span>
               )}
             </div>
@@ -641,7 +668,7 @@ export default function StudentDashboard() {
                     {/* Sunday closure banner in cart */}
                     {isSunday && (
                       <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: '0.75rem', display: 'flex', gap: '0.625rem', alignItems: 'center' }}>
-                        <span style={{ fontSize: '1.25rem' }}>🚫</span>
+                        <IconBan size={20} className="w-5 h-5 text-amber-400 shrink-0" />
                         <div>
                           <div style={{ color: '#fbbf24', fontSize: '0.8125rem', fontWeight: 700 }}>Canteen Closed on Sundays</div>
                           <div style={{ color: '#fde68a', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders are not accepted on Sundays.</div>
@@ -652,7 +679,7 @@ export default function StudentDashboard() {
                     {/* Lunch cutoff banner in cart */}
                     {!isSunday && isLunchClosedForToday && (
                       <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '0.75rem', display: 'flex', gap: '0.625rem', alignItems: 'center' }}>
-                        <span style={{ fontSize: '1.25rem' }}>⏳</span>
+                        <IconClock size={20} className="w-5 h-5 text-rose-400 shrink-0" />
                         <div>
                           <div style={{ color: '#f87171', fontSize: '0.8125rem', fontWeight: 700 }}>Lunch Ordering Closed Today</div>
                           <div style={{ color: '#fca5a5', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders must be placed at least 30 mins before pickup (Lunch: 12:30 PM – 1:40 PM).</div>
@@ -715,7 +742,10 @@ export default function StudentDashboard() {
                     {/* Sold out warning */}
                     {cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out) && (
                       <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.15)', borderRadius: '0.75rem' }}>
-                        <p style={{ color: '#f87171', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.25rem' }}>⚠ Sold out items in your order:</p>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', marginBottom: '0.25rem' }}>
+                          <IconAlertTriangle size={14} className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                          <p style={{ color: '#f87171', fontSize: '0.75rem', fontWeight: 600, margin: 0 }}>Sold out items in your order:</p>
+                        </div>
                         <ul style={{ color: '#fca5a5', fontSize: '0.75rem' }}>
                           {cart.filter(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out).map(c => (
                             <li key={c.item.id}>• {c.item.name}</li>
@@ -850,7 +880,9 @@ export default function StudentDashboard() {
                       </span>
                     )}
                   </div>
-                  <span style={{ color: '#64748b', fontSize: '1rem', transform: cartOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.3s', display: 'inline-block' }}>▲</span>
+                  <div style={{ color: '#64748b', display: 'flex', alignItems: 'center', transition: 'transform 0.3s', transform: cartOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}>
+                    <IconChevronUp size={18} className="w-4.5 h-4.5" />
+                  </div>
                 </button>
               </div>
             </div>

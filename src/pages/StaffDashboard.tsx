@@ -3,6 +3,18 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Database } from '../types/supabase';
 import { formatPickupTime, LUNCH_SLOTS } from './StudentDashboard';
+import {
+  IconAlertTriangle,
+  IconCheckCircle,
+  IconCooking,
+  IconKey,
+  IconZap,
+  IconSearch,
+  IconKanban,
+  IconGrid,
+  IconPackage,
+  IconX
+} from '../components/Icons';
 
 type Order = Database['public']['Tables']['orders']['Row'];
 type OrderItem = Database['public']['Tables']['order_items']['Row'];
@@ -242,7 +254,7 @@ export default function StaffDashboard() {
     const success = await handleVerifyOtp(matchingOrder.id, cleanOtp);
     if (success) {
       setQuickOtpToast({
-        message: `✅ Order #${matchingOrder.order_number} for ${matchingOrder.profiles?.name || 'Student'} verified and collected!`,
+        message: `Order #${matchingOrder.order_number} for ${matchingOrder.profiles?.name || 'Student'} verified and collected!`,
         isError: false
       });
       setQuickOtpInput('');
@@ -368,7 +380,8 @@ export default function StaffDashboard() {
           <div className="bg-amber-50 border border-amber-200 text-amber-900 px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between gap-2 mb-3">
             <div className="flex items-center gap-1.5 min-w-0">
               <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0"></span>
-              <span className="truncate">⚠️ <strong>No-Show:</strong> {overdueInfo.minutesOverdue}m overdue</span>
+              <IconAlertTriangle size={14} className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+              <span className="truncate"><strong>No-Show:</strong> {overdueInfo.minutesOverdue}m overdue</span>
             </div>
             <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-bold shrink-0">&gt;10m</span>
           </div>
@@ -443,18 +456,20 @@ export default function StaffDashboard() {
           {order.status === 'ACCEPTED' && (
             <button 
               onClick={() => updateOrderStatus(order.id, 'PREPARING')} 
-              className="w-full bg-orange-500 hover:bg-orange-600 text-white py-1.5 rounded-xl text-xs font-bold transition-colors shadow-sm"
+              className="w-full bg-orange-500 hover:bg-orange-600 text-white py-1.5 rounded-xl text-xs font-bold transition-colors shadow-sm flex items-center justify-center gap-1.5"
             >
-              🍳 Start Preparing
+              <IconCooking size={14} className="w-3.5 h-3.5" />
+              <span>Start Preparing</span>
             </button>
           )}
 
           {order.status === 'PREPARING' && (
             <button 
               onClick={() => updateOrderStatus(order.id, 'READY')} 
-              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-1.5 rounded-xl text-xs font-bold transition-colors shadow-sm"
+              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-1.5 rounded-xl text-xs font-bold transition-colors shadow-sm flex items-center justify-center gap-1.5"
             >
-              ✅ Mark Ready for Pickup
+              <IconCheckCircle size={14} className="w-3.5 h-3.5" />
+              <span>Mark Ready for Pickup</span>
             </button>
           )}
 
@@ -479,9 +494,9 @@ export default function StaffDashboard() {
                   </button>
                   <button 
                     onClick={() => { setSelectedOrderForOtp(null); setOtpInput(''); }} 
-                    className="px-2.5 py-1.5 bg-slate-100 text-slate-500 rounded-xl hover:bg-slate-200 text-xs"
+                    className="px-2.5 py-1.5 bg-slate-100 text-slate-500 rounded-xl hover:bg-slate-200 text-xs flex items-center justify-center"
                   >
-                    ✕
+                    <IconX size={13} className="w-3.5 h-3.5" />
                   </button>
                 </div>
               ) : (
@@ -489,7 +504,8 @@ export default function StaffDashboard() {
                   onClick={() => setSelectedOrderForOtp(order.id)} 
                   className="w-full bg-slate-900 hover:bg-slate-800 text-white py-1.5 rounded-xl text-xs font-bold transition-colors shadow-sm flex items-center justify-center gap-1.5"
                 >
-                  <span>🔑</span> Verify OTP
+                  <IconKey size={14} className="w-3.5 h-3.5 text-indigo-200" />
+                  <span>Verify OTP</span>
                 </button>
               )}
 
@@ -540,9 +556,10 @@ export default function StaffDashboard() {
               <button
                 type="submit"
                 disabled={quickOtpInput.trim().length !== 6 || quickOtpLoading}
-                className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1 shadow-sm shrink-0"
+                className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm shrink-0"
               >
-                {quickOtpLoading ? 'Verifying...' : '⚡ Collect'}
+                <IconZap size={14} className="w-3.5 h-3.5" />
+                <span>{quickOtpLoading ? 'Verifying...' : 'Collect'}</span>
               </button>
             </form>
 
@@ -563,7 +580,9 @@ export default function StaffDashboard() {
               : 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-200'
           }`}>
             <span>{quickOtpToast.message}</span>
-            <button onClick={() => setQuickOtpToast(null)} className="text-slate-400 hover:text-white">✕</button>
+            <button onClick={() => setQuickOtpToast(null)} className="text-slate-400 hover:text-white p-1">
+              <IconX size={14} className="w-3.5 h-3.5" />
+            </button>
           </div>
         )}
 
@@ -594,8 +613,9 @@ export default function StaffDashboard() {
             <div className="text-2xl font-black text-emerald-400 mt-0.5 flex items-center gap-2">
               <span>{orders.filter(o => o.status === 'READY').length}</span>
               {totalOverdueCount > 0 && (
-                <span className="text-xs bg-amber-500 text-slate-900 font-bold px-2 py-0.5 rounded-full">
-                  ⚠️ {totalOverdueCount} No-Show
+                <span className="text-xs bg-amber-500 text-slate-900 font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                  <IconAlertTriangle size={12} className="w-3 h-3 text-slate-900 shrink-0" />
+                  <span>{totalOverdueCount} No-Show</span>
                 </span>
               )}
             </div>
@@ -608,7 +628,7 @@ export default function StaffDashboard() {
         {/* Top Controls: Search Bar & View Mode Switcher */}
         <div className="flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3">
           <div className="relative flex-1">
-            <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm">🔍</span>
+            <IconSearch size={16} className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               placeholder="Search by Order #, Student Name, Student ID, or OTP..."
@@ -619,9 +639,10 @@ export default function StaffDashboard() {
             {searchQuery && (
               <button 
                 onClick={() => setSearchQuery('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-600"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1"
               >
-                ✕ Clear
+                <IconX size={12} className="w-3 h-3" />
+                <span>Clear</span>
               </button>
             )}
           </div>
@@ -635,29 +656,32 @@ export default function StaffDashboard() {
                   : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
               }`}
             >
-              <span>🍳</span> Kitchen Batch Prep
+              <IconCooking size={14} className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+              <span>Kitchen Batch Prep</span>
             </button>
 
             <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
               <button
                 onClick={() => setViewMode('KANBAN')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
                   viewMode === 'KANBAN' 
                     ? 'bg-white text-indigo-600 shadow-sm' 
                     : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
-                📋 Kanban
+                <IconKanban size={13} className="w-3.5 h-3.5" />
+                <span>Kanban</span>
               </button>
               <button
                 onClick={() => setViewMode('GRID')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
                   viewMode === 'GRID' 
                     ? 'bg-white text-indigo-600 shadow-sm' 
                     : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
-                🔲 Grid
+                <IconGrid size={13} className="w-3.5 h-3.5" />
+                <span>Grid</span>
               </button>
             </div>
           </div>
@@ -715,7 +739,7 @@ export default function StaffDashboard() {
         <div className="bg-gradient-to-r from-slate-900 to-indigo-950 rounded-2xl p-4 sm:p-5 text-white shadow-sm border border-indigo-900/40">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-3">
             <div className="flex items-center gap-2">
-              <span className="text-lg">🍳</span>
+              <IconCooking size={20} className="w-5 h-5 text-indigo-300 shrink-0" />
               <h3 className="font-extrabold text-sm sm:text-base text-white">
                 Live Kitchen Prep Summary {selectedSlot !== 'ALL' ? `for ${formatPickupTime(selectedSlot)}` : '(All Filtered Orders)'}
               </h3>
@@ -753,7 +777,7 @@ export default function StaffDashboard() {
         </div>
       ) : filteredOrders.length === 0 ? (
         <div className="bg-white border border-slate-200 rounded-[2rem] p-12 text-center text-slate-500 shadow-sm space-y-2">
-          <div className="text-3xl">📦</div>
+          <IconPackage size={36} className="w-9 h-9 text-slate-300 mx-auto mb-2" />
           <div className="font-bold text-slate-700 text-lg">No orders found</div>
           <div className="text-sm text-slate-400">
             {searchQuery ? `No orders match "${searchQuery}"` : selectedSlot !== 'ALL' ? `No orders for the ${formatPickupTime(selectedSlot)} slot.` : 'No active orders in the queue.'}
@@ -785,9 +809,10 @@ export default function StaffDashboard() {
               {placedOrders.length > 1 && (
                 <button
                   onClick={() => bulkAcceptOrders(placedOrders.map(o => o.id))}
-                  className="text-[11px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2 py-1 rounded-lg transition-colors"
+                  className="text-[11px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2 py-1 rounded-lg transition-colors flex items-center gap-1"
                 >
-                  ⚡ Accept All ({placedOrders.length})
+                  <IconZap size={12} className="w-3 h-3 text-indigo-600" />
+                  <span>Accept All ({placedOrders.length})</span>
                 </button>
               )}
             </div>
@@ -837,8 +862,9 @@ export default function StaffDashboard() {
                 </span>
               </div>
               {readyOrders.some(o => getOrderOverdueInfo(o).isOverdue) && (
-                <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200 animate-pulse">
-                  ⚠️ No-Show Alerts
+                <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200 animate-pulse flex items-center gap-1">
+                  <IconAlertTriangle size={11} className="w-3 h-3 text-amber-700 shrink-0" />
+                  <span>No-Show Alerts</span>
                 </span>
               )}
             </div>

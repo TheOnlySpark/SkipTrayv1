@@ -5,6 +5,12 @@ import { supabase } from '../lib/supabase';
 import { Database } from '../types/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatPickupTime } from './StudentDashboard';
+import {
+  IconAlertTriangle,
+  IconBan,
+  IconStar,
+  IconSparkles
+} from '../components/Icons';
 
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 type FoodType = Database['public']['Enums']['food_type'];
@@ -476,7 +482,12 @@ export default function AdminDashboard() {
                   </div>
                   <div className="flex items-center gap-1">
                     {Array.from({ length: 5 }).map((_, i) => (
-                      <span key={i} className={`text-lg ${i < review.rating ? 'text-yellow-400' : 'text-slate-200'}`}>★</span>
+                      <IconStar 
+                        key={i} 
+                        size={16} 
+                        className={`w-4 h-4 ${i < review.rating ? 'text-yellow-400 fill-yellow-400' : 'text-slate-200'}`} 
+                        filled={i < review.rating} 
+                      />
                     ))}
                   </div>
                 </div>
@@ -602,7 +613,8 @@ export default function AdminDashboard() {
         <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 mb-6">
           <div>
             <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-              <span>⚠️</span> Student No-Show Penalties & Suspensions
+              <IconAlertTriangle size={20} className="w-5 h-5 text-amber-600 shrink-0" />
+              <span>Student No-Show Penalties &amp; Suspensions</span>
             </h2>
             <p className="text-xs text-slate-500 mt-1">
               Students receive 1 strike per missed pickup. 2 strikes trigger an automatic 3-day account deactivation.
@@ -616,8 +628,9 @@ export default function AdminDashboard() {
         {penaltiesLoading ? (
           <div className="text-slate-500 text-sm py-4">Loading student penalty records...</div>
         ) : penalizedStudents.length === 0 ? (
-          <div className="bg-slate-50 border border-slate-100 rounded-2xl p-6 text-center text-slate-500 text-sm">
-            🎉 All clean! No students currently have active strikes or suspensions.
+          <div className="bg-slate-50 border border-slate-100 rounded-2xl p-6 text-center text-slate-500 text-sm flex items-center justify-center gap-2">
+            <IconSparkles size={18} className="w-4.5 h-4.5 text-indigo-500 shrink-0" />
+            <span>All clean! No students currently have active strikes or suspensions.</span>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -646,8 +659,9 @@ export default function AdminDashboard() {
                       <td className="py-3 px-4">
                         {isSuspended ? (
                           <div className="flex flex-col">
-                            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-red-100 text-red-700 w-fit">
-                              🚫 Suspended (3-Day Penalty)
+                            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-red-100 text-red-700 w-fit flex items-center gap-1">
+                              <IconBan size={12} className="w-3 h-3 text-red-600 shrink-0" />
+                              <span>Suspended (3-Day Penalty)</span>
                             </span>
                             <span className="text-[11px] text-slate-400 mt-0.5">
                               Until: {new Date(student.suspended_until).toLocaleDateString()} {new Date(student.suspended_until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
