@@ -10,8 +10,11 @@ import {
   IconClock, 
   IconStar, 
   IconX, 
-  IconChevronUp 
+  IconChevronUp,
+  IconQrCode,
+  IconMaximize
 } from '../components/Icons';
+import { QRCodeSVG } from '../components/QRCode';
 
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 type Order = Database['public']['Tables']['orders']['Row'];
@@ -53,6 +56,7 @@ export default function StudentDashboard() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [cartOpen, setCartOpen] = useState(false);
+  const [showQrModal, setShowQrModal] = useState(false);
   const [currentTime, setCurrentTime] = useState(Date.now());
 
   // Periodically refresh current time every 30s to dynamically update slot cutoffs
@@ -575,12 +579,41 @@ export default function StudentDashboard() {
             {activeOrder.status}
           </div>
           
-          <div className="mt-8 bg-white/10 p-6 rounded-2xl border border-white/20 text-center w-full max-w-xs">
-            <p className="text-indigo-200 text-sm font-semibold uppercase tracking-widest mb-2">Pickup OTP</p>
-            <p className="text-5xl font-mono font-bold tracking-[0.2em]">{activeOrder.otp_code}</p>
+          {/* Dual Verification: Dynamic QR Code + 6-Digit OTP Backup */}
+          <div className="mt-6 flex flex-col items-center gap-3 w-full max-w-xs">
+            {/* High-Contrast QR Code Card */}
+            <div 
+              onClick={() => setShowQrModal(true)}
+              className="bg-white p-4 rounded-3xl shadow-xl cursor-pointer hover:scale-105 transition-all relative group border-4 border-white/20"
+              title="Click to Enlarge QR Code"
+            >
+              <QRCodeSVG 
+                value={`SKIPTRAY:${activeOrder.id}:${activeOrder.otp_code}`} 
+                size={180}
+                className="rounded-xl"
+              />
+              <div className="absolute inset-0 bg-indigo-950/70 backdrop-blur-xs rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white gap-1.5 p-2">
+                <IconMaximize size={24} className="w-6 h-6 text-white" />
+                <span className="text-[11px] font-extrabold uppercase tracking-wider">Tap to Enlarge</span>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setShowQrModal(true)}
+              className="text-xs text-indigo-100 hover:text-white flex items-center gap-1.5 font-medium transition-colors"
+            >
+              <IconQrCode size={14} className="w-3.5 h-3.5" />
+              <span>Show QR at counter for instant scan</span>
+            </button>
+
+            {/* Manual 6-Digit OTP Box (Fallback / Backup) */}
+            <div className="bg-white/10 px-4 py-2.5 rounded-2xl border border-white/20 text-center w-full shadow-inner mt-1">
+              <p className="text-indigo-200 text-[10px] font-bold uppercase tracking-widest mb-0.5">Or Give 6-Digit OTP</p>
+              <p className="text-3xl font-mono font-black tracking-[0.25em] text-white">{activeOrder.otp_code}</p>
+            </div>
           </div>
           
-          <p className="mt-6 text-indigo-200">Requested Pickup Time: <span className="font-semibold text-white">{formatPickupTime(activeOrder.pickup_time)} (Lunch)</span></p>
+          <p className="mt-5 text-xs text-indigo-200">Requested Pickup Time: <span className="font-semibold text-white">{formatPickupTime(activeOrder.pickup_time)} (Lunch)</span></p>
           </div>
         </div>
       ) : (
@@ -926,6 +959,44 @@ export default function StudentDashboard() {
             </div>
           </div>
         </>
+      )}
+
+      {/* Fullscreen Enlarge QR Modal */}
+      {showQrModal && activeOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-in fade-in">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-sm w-full text-center flex flex-col items-center gap-4 shadow-2xl relative">
+            <button 
+              onClick={() => setShowQrModal(false)}
+              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-700 rounded-full hover:bg-slate-100 transition-colors"
+            >
+              <IconX size={20} className="w-5 h-5" />
+            </button>
+
+            <div>
+              <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full uppercase tracking-wider">
+                Pickup Pass
+              </span>
+              <h3 className="text-2xl font-extrabold text-slate-900 mt-2">Order #{activeOrder.order_number}</h3>
+              <p className="text-xs text-slate-500 font-mono mt-0.5">ID: {activeOrder.id.split('-')[0].toUpperCase()}</p>
+            </div>
+
+            <div className="p-3 bg-slate-50 border-2 border-slate-100 rounded-2xl shadow-inner">
+              <QRCodeSVG 
+                value={`SKIPTRAY:${activeOrder.id}:${activeOrder.otp_code}`} 
+                size={230}
+              />
+            </div>
+
+            <div className="w-full bg-slate-900 text-white py-3 rounded-2xl">
+              <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Pickup OTP</div>
+              <div className="text-3xl font-mono font-extrabold tracking-[0.2em]">{activeOrder.otp_code}</div>
+            </div>
+
+            <p className="text-xs text-slate-400 font-medium">
+              Requested Slot: <strong className="text-slate-700">{formatPickupTime(activeOrder.pickup_time)} (Lunch)</strong>
+            </p>
+          </div>
+        </div>
       )}
     </div>
   );

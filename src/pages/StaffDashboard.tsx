@@ -13,8 +13,10 @@ import {
   IconKanban,
   IconGrid,
   IconPackage,
-  IconX
+  IconX,
+  IconCamera
 } from '../components/Icons';
+import { QRScannerModal } from '../components/QRScannerModal';
 
 type Order = Database['public']['Tables']['orders']['Row'];
 type OrderItem = Database['public']['Tables']['order_items']['Row'];
@@ -39,10 +41,11 @@ export default function StaffDashboard() {
   const [viewMode, setViewMode] = useState<'KANBAN' | 'GRID'>('KANBAN');
   const [showBatchSummary, setShowBatchSummary] = useState<boolean>(true);
 
-  // Quick OTP Verification State
+  // Quick OTP & QR Scanner Verification State
   const [quickOtpInput, setQuickOtpInput] = useState('');
   const [quickOtpLoading, setQuickOtpLoading] = useState(false);
   const [quickOtpToast, setQuickOtpToast] = useState<{ message: string; isError: boolean } | null>(null);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
 
   // Card-level OTP Verification state
   const [selectedOrderForOtp, setSelectedOrderForOtp] = useState<string | null>(null);
@@ -270,6 +273,52 @@ export default function StaffDashboard() {
     setTimeout(() => {
       setQuickOtpToast(null);
     }, 5000);
+  };
+
+  // QR Code Scanner Payload Handler
+  const handleQrScanPayload = async (payload: string): Promise<boolean> => {
+    let orderIdToVerify: string | null = null;
+    let otpCodeToVerify: string = '';
+
+    const cleanPayload = payload.trim();
+    if (cleanPayload.startsWith('SKIPTRAY:')) {
+      const parts = cleanPayload.split(':');
+      if (parts.length >= 3) {
+        orderIdToVerify = parts[1];
+        otpCodeToVerify = parts[2];
+      }
+    } else if (cleanPayload.length === 6 && /^\d+$/.test(cleanPayload)) {
+      // 6-digit OTP code scanned directly
+      otpCodeToVerify = cleanPayload;
+      const match = orders.find(o => o.otp_code === cleanPayload);
+      if (match) orderIdToVerify = match.id;
+    }
+
+    if (!orderIdToVerify) {
+      setQuickOtpToast({
+        message: `Invalid or unrecognized QR code format: "${cleanPayload}".`,
+        isError: true
+      });
+      return false;
+    }
+
+    const matchingOrder = orders.find(o => o.id === orderIdToVerify);
+    const success = await handleVerifyOtp(orderIdToVerify, otpCodeToVerify);
+    if (success) {
+      const studentName = matchingOrder?.profiles?.name || 'Student';
+      const orderNum = matchingOrder?.order_number ? `#${matchingOrder.order_number}` : '';
+      setQuickOtpToast({
+        message: `QR Verified! Order ${orderNum} for ${studentName} collected successfully!`,
+        isError: false
+      });
+      return true;
+    } else {
+      setQuickOtpToast({
+        message: `QR verification failed for order ${matchingOrder ? '#' + matchingOrder.order_number : ''}.`,
+        isError: true
+      });
+      return false;
+    }
   };
 
   const handleMarkNoShow = async (order: OrderWithDetails) => {
@@ -542,8 +591,18 @@ export default function StaffDashboard() {
             </h1>
           </div>
 
-          {/* Quick Counter Pickup by OTP */}
+          {/* Quick Counter Pickup by OTP / QR Scan */}
           <div className="w-full lg:w-auto flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setIsScannerOpen(true)}
+              className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-sm shrink-0 active:scale-95 border border-indigo-400/30"
+              title="Open camera to scan student's QR code"
+            >
+              <IconCamera size={16} className="w-4 h-4" />
+              <span>Scan QR</span>
+            </button>
+
             <form onSubmit={handleQuickOtpSubmit} className="flex gap-2 bg-slate-800/90 p-1.5 rounded-2xl border border-slate-700 shadow-inner">
               <input
                 type="text"
@@ -930,6 +989,13 @@ export default function StaffDashboard() {
           ))}
         </div>
       </div>
+
+      {/* Live Camera QR Scanner Modal */}
+      <QRScannerModal
+        isOpen={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        onScanSuccess={handleQrScanPayload}
+      />
     </div>
   );
 }
