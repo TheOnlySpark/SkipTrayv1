@@ -13,6 +13,8 @@ import Dashboard from './pages/Dashboard';
 import StudentDashboard from './pages/StudentDashboard';
 import StaffDashboard from './pages/StaffDashboard';
 import AdminDashboard from './pages/AdminDashboard';
+import PrivacyPolicy from './pages/PrivacyPolicy';
+import TermsOfService from './pages/TermsOfService';
 
 function NavigationHeader() {
   const { user } = useAuth();
@@ -105,6 +107,8 @@ export default function App() {
               <main className="w-full flex-grow flex flex-col items-center justify-center">
                 <Routes>
                   <Route path="/" element={<Landing />} />
+                  <Route path="/privacy" element={<PrivacyPolicy />} />
+                  <Route path="/terms" element={<TermsOfService />} />
                   <Route path="/login" element={<Login />} />
                   <Route path="/dashboard" element={
                     <ProtectedRoute>
@@ -131,6 +135,10 @@ export default function App() {
 
               <footer className="w-full max-w-4xl mt-12 py-4 border-t border-slate-200 flex justify-between items-center text-[10px] text-slate-400 uppercase tracking-widest">
                 <span>&copy; 2026 SkipTray</span>
+                <div className="flex gap-4">
+                  <Link to="/privacy" className="hover:text-slate-600 transition-colors">Privacy</Link>
+                  <Link to="/terms" className="hover:text-slate-600 transition-colors">Terms</Link>
+                </div>
               </footer>
             </div>
           </Router>
