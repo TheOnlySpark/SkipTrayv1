@@ -61,6 +61,7 @@ export default function StudentDashboard() {
   const [cartOpen, setCartOpen] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
   const [currentTime, setCurrentTime] = useState(Date.now());
+  const [testMode, setTestMode] = useState(false);
 
   // Periodically refresh current time every 30s to dynamically update slot cutoffs
   useEffect(() => {
@@ -75,16 +76,19 @@ export default function StudentDashboard() {
     return () => clearInterval(ticker);
   }, []);
 
-  const isSunday = new Date(currentTime).getDay() === 0;
+  const isSunday = testMode ? false : new Date(currentTime).getDay() === 0;
 
   // Check if current time is before 9:30 AM opening time
   const nowObj = new Date(currentTime);
   const currentHour = nowObj.getHours();
   const currentMinute = nowObj.getMinutes();
-  const isBeforeOpeningTime = !isSunday && (currentHour < 9 || (currentHour === 9 && currentMinute < 30));
+  const isBeforeOpeningTime = testMode ? false : (!isSunday && (currentHour < 9 || (currentHour === 9 && currentMinute < 30)));
 
   // Helper to determine slot availability (must be placed >= 30 mins before pickup slot today)
   const getSlotAvailability = (slotValue: string) => {
+    if (testMode) {
+      return { isAvailable: true, diffMinutes: 60, reason: '' };
+    }
     const now = new Date(currentTime);
     const [hours, minutes] = slotValue.split(':').map(Number);
     const slotDate = new Date(now);
@@ -444,6 +448,9 @@ export default function StudentDashboard() {
           <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto items-stretch sm:items-center">
             <button onClick={() => setShowHistory(!showHistory)} className="flex-1 text-center text-sm font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 px-4 py-3 sm:py-2 rounded-xl border border-indigo-100 transition-colors">
               {showHistory ? 'Back to Order' : 'Order History'}
+            </button>
+            <button onClick={() => setTestMode(!testMode)} className={`flex-1 text-center text-sm font-semibold px-4 py-3 sm:py-2 rounded-xl border transition-colors ${testMode ? 'bg-amber-100 text-amber-700 border-amber-200 hover:bg-amber-200' : 'bg-slate-50 text-slate-500 hover:text-slate-800 border-slate-200'}`}>
+              {testMode ? 'Test Mode: ON' : 'Test Mode: OFF'}
             </button>
             <button onClick={signOut} className="flex-1 text-center text-sm font-semibold text-slate-500 hover:text-slate-800 bg-slate-50 px-4 py-3 sm:py-2 rounded-xl border border-slate-200 transition-colors">
               Sign Out

@@ -19,3 +19,4 @@ coverage/
 .agents/
 skills-lock.json
 metadata.json
+DESIGN_PHILOSOPHY.md
