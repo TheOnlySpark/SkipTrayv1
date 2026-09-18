@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { BrowserRouter as Router, Routes, Route, Link, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { useState } from 'react';
-import { Menu, X } from 'lucide-react';
+import { Menu, X, LayoutDashboard, LogOut } from 'lucide-react';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import StudentDashboard from './pages/StudentDashboard';
@@ -19,8 +19,10 @@ import TermsOfService from './pages/TermsOfService';
 function NavigationHeader() {
   const { user } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
+  const location = useLocation();
+  const isLoginPage = location.pathname === '/login';
   return (
-    <header className="flex flex-col w-full max-w-4xl mb-8 px-4 relative z-50">
+    <header className="flex flex-col w-full max-w-4xl mb-8 px-4 relative z-40">
       <div className="flex items-center justify-between w-full">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
@@ -31,14 +33,9 @@ function NavigationHeader() {
 
         {/* Desktop Nav */}
         <div className="hidden md:flex gap-4 items-center">
-          {!user && (
+          {!user && !isLoginPage && (
             <Link to="/login" className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition">
               Login
-            </Link>
-          )}
-          {user && (
-            <Link to="/dashboard" className="px-4 py-2 bg-slate-100 text-slate-700 text-sm font-semibold rounded-lg hover:bg-slate-200 transition">
-              Dashboard
             </Link>
           )}
         </div>
@@ -52,15 +49,12 @@ function NavigationHeader() {
         </button>
       </div>
 
-      {/* Mobile Nav Dropdown */}
+        {/* Mobile Nav Dropdown */}
       {isOpen && (
         <div className="md:hidden absolute top-full left-4 right-4 mt-2 p-4 bg-white rounded-2xl shadow-xl border border-slate-100 flex flex-col gap-2 z-50">
           <Link to="/" onClick={() => setIsOpen(false)} className="px-4 py-3 text-slate-700 font-medium hover:bg-slate-50 rounded-xl">Home</Link>
-          {!user && (
+          {!user && !isLoginPage && (
             <Link to="/login" onClick={() => setIsOpen(false)} className="px-4 py-3 bg-indigo-50 text-indigo-700 font-semibold rounded-xl text-center mt-2">Login</Link>
-          )}
-          {user && (
-            <Link to="/dashboard" onClick={() => setIsOpen(false)} className="px-4 py-3 bg-indigo-50 text-indigo-700 font-semibold rounded-xl text-center mt-2">Dashboard</Link>
           )}
         </div>
       )}
@@ -95,13 +89,51 @@ import { ModalDialogProvider } from './contexts/ModalDialogContext';
 
 const queryClient = new QueryClient();
 
+function TopStickyHeader() {
+  const { user, signOut } = useAuth();
+  const location = useLocation();
+  const isLoginPage = location.pathname === '/login';
+
+  return (
+    <div className={`fixed top-0 left-0 w-full z-[100] bg-white border-b border-slate-200 shadow-sm py-2 px-3 md:py-3 md:px-6 flex items-center ${isLoginPage ? 'justify-center' : 'justify-between'}`}>
+      <div className="flex items-center gap-2 md:gap-4">
+        <span className="text-slate-500 font-semibold text-[10px] md:text-xs uppercase tracking-wider hidden sm:inline">A Collaborative Project By</span>
+        <img src="/assets/vistas-logo.png" alt="VISTAS" className="h-7 md:h-10 object-contain" />
+        <span className="text-slate-400 font-medium text-[10px] md:text-sm">x</span>
+        <img src="/assets/mh-logo.png" alt="MH Cognition" className="h-5 md:h-7 object-contain" />
+      </div>
+      {!isLoginPage && user && (
+        <div className="flex items-center gap-1.5 md:gap-3">
+          <Link 
+            to="/dashboard"
+            className="px-2.5 py-1.5 md:px-4 md:py-2 bg-indigo-50 text-indigo-700 text-xs md:text-sm font-semibold rounded-lg hover:bg-indigo-100 transition flex items-center gap-1.5"
+            title="Dashboard"
+          >
+            <LayoutDashboard size={16} className="md:w-4 md:h-4" />
+            <span className="hidden sm:inline">Dashboard</span>
+          </Link>
+          <button 
+            onClick={signOut}
+            className="px-2.5 py-1.5 md:px-4 md:py-2 bg-slate-100 text-slate-700 text-xs md:text-sm font-semibold rounded-lg hover:bg-red-50 hover:text-red-600 transition flex items-center gap-1.5"
+            title="Sign out"
+          >
+            <LogOut size={16} className="md:w-4 md:h-4" />
+            <span className="hidden sm:inline">Sign out</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <ModalDialogProvider>
           <Router>
-            <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center font-sans text-slate-900 p-4 pt-6 md:p-6 md:pt-12">
+            <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center font-sans text-slate-900 p-4 pt-20 md:p-6 md:pt-24">
+              <TopStickyHeader />
               <NavigationHeader />
 
               <main className="w-full flex-grow flex flex-col items-center justify-center">
@@ -133,8 +165,10 @@ export default function App() {
                 </Routes>
               </main>
 
-              <footer className="w-full max-w-4xl mt-12 py-4 border-t border-slate-200 flex justify-between items-center text-[10px] text-slate-400 uppercase tracking-widest">
-                <span>&copy; 2026 SkipTray</span>
+              <footer className="w-full max-w-4xl mt-12 py-6 border-t border-slate-200 flex flex-col md:flex-row justify-between items-center gap-4 text-[10px] text-slate-400 uppercase tracking-widest">
+                <div className="flex items-center gap-4">
+                  <span>&copy; 2026 SkipTray</span>
+                </div>
                 <div className="flex gap-4">
                   <Link to="/privacy" className="hover:text-slate-600 transition-colors">Privacy</Link>
                   <Link to="/terms" className="hover:text-slate-600 transition-colors">Terms</Link>

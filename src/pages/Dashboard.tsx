@@ -19,12 +19,6 @@ export default function Dashboard() {
       <div className="text-xl font-semibold text-slate-700">
         Account configuration error. Please contact an administrator.
       </div>
-      <button 
-        onClick={signOut} 
-        className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl transition-colors"
-      >
-        Sign Out
-      </button>
     </div>
   );
 }

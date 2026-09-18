@@ -445,9 +445,6 @@ export default function StudentDashboard() {
             <button onClick={() => setShowHistory(!showHistory)} className="flex-1 text-center text-sm font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 px-4 py-3 sm:py-2 rounded-xl border border-indigo-100 transition-colors">
               {showHistory ? 'Back to Order' : 'Order History'}
             </button>
-            <button onClick={signOut} className="flex-1 text-center text-sm font-semibold text-slate-500 hover:text-slate-800 bg-slate-50 px-4 py-3 sm:py-2 rounded-xl border border-slate-200 transition-colors">
-              Sign Out
-            </button>
           </div>
         </div>
       </div>

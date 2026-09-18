@@ -313,9 +313,6 @@ export default function AdminDashboard() {
             <span className="px-3 py-1 bg-indigo-500 text-indigo-100 text-xs font-bold uppercase tracking-wider rounded-full border border-indigo-400">Admin Console</span>
             <h1 className="text-3xl font-extrabold text-white mt-4 leading-tight">Welcome, {profile?.name || 'Admin'}</h1>
           </div>
-          <button onClick={signOut} className="text-sm font-semibold text-indigo-100 hover:text-white bg-indigo-700 px-4 py-2 rounded-xl border border-indigo-500 transition-colors">
-            Sign Out
-          </button>
         </div>
       </div>
 

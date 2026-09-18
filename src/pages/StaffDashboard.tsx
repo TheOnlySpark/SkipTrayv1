@@ -686,13 +686,6 @@ export default function StaffDashboard() {
                 <span>{quickOtpLoading ? 'Verifying...' : 'Collect'}</span>
               </button>
             </form>
-
-            <button 
-              onClick={signOut} 
-              className="text-xs font-semibold text-slate-400 hover:text-white bg-slate-800/80 px-3.5 py-2.5 rounded-xl border border-slate-700 transition-colors shrink-0"
-            >
-              Sign Out
-            </button>
           </div>
         </div>
 
