@@ -100,7 +100,7 @@ function TopStickyHeader() {
         <span className="text-slate-500 font-semibold text-[10px] md:text-xs uppercase tracking-wider hidden sm:inline">A Collaborative Project By</span>
         <img src="/assets/vistas-logo.png" alt="VISTAS" className="h-7 md:h-10 object-contain" />
         <span className="text-slate-400 font-medium text-[10px] md:text-sm">x</span>
-        <img src="/assets/mh-logo.png" alt="MH Cognition" className="h-6 md:h-9 object-contain" />
+        <img src="/assets/mh-logo.png" alt="MH Cognition" className="h-5 md:h-7 object-contain" />
       </div>
       {!isLoginPage && user && (
         <div className="flex items-center gap-1.5 md:gap-3">
