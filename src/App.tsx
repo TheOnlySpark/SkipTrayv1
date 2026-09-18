@@ -91,15 +91,18 @@ const queryClient = new QueryClient();
 
 function TopStickyHeader() {
   const { user, signOut } = useAuth();
+  const location = useLocation();
+  const isLoginPage = location.pathname === '/login';
+
   return (
-    <div className="fixed top-0 left-0 w-full z-[100] bg-white border-b border-slate-200 shadow-sm py-2 px-3 md:py-3 md:px-6 flex items-center justify-between">
+    <div className={`fixed top-0 left-0 w-full z-[100] bg-white border-b border-slate-200 shadow-sm py-2 px-3 md:py-3 md:px-6 flex items-center ${isLoginPage ? 'justify-center' : 'justify-between'}`}>
       <div className="flex items-center gap-2 md:gap-4">
         <span className="text-slate-500 font-semibold text-[10px] md:text-xs uppercase tracking-wider hidden sm:inline">A Collaborative Project By</span>
         <img src="/assets/vistas-logo.png" alt="VISTAS" className="h-7 md:h-10 object-contain" />
         <span className="text-slate-400 font-medium text-[10px] md:text-sm">x</span>
         <img src="/assets/mh-logo.png" alt="MH Cognition" className="h-6 md:h-9 object-contain" />
       </div>
-      {user && (
+      {!isLoginPage && user && (
         <div className="flex items-center gap-1.5 md:gap-3">
           <Link 
             to="/dashboard"
