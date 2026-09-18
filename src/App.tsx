@@ -7,7 +7,7 @@ import { BrowserRouter as Router, Routes, Route, Link, Navigate, useLocation } f
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { useState } from 'react';
-import { Menu, X } from 'lucide-react';
+import { Menu, X, LayoutDashboard, LogOut } from 'lucide-react';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import StudentDashboard from './pages/StudentDashboard';
@@ -92,26 +92,30 @@ const queryClient = new QueryClient();
 function TopStickyHeader() {
   const { user, signOut } = useAuth();
   return (
-    <div className="fixed top-0 left-0 w-full z-[100] bg-white border-b border-slate-200 shadow-sm py-3 px-4 md:px-6 flex items-center justify-between">
-      <div className="flex items-center gap-3 md:gap-4">
+    <div className="fixed top-0 left-0 w-full z-[100] bg-white border-b border-slate-200 shadow-sm py-2 px-3 md:py-3 md:px-6 flex items-center justify-between">
+      <div className="flex items-center gap-2 md:gap-4">
         <span className="text-slate-500 font-semibold text-[10px] md:text-xs uppercase tracking-wider hidden sm:inline">A Collaborative Project By</span>
-        <img src="/assets/vistas-logo.png" alt="VISTAS" className="h-7 md:h-9 object-contain" />
-        <span className="text-slate-400 font-medium text-xs md:text-sm">x</span>
-        <img src="/assets/mh-logo.png" alt="MH Cognition" className="h-6 md:h-8 object-contain" />
+        <img src="/assets/vistas-logo.png" alt="VISTAS" className="h-5 md:h-9 object-contain" />
+        <span className="text-slate-400 font-medium text-[10px] md:text-sm">x</span>
+        <img src="/assets/mh-logo.png" alt="MH Cognition" className="h-4 md:h-8 object-contain" />
       </div>
       {user && (
-        <div className="flex items-center gap-2 md:gap-3">
+        <div className="flex items-center gap-1.5 md:gap-3">
           <Link 
             to="/dashboard"
-            className="px-4 py-2 bg-indigo-50 text-indigo-700 text-xs md:text-sm font-semibold rounded-lg hover:bg-indigo-100 transition"
+            className="px-2.5 py-1.5 md:px-4 md:py-2 bg-indigo-50 text-indigo-700 text-xs md:text-sm font-semibold rounded-lg hover:bg-indigo-100 transition flex items-center gap-1.5"
+            title="Dashboard"
           >
-            Dashboard
+            <LayoutDashboard size={16} className="md:w-4 md:h-4" />
+            <span className="hidden sm:inline">Dashboard</span>
           </Link>
           <button 
             onClick={signOut}
-            className="px-4 py-2 bg-slate-100 text-slate-700 text-xs md:text-sm font-semibold rounded-lg hover:bg-red-50 hover:text-red-600 transition"
+            className="px-2.5 py-1.5 md:px-4 md:py-2 bg-slate-100 text-slate-700 text-xs md:text-sm font-semibold rounded-lg hover:bg-red-50 hover:text-red-600 transition flex items-center gap-1.5"
+            title="Sign out"
           >
-            Sign out
+            <LogOut size={16} className="md:w-4 md:h-4" />
+            <span className="hidden sm:inline">Sign out</span>
           </button>
         </div>
       )}
