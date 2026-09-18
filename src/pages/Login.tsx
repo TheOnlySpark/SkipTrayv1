@@ -219,10 +219,21 @@ export default function Login() {
                 required
               />
             </div>
+            <div className="flex items-start gap-2 pt-2 pb-2">
+              <input
+                type="checkbox"
+                id="accept-terms"
+                required
+                className="mt-0.5 accent-indigo-600 w-4 h-4 cursor-pointer shrink-0"
+              />
+              <label htmlFor="accept-terms" className="text-xs text-slate-600 leading-relaxed cursor-pointer select-none">
+                I agree to the <a href="/terms" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline font-semibold">Terms of Service</a> and <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline font-semibold">Privacy Policy</a>.
+              </label>
+            </div>
             <button
               type="submit"
               disabled={loading}
-              className="w-full px-4 py-3 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition-colors shadow-sm disabled:opacity-50 mt-4"
+              className="w-full px-4 py-3 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition-colors shadow-sm disabled:opacity-50 mt-2"
             >
               {loading ? 'Saving...' : 'Complete Profile'}
             </button>
