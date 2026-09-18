@@ -41,7 +41,7 @@ function NavigationHeader() {
         </div>
 
         {/* Mobile Toggle */}
-        <button 
+        <button
           className="md:hidden p-2 text-slate-600"
           onClick={() => setIsOpen(!isOpen)}
         >
@@ -49,7 +49,7 @@ function NavigationHeader() {
         </button>
       </div>
 
-        {/* Mobile Nav Dropdown */}
+      {/* Mobile Nav Dropdown */}
       {isOpen && (
         <div className="md:hidden absolute top-full left-4 right-4 mt-2 p-4 bg-white rounded-2xl shadow-xl border border-slate-100 flex flex-col gap-2 z-50">
           <Link to="/" onClick={() => setIsOpen(false)} className="px-4 py-3 text-slate-700 font-medium hover:bg-slate-50 rounded-xl">Home</Link>
@@ -104,7 +104,7 @@ function TopStickyHeader() {
       </div>
       {!isLoginPage && user && (
         <div className="flex items-center gap-1.5 md:gap-3">
-          <Link 
+          <Link
             to="/dashboard"
             className="px-2.5 py-1.5 md:px-4 md:py-2 bg-indigo-50 text-indigo-700 text-xs md:text-sm font-semibold rounded-lg hover:bg-indigo-100 transition flex items-center gap-1.5"
             title="Dashboard"
@@ -112,7 +112,7 @@ function TopStickyHeader() {
             <LayoutDashboard size={16} className="md:w-4 md:h-4" />
             <span className="hidden sm:inline">Dashboard</span>
           </Link>
-          <button 
+          <button
             onClick={signOut}
             className="px-2.5 py-1.5 md:px-4 md:py-2 bg-slate-100 text-slate-700 text-xs md:text-sm font-semibold rounded-lg hover:bg-red-50 hover:text-red-600 transition flex items-center gap-1.5"
             title="Sign out"
