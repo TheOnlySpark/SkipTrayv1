@@ -95,9 +95,9 @@ function TopStickyHeader() {
     <div className="fixed top-0 left-0 w-full z-[100] bg-white border-b border-slate-200 shadow-sm py-2 px-3 md:py-3 md:px-6 flex items-center justify-between">
       <div className="flex items-center gap-2 md:gap-4">
         <span className="text-slate-500 font-semibold text-[10px] md:text-xs uppercase tracking-wider hidden sm:inline">A Collaborative Project By</span>
-        <img src="/assets/vistas-logo.png" alt="VISTAS" className="h-5 md:h-9 object-contain" />
+        <img src="/assets/vistas-logo.png" alt="VISTAS" className="h-7 md:h-10 object-contain" />
         <span className="text-slate-400 font-medium text-[10px] md:text-sm">x</span>
-        <img src="/assets/mh-logo.png" alt="MH Cognition" className="h-4 md:h-8 object-contain" />
+        <img src="/assets/mh-logo.png" alt="MH Cognition" className="h-6 md:h-9 object-contain" />
       </div>
       {user && (
         <div className="flex items-center gap-1.5 md:gap-3">
