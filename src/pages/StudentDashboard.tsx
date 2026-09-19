@@ -28,14 +28,13 @@ type PastOrder = Order & {
 };
 
 export const LUNCH_SLOTS = [
+  { value: '11:30', label: '11:30 AM' },
+  { value: '12:00', label: '12:00 PM' },
   { value: '12:30', label: '12:30 PM' },
-  { value: '12:40', label: '12:40 PM' },
-  { value: '12:50', label: '12:50 PM' },
   { value: '13:00', label: '1:00 PM' },
-  { value: '13:10', label: '1:10 PM' },
-  { value: '13:20', label: '1:20 PM' },
   { value: '13:30', label: '1:30 PM' },
-  { value: '13:40', label: '1:40 PM' },
+  { value: '14:00', label: '2:00 PM' },
+  { value: '14:30', label: '2:30 PM' },
 ];
 
 export const formatPickupTime = (timeStr?: string | null) => {
@@ -57,6 +56,7 @@ export default function StudentDashboard() {
   
   const [cart, setCart] = useState<{item: MenuItem, quantity: number}[]>([]);
   const [pickupTime, setPickupTime] = useState('');
+  const [isTakeaway, setIsTakeaway] = useState<boolean | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [cartOpen, setCartOpen] = useState(false);
@@ -260,7 +260,7 @@ export default function StudentDashboard() {
     if (isLunchClosedForToday) {
       showAlert({
         title: 'Booking Window Closed',
-        message: 'Lunch ordering for today is closed. Orders must be placed at least 30 minutes in advance of Lunch slots (12:30 PM – 1:40 PM).',
+        message: 'Lunch ordering for today is closed. Orders must be placed at least 30 minutes in advance of Lunch slots (11:30 AM – 2:30 PM).',
         type: 'warning'
       });
       return;
@@ -300,6 +300,10 @@ export default function StudentDashboard() {
       return;
     }
     if (cart.length === 0 || !pickupTime) return;
+    if (isTakeaway === null) {
+      setError('Please select whether you want Dine-in or Take-away.');
+      return;
+    }
 
     const slotAvail = getSlotAvailability(pickupTime);
     if (!slotAvail.isAvailable) {
@@ -310,33 +314,11 @@ export default function StudentDashboard() {
     setSubmitting(true);
     setError('');
 
-    // TEMPORARY BYPASS: Use RPC directly to test without Razorpay
     const itemsJson = cart.map(c => ({
       menu_item_id: c.item.id,
       quantity: c.quantity
     }));
 
-    const { data: orderId, error: rpcError } = await supabase.rpc('place_order_with_otp', {
-      p_pickup_time: pickupTime,
-      p_items: itemsJson
-    });
-
-    if (rpcError) {
-      setError('Failed to place order: ' + rpcError.message);
-      setSubmitting(false);
-      return;
-    }
-
-    const { data: newOrder } = await supabase.from('orders').select('*').eq('id', orderId).single();
-    if (newOrder) {
-      setActiveOrder(newOrder);
-    }
-    setCart([]);
-    setPickupTime('');
-    setSubmitting(false);
-    return;
-    
-    /* Razorpay Implementation Commented Out for Testing
     const isLoaded = await loadRazorpayScript();
     if (!isLoaded) {
       setError('Failed to load Razorpay SDK. Please check your connection.');
@@ -355,10 +337,14 @@ export default function StudentDashboard() {
       return;
     }
 
+    // Calculate Gateway Fee manually for UI parity (Total * 0.0236)
+    const gatewayFee = cartTotalPrice * 0.0236;
+    const expectedAmountPaid = Math.round((cartTotalPrice + gatewayFee) * 100) / 100;
+
     // 2. Open Razorpay Widget
     const options = {
       key: import.meta.env.VITE_RAZORPAY_KEY_ID || 'rzp_test_dummy',
-      amount: cartTotalPrice * 100,
+      amount: expectedAmountPaid * 100, // Pass the total amount in paise
       currency: 'INR',
       name: 'SkipTray',
       description: 'Food Order Payment',
@@ -371,6 +357,7 @@ export default function StudentDashboard() {
             razorpay_order_id: response.razorpay_order_id,
             razorpay_signature: response.razorpay_signature,
             pickup_time: pickupTime,
+            is_takeaway: isTakeaway,
             items: itemsJson
           }
         });
@@ -388,6 +375,7 @@ export default function StudentDashboard() {
         }
         setCart([]);
         setPickupTime('');
+        setIsTakeaway(null);
         setSubmitting(false);
       },
       prefill: {
@@ -410,7 +398,6 @@ export default function StudentDashboard() {
     });
     
     rzp1.open();
-    */
   };
 
   const handleCancelOrder = async () => {
@@ -561,7 +548,9 @@ export default function StudentDashboard() {
                   <div className="flex justify-between items-center border-b border-slate-100 pb-3">
                     <div>
                       <div className="font-bold text-slate-800 text-lg">Order #{o.order_number}</div>
-                      <div className="text-xs text-slate-500 font-mono font-medium mb-1">ID: {o.id.split('-')[0].toUpperCase()}</div>
+                      <div className="text-xs text-slate-500 font-mono font-medium mb-1">
+                        ID: {o.id.split('-')[0].toUpperCase()} • {o.is_takeaway ? 'Take-away' : 'Dine-in'}
+                      </div>
                       <div className="text-xs text-slate-500 font-medium mb-1">Placed on: {new Date(o.created_at).toLocaleDateString()}</div>
                       <div className="text-sm text-slate-600 mt-1">Pickup: {formatPickupTime(o.pickup_time)} (Lunch)</div>
                     </div>
@@ -700,6 +689,9 @@ export default function StudentDashboard() {
               <span className="text-indigo-200 bg-white/10 px-2 py-1 rounded text-xs font-mono tracking-wider border border-white/20">
                 ID: {activeOrder.id.split('-')[0].toUpperCase()}
               </span>
+              <span className={`px-2 py-1 rounded text-xs font-bold border ${activeOrder.is_takeaway ? 'bg-amber-500/20 text-amber-200 border-amber-500/40' : 'bg-emerald-500/20 text-emerald-200 border-emerald-500/40'}`}>
+                {activeOrder.is_takeaway ? 'Take-away' : 'Dine-in'}
+              </span>
             </div>
             <p className="text-indigo-200 font-medium tracking-wide mb-4 text-sm">Your Order Status</p>
           
@@ -777,7 +769,7 @@ export default function StudentDashboard() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
               <div>
                 <h2 className="text-xl font-bold text-slate-800">Menu</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Lunch Pickup: 12:30 PM – 1:40 PM • Booking Opens: 9:30 AM (Min 30m Notice)</p>
+                <p className="text-xs text-slate-500 mt-0.5">Lunch Pickup: 11:30 AM – 2:30 PM • Booking Opens: 9:30 AM (Min 30m Notice)</p>
               </div>
               {isSunday ? (
                 <span className="self-start sm:self-auto px-3 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm">
@@ -797,7 +789,7 @@ export default function StudentDashboard() {
               ) : (
                 <span className="self-start sm:self-auto px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span>Lunch Slots Open (12:30 PM – 1:40 PM)</span>
+                  <span>Lunch Slots Open (11:30 AM – 2:30 PM)</span>
                 </span>
               )}
             </div>
@@ -890,7 +882,7 @@ export default function StudentDashboard() {
                         <IconClock size={20} className="w-5 h-5 text-indigo-400 shrink-0" />
                         <div>
                           <div style={{ color: '#818cf8', fontSize: '0.8125rem', fontWeight: 700 }}>Lunch Booking Opens at 9:30 AM</div>
-                          <div style={{ color: '#c7d2fe', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders open at 9:30 AM today (Lunch Slots: 12:30 PM – 1:40 PM, Min 30m notice).</div>
+                          <div style={{ color: '#c7d2fe', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders open at 9:30 AM today (Lunch Slots: 11:30 AM – 2:30 PM, Min 30m notice).</div>
                         </div>
                       </div>
                     )}
@@ -901,7 +893,7 @@ export default function StudentDashboard() {
                         <IconClock size={20} className="w-5 h-5 text-rose-400 shrink-0" />
                         <div>
                           <div style={{ color: '#f87171', fontSize: '0.8125rem', fontWeight: 700 }}>Lunch Ordering Closed Today</div>
-                          <div style={{ color: '#fca5a5', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders must be placed at least 30 mins before pickup (Lunch: 12:30 PM – 1:40 PM).</div>
+                          <div style={{ color: '#fca5a5', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders must be placed at least 30 mins before pickup (Lunch: 11:30 AM – 2:30 PM).</div>
                         </div>
                       </div>
                     )}
@@ -977,10 +969,51 @@ export default function StudentDashboard() {
                     {/* Pickup time */}
                     <form onSubmit={handlePlaceOrder} style={{ paddingTop: '1rem', borderTop: '1px solid #1e293b' }}>
                       {error && <div style={{ color: '#f87171', fontSize: '0.75rem', marginBottom: '0.75rem', fontWeight: 600 }}>{error}</div>}
+                      
+                      {/* Dine-in vs Takeaway Toggle */}
+                      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+                        <button
+                          type="button"
+                          onClick={() => setIsTakeaway(false)}
+                          style={{
+                            flex: 1,
+                            padding: '0.625rem',
+                            borderRadius: '0.75rem',
+                            fontSize: '0.875rem',
+                            fontWeight: 600,
+                            border: isTakeaway === false ? '1px solid #6366f1' : '1px solid #334155',
+                            background: isTakeaway === false ? 'rgba(99,102,241,0.15)' : '#1e293b',
+                            color: isTakeaway === false ? '#818cf8' : '#94a3b8',
+                            transition: 'all 0.2s',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Dine-in
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsTakeaway(true)}
+                          style={{
+                            flex: 1,
+                            padding: '0.625rem',
+                            borderRadius: '0.75rem',
+                            fontSize: '0.875rem',
+                            fontWeight: 600,
+                            border: isTakeaway === true ? '1px solid #6366f1' : '1px solid #334155',
+                            background: isTakeaway === true ? 'rgba(99,102,241,0.15)' : '#1e293b',
+                            color: isTakeaway === true ? '#818cf8' : '#94a3b8',
+                            transition: 'all 0.2s',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Take-away
+                        </button>
+                      </div>
+
                       <div style={{ marginBottom: '1rem' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
                           <label style={{ fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em' }}>
-                            Lunch Pickup Slot (12:30 PM – 1:40 PM)
+                            Lunch Pickup Slot (11:30 AM – 2:30 PM)
                           </label>
                           <span style={{ fontSize: '0.65rem', color: '#818cf8', fontWeight: 600, background: 'rgba(99,102,241,0.15)', padding: '2px 6px', borderRadius: '4px' }}>
                             Min 30m notice
@@ -1009,9 +1042,9 @@ export default function StudentDashboard() {
                               ? 'Closed on Sundays' 
                               : isBeforeOpeningTime
                                 ? 'Lunch Booking Opens at 9:30 AM'
-                                : isLunchClosedForToday 
-                                  ? 'Lunch Ordering Closed for Today' 
-                                  : 'Select a Lunch Slot (10-min intervals)...'}
+                                  : isLunchClosedForToday 
+                                    ? 'Lunch Ordering Closed for Today' 
+                                    : 'Select a Lunch Slot (30-min intervals)...'}
                           </option>
                           {LUNCH_SLOTS.map(slot => {
                             const { isAvailable, reason } = getSlotAvailability(slot.value);
