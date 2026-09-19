@@ -104,11 +104,8 @@ serve(async (req: any) => {
       }
     });
 
-    const expectedGrossTotal = Math.ceil((calculatedTotal / 0.9764) * 100) / 100;
-    
-    // amountPaid from Razorpay may sometimes be slightly off due to float math on their end when parsing paise, 
-    // but since we send Math.round(expectedGrossTotal * 100) / 100, we should check against that.
-    const expectedAmountPaid = Math.round(expectedGrossTotal * 100) / 100;
+    const gatewayFee = calculatedTotal * 0.0236;
+    const expectedAmountPaid = Math.round((calculatedTotal + gatewayFee) * 100) / 100;
 
     // Allow for a 1 paisa rounding difference just in case
     if (Math.abs(expectedAmountPaid - amountPaid) > 0.02) {

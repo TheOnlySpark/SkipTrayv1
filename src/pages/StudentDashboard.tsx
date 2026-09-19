@@ -1026,9 +1026,20 @@ export default function StudentDashboard() {
 
                       {/* Total Amount Summary */}
                       {cart.length > 0 && (
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', padding: '0.75rem 1rem', background: '#1e293b', borderRadius: '0.75rem' }}>
-                          <span style={{ color: '#94a3b8', fontSize: '0.875rem', fontWeight: 600 }}>Total Amount</span>
-                          <span style={{ color: '#38bdf8', fontSize: '1.125rem', fontWeight: 700 }}>₹{cartTotalPrice.toFixed(2)}</span>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem', padding: '0.75rem 1rem', background: '#1e293b', borderRadius: '0.75rem' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ color: '#94a3b8', fontSize: '0.875rem', fontWeight: 600 }}>Item Total</span>
+                            <span style={{ color: '#94a3b8', fontSize: '0.875rem', fontWeight: 600 }}>₹{cartTotalPrice.toFixed(2)}</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ color: '#94a3b8', fontSize: '0.875rem', fontWeight: 600 }}>Gateway Fee (2.36%)</span>
+                            <span style={{ color: '#94a3b8', fontSize: '0.875rem', fontWeight: 600 }}>₹{(cartTotalPrice * 0.0236).toFixed(2)}</span>
+                          </div>
+                          <div style={{ borderTop: '1px solid #334155', margin: '0.25rem 0' }}></div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ color: '#f8fafc', fontSize: '0.95rem', fontWeight: 700 }}>Total Amount</span>
+                            <span style={{ color: '#38bdf8', fontSize: '1.125rem', fontWeight: 700 }}>₹{(cartTotalPrice + cartTotalPrice * 0.0236).toFixed(2)}</span>
+                          </div>
                         </div>
                       )}
 
@@ -1066,7 +1077,7 @@ export default function StudentDashboard() {
                               ? 'Lunch Booking Opens at 9:30 AM'
                               : isLunchClosedForToday
                                 ? 'Lunch Ordering Closed Today'
-                                : (submitting ? 'Placing...' : `Place Order (${cartTotalItems} items • ₹${cartTotalPrice.toFixed(2)})`)}
+                                : (submitting ? 'Placing...' : `Place Order (${cartTotalItems} items • ₹${(cartTotalPrice + cartTotalPrice * 0.0236).toFixed(2)})`)}
                       </button>
                     </form>
                   </div>
@@ -1101,7 +1112,7 @@ export default function StudentDashboard() {
                     <span style={{ color: '#f1f5f9', fontWeight: 700, fontSize: '0.95rem' }}>Your Order</span>
                     {cartTotalItems > 0 && (
                       <span style={{ color: '#818cf8', fontSize: '0.75rem', fontWeight: 600 }}>
-                        ₹{cartTotalPrice.toFixed(2)} • {cartTotalItems} item{cartTotalItems > 1 ? 's' : ''}
+                        ₹{(cartTotalPrice + cartTotalPrice * 0.0236).toFixed(2)} • {cartTotalItems} item{cartTotalItems > 1 ? 's' : ''}
                       </span>
                     )}
                   </div>

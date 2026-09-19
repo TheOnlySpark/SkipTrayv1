@@ -54,10 +54,9 @@ serve(async (req: any) => {
       throw new Error("Cart total must be greater than zero")
     }
     
-    // Exact Gross-Up formula to cover 2.36% Razorpay commission exactly
-    // grossTotal - (grossTotal * 0.0236) = calculatedTotal -> grossTotal * 0.9764 = calculatedTotal
-    const grossTotal = Math.ceil((calculatedTotal / 0.9764) * 100) / 100;
-    const amountToCharge = grossTotal;
+    // Use simple math as requested: just add exactly 2.36% to the cart total
+    const gatewayFee = calculatedTotal * 0.0236;
+    const amountToCharge = calculatedTotal + gatewayFee;
 
     // @ts-ignore
     const keyId = Deno.env.get('RAZORPAY_KEY_ID')
