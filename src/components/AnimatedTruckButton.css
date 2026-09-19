@@ -1,6 +1,6 @@
 .truck-button {
   --color: #fff;
-  --background: #1e293b; /* slate-800 */
+  --background: #6366f1; /* indigo-500 to match app branding */
   --tick: #16bf78;
   --base: #0d0f18;
   --wheel: #2b3044;
@@ -29,7 +29,7 @@
   outline: none;
   color: var(--color);
   background: var(--background);
-  border-radius: 12px;
+  border-radius: 0.875rem; /* to match 14px border radius of old button */
   box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
   transition: background 0.3s, transform 0.2s;
   overflow: hidden;
@@ -40,8 +40,13 @@
   font-family: inherit;
 }
 
-.truck-button:hover {
-  background: #334155; /* slate-700 */
+.truck-button:hover:not(:disabled) {
+  background: #4f46e5; /* indigo-600 */
+}
+
+.truck-button:disabled {
+  background: rgba(99,102,241,0.4);
+  cursor: not-allowed;
 }
 
 .truck-button:active {
@@ -129,11 +134,11 @@
   height: 26px;
   display: flex;
   align-items: center;
-  left: 100%; /* Start outside right */
+  left: 50%; /* Start relative to center */
   top: 50%;
   margin-top: -13px;
   transition: transform 0.5s ease-out;
-  transform: translateX(20px);
+  transform: translateX(-200px); /* Start offscreen left */
   z-index: 20;
 }
 
@@ -149,7 +154,7 @@
 .truck-cab {
   width: 18px;
   height: 22px;
-  background: #3b82f6; /* blue-500 */
+  background: #2563eb; /* slightly darker blue to match the image better */
   border-radius: 0 4px 4px 0;
   position: relative;
   margin-left: 2px;
@@ -164,7 +169,20 @@
   top: 2px;
   bottom: 2px;
   width: 8px;
-  background: rgba(0,0,0,0.3);
+  background: rgba(0,0,0,0.4);
+  border-radius: 0 2px 2px 0;
+}
+
+/* Indicator lights */
+.truck-cab::before {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 2px;
+  width: 3px;
+  height: 18px;
+  background: transparent;
+  box-shadow: inset -2px 0 0 #fdb159, inset -2px 14px 0 #fdb159; /* Two orange lights at top/bottom corners */
   border-radius: 0 2px 2px 0;
 }
 
@@ -209,7 +227,7 @@
 /* 1. Truck Entry */
 .truck-button[data-step="TRUCK_ENTRY"] .truck,
 .truck-button[data-step="DOORS_OPEN"] .truck {
-  transform: translateX(-30px); /* Stop before the box */
+  transform: translateX(20px); /* Stop past the box */
 }
 
 /* 2. Doors Open */
@@ -227,9 +245,7 @@
 .truck-button[data-step="DOORS_CLOSE"] .truck,
 .truck-button[data-step="FORWARD_START"] .truck,
 .truck-button[data-step="LIGHTS_ON"] .truck {
-  transform: translateX(calc(-50vw + 50% + 24px)); /* Adjust depending on parent width, we use centered logic */
-  left: 50%;
-  transform: translateX(-14px); /* Box is at center, truck trailer is 48px. Back of trailer is left of truck. */
+  transform: translateX(-30px); /* Truck reverses left to swallow the box */
 }
 
 /* Once the truck reverses, the box goes INSIDE the truck */
@@ -244,7 +260,6 @@
 
 /* 4. Drive Out */
 .truck-button[data-step="DRIVE_OUT"] .truck {
-  left: 50%;
-  transform: translateX(300px);
+  transform: translateX(300px); /* Drives forward offscreen right */
   transition: transform 0.5s ease-in;
 }
