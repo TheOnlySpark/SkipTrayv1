@@ -44,7 +44,7 @@
   background: #4f46e5; /* indigo-600 */
 }
 
-.truck-button:disabled {
+.truck-button:disabled:not(.is-animating) {
   background: rgba(99,102,241,0.4);
   cursor: not-allowed;
 }
