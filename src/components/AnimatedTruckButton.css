@@ -210,17 +210,18 @@
 .door-top, .door-bottom {
   position: absolute;
   left: -2px;
-  width: 4px;
+  width: 2px;
   height: 12px;
   background: #e2e8f0;
-  transform-origin: right center;
   transition: transform 0.35s ease;
 }
 .door-top {
   top: 1px;
+  transform-origin: right top;
 }
 .door-bottom {
   bottom: 1px;
+  transform-origin: right bottom;
 }
 
 /* Steps execution */
