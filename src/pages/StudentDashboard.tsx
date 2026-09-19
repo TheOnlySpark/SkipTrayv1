@@ -56,7 +56,8 @@ export default function StudentDashboard() {
   
   const [cart, setCart] = useState<{item: MenuItem, quantity: number}[]>([]);
   const [pickupTime, setPickupTime] = useState('');
-  const [isTakeaway, setIsTakeaway] = useState<boolean | null>(null);
+  const [isTakeaway, setIsTakeaway] = useState<boolean>(false);
+  const [testMode, setTestMode] = useState<boolean>(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [cartOpen, setCartOpen] = useState(false);
@@ -260,7 +261,7 @@ export default function StudentDashboard() {
     if (isLunchClosedForToday) {
       showAlert({
         title: 'Booking Window Closed',
-        message: 'Lunch ordering for today is closed. Orders must be placed at least 30 minutes in advance of Lunch slots (11:30 AM – 2:30 PM).',
+        message: 'Lunch ordering for today is closed. Orders must be placed at least 30 minutes in advance of Lunch slots (12:30 PM – 1:40 PM).',
         type: 'warning'
       });
       return;
@@ -300,10 +301,6 @@ export default function StudentDashboard() {
       return;
     }
     if (cart.length === 0 || !pickupTime) return;
-    if (isTakeaway === null) {
-      setError('Please select whether you want Dine-in or Take-away.');
-      return;
-    }
 
     const slotAvail = getSlotAvailability(pickupTime);
     if (!slotAvail.isAvailable) {
@@ -318,6 +315,30 @@ export default function StudentDashboard() {
       menu_item_id: c.item.id,
       quantity: c.quantity
     }));
+
+    if (testMode) {
+      // Bypass Razorpay for testing
+      const { data: orderId, error: rpcError } = await supabase.rpc('place_order_with_otp', {
+        p_pickup_time: pickupTime,
+        p_items: itemsJson
+      });
+
+      if (rpcError) {
+        setError('Failed to place order (Test Mode): ' + rpcError.message);
+        setSubmitting(false);
+        return;
+      }
+
+      const { data: newOrder } = await supabase.from('orders').select('*').eq('id', orderId).single();
+      if (newOrder) {
+        setActiveOrder(newOrder);
+      }
+      setCart([]);
+      setPickupTime('');
+      setIsTakeaway(false);
+      setSubmitting(false);
+      return;
+    }
 
     const isLoaded = await loadRazorpayScript();
     if (!isLoaded) {
@@ -357,7 +378,6 @@ export default function StudentDashboard() {
             razorpay_order_id: response.razorpay_order_id,
             razorpay_signature: response.razorpay_signature,
             pickup_time: pickupTime,
-            is_takeaway: isTakeaway,
             items: itemsJson
           }
         });
@@ -375,7 +395,7 @@ export default function StudentDashboard() {
         }
         setCart([]);
         setPickupTime('');
-        setIsTakeaway(null);
+        setIsTakeaway(false);
         setSubmitting(false);
       },
       prefill: {
@@ -548,9 +568,7 @@ export default function StudentDashboard() {
                   <div className="flex justify-between items-center border-b border-slate-100 pb-3">
                     <div>
                       <div className="font-bold text-slate-800 text-lg">Order #{o.order_number}</div>
-                      <div className="text-xs text-slate-500 font-mono font-medium mb-1">
-                        ID: {o.id.split('-')[0].toUpperCase()} • {o.is_takeaway ? 'Take-away' : 'Dine-in'}
-                      </div>
+                      <div className="text-xs text-slate-500 font-mono font-medium mb-1">ID: {o.id.split('-')[0].toUpperCase()}</div>
                       <div className="text-xs text-slate-500 font-medium mb-1">Placed on: {new Date(o.created_at).toLocaleDateString()}</div>
                       <div className="text-sm text-slate-600 mt-1">Pickup: {formatPickupTime(o.pickup_time)} (Lunch)</div>
                     </div>
@@ -688,9 +706,6 @@ export default function StudentDashboard() {
               <h2 className="text-3xl font-extrabold">Order #{activeOrder.order_number}</h2>
               <span className="text-indigo-200 bg-white/10 px-2 py-1 rounded text-xs font-mono tracking-wider border border-white/20">
                 ID: {activeOrder.id.split('-')[0].toUpperCase()}
-              </span>
-              <span className={`px-2 py-1 rounded text-xs font-bold border ${activeOrder.is_takeaway ? 'bg-amber-500/20 text-amber-200 border-amber-500/40' : 'bg-emerald-500/20 text-emerald-200 border-emerald-500/40'}`}>
-                {activeOrder.is_takeaway ? 'Take-away' : 'Dine-in'}
               </span>
             </div>
             <p className="text-indigo-200 font-medium tracking-wide mb-4 text-sm">Your Order Status</p>
@@ -968,48 +983,6 @@ export default function StudentDashboard() {
 
                     {/* Pickup time */}
                     <form onSubmit={handlePlaceOrder} style={{ paddingTop: '1rem', borderTop: '1px solid #1e293b' }}>
-                      {error && <div style={{ color: '#f87171', fontSize: '0.75rem', marginBottom: '0.75rem', fontWeight: 600 }}>{error}</div>}
-                      
-                      {/* Dine-in vs Takeaway Toggle */}
-                      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
-                        <button
-                          type="button"
-                          onClick={() => setIsTakeaway(false)}
-                          style={{
-                            flex: 1,
-                            padding: '0.625rem',
-                            borderRadius: '0.75rem',
-                            fontSize: '0.875rem',
-                            fontWeight: 600,
-                            border: isTakeaway === false ? '1px solid #6366f1' : '1px solid #334155',
-                            background: isTakeaway === false ? 'rgba(99,102,241,0.15)' : '#1e293b',
-                            color: isTakeaway === false ? '#818cf8' : '#94a3b8',
-                            transition: 'all 0.2s',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          Dine-in
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setIsTakeaway(true)}
-                          style={{
-                            flex: 1,
-                            padding: '0.625rem',
-                            borderRadius: '0.75rem',
-                            fontSize: '0.875rem',
-                            fontWeight: 600,
-                            border: isTakeaway === true ? '1px solid #6366f1' : '1px solid #334155',
-                            background: isTakeaway === true ? 'rgba(99,102,241,0.15)' : '#1e293b',
-                            color: isTakeaway === true ? '#818cf8' : '#94a3b8',
-                            transition: 'all 0.2s',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          Take-away
-                        </button>
-                      </div>
-
                       <div style={{ marginBottom: '1rem' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
                           <label style={{ fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em' }}>
@@ -1042,9 +1015,9 @@ export default function StudentDashboard() {
                               ? 'Closed on Sundays' 
                               : isBeforeOpeningTime
                                 ? 'Lunch Booking Opens at 9:30 AM'
-                                  : isLunchClosedForToday 
-                                    ? 'Lunch Ordering Closed for Today' 
-                                    : 'Select a Lunch Slot (30-min intervals)...'}
+                                : isLunchClosedForToday 
+                                  ? 'Lunch Ordering Closed for Today' 
+                                  : 'Select a Lunch Slot (30-min intervals)...'}
                           </option>
                           {LUNCH_SLOTS.map(slot => {
                             const { isAvailable, reason } = getSlotAvailability(slot.value);
@@ -1055,6 +1028,86 @@ export default function StudentDashboard() {
                             );
                           })}
                         </select>
+                      </div>
+
+                      {/* Dine In / Takeaway Option */}
+                      <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem' }}>
+                        <button
+                          type="button"
+                          onClick={() => setIsTakeaway(false)}
+                          style={{
+                            flex: 1,
+                            padding: '0.75rem',
+                            borderRadius: '0.75rem',
+                            background: !isTakeaway ? '#6366f1' : '#1e293b',
+                            color: !isTakeaway ? 'white' : '#94a3b8',
+                            border: `1px solid ${!isTakeaway ? '#6366f1' : '#334155'}`,
+                            fontWeight: 700,
+                            fontSize: '0.875rem',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}
+                        >
+                          Dine In
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsTakeaway(true)}
+                          style={{
+                            flex: 1,
+                            padding: '0.75rem',
+                            borderRadius: '0.75rem',
+                            background: isTakeaway ? '#6366f1' : '#1e293b',
+                            color: isTakeaway ? 'white' : '#94a3b8',
+                            border: `1px solid ${isTakeaway ? '#6366f1' : '#334155'}`,
+                            fontWeight: 700,
+                            fontSize: '0.875rem',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}
+                        >
+                          Takeaway
+                        </button>
+                      </div>
+
+                      {/* Test Mode Toggle */}
+                      <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.75rem 1rem', background: '#1e293b', borderRadius: '0.75rem', border: '1px solid #334155' }}>
+                        <div>
+                          <div style={{ color: '#e2e8f0', fontSize: '0.875rem', fontWeight: 600 }}>Test Mode (Bypass Payment)</div>
+                          <div style={{ color: '#94a3b8', fontSize: '0.7rem', marginTop: '0.125rem' }}>Places order instantly via RPC</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setTestMode(!testMode)}
+                          style={{
+                            width: '3rem',
+                            height: '1.5rem',
+                            borderRadius: '9999px',
+                            background: testMode ? '#6366f1' : '#334155',
+                            position: 'relative',
+                            transition: 'background 0.3s',
+                            border: 'none',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          <div style={{
+                            width: '1.125rem',
+                            height: '1.125rem',
+                            background: 'white',
+                            borderRadius: '50%',
+                            position: 'absolute',
+                            top: '0.1875rem',
+                            left: testMode ? '1.6875rem' : '0.1875rem',
+                            transition: 'left 0.3s, transform 0.3s',
+                            boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                          }} />
+                        </button>
                       </div>
 
                       {/* Total Amount Summary */}
@@ -1075,6 +1128,8 @@ export default function StudentDashboard() {
                           </div>
                         </div>
                       )}
+
+                      {error && <div style={{ color: '#f87171', fontSize: '0.75rem', marginBottom: '0.75rem', fontWeight: 600, textAlign: 'center' }}>{error}</div>}
 
                       <button
                         type="submit"
