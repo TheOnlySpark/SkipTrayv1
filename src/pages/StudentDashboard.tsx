@@ -360,12 +360,12 @@ export default function StudentDashboard() {
 
     // Calculate Gateway Fee manually for UI parity (Total * 0.0236)
     const gatewayFee = cartTotalPrice * 0.0236;
-    const expectedAmountPaid = Math.round((cartTotalPrice + gatewayFee) * 100) / 100;
+    const amountInPaise = Math.round((cartTotalPrice + gatewayFee) * 100);
 
     // 2. Open Razorpay Widget
     const options = {
       key: import.meta.env.VITE_RAZORPAY_KEY_ID || 'rzp_test_dummy',
-      amount: expectedAmountPaid * 100, // Pass the total amount in paise
+      amount: amountInPaise, // Pass the total amount in paise (must be integer)
       currency: 'INR',
       name: 'SkipTray',
       description: 'Food Order Payment',

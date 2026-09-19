@@ -9,7 +9,6 @@ const corsHeaders = {
 }
 
 serve(async (req: any) => {
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
@@ -18,10 +17,7 @@ serve(async (req: any) => {
     const { items } = await req.json()
 
     if (!items || !Array.isArray(items) || items.length === 0) {
-      return new Response(JSON.stringify({ error: 'Invalid or empty cart' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 400,
-      })
+      throw new Error("Invalid or empty cart")
     }
 
     const supabaseAdmin = createClient(
@@ -31,7 +27,7 @@ serve(async (req: any) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
 
-    // Calculate strict amount from DB
+    // 1. Fetch exact prices from DB to prevent tampering
     const itemIds = items.map((i: any) => i.menu_item_id)
     const { data: menuItems, error: menuError } = await supabaseAdmin
       .from('menu_items')
@@ -39,63 +35,69 @@ serve(async (req: any) => {
       .in('id', itemIds)
 
     if (menuError || !menuItems) {
-      throw new Error("Could not fetch menu items for price calculation")
+      throw new Error("Failed to fetch menu items")
     }
 
-    let calculatedTotal = 0;
+    // 2. Calculate the total base price
+    let baseTotal = 0;
     items.forEach((reqItem: any) => {
       const dbItem = menuItems.find((m: any) => m.id === reqItem.menu_item_id);
       if (dbItem && typeof dbItem.price === 'number') {
-        calculatedTotal += dbItem.price * reqItem.quantity;
+        baseTotal += dbItem.price * reqItem.quantity;
       }
     });
 
-    if (calculatedTotal <= 0) {
-      throw new Error("Cart total must be greater than zero")
+    if (baseTotal <= 0) {
+      throw new Error("Order total must be greater than zero")
     }
     
-    // Use simple math as requested: just add exactly 2.36% to the cart total
-    const gatewayFee = calculatedTotal * 0.0236;
-    const amountToCharge = calculatedTotal + gatewayFee;
+    // 3. Add Gateway Fee (2.36%)
+    const gatewayFee = baseTotal * 0.0236;
+    const finalAmount = baseTotal + gatewayFee;
+    
+    // Convert to paise (Razorpay expects smallest currency unit, rounded)
+    const amountInPaise = Math.round(finalAmount * 100);
 
+    // 4. Get Razorpay Credentials
     // @ts-ignore
     const keyId = Deno.env.get('RAZORPAY_KEY_ID')
     // @ts-ignore
     const keySecret = Deno.env.get('RAZORPAY_KEY_SECRET')
 
     if (!keyId || !keySecret) {
-      throw new Error("Razorpay keys not configured")
+      throw new Error("Razorpay credentials are not configured in Supabase Secrets")
     }
 
-    // Call Razorpay API to create an order
+    // 5. Create order with Razorpay
     const authHeader = `Basic ${btoa(`${keyId}:${keySecret}`)}`
-    
-    const response = await fetch('https://api.razorpay.com/v1/orders', {
+    const razorpayResponse = await fetch('https://api.razorpay.com/v1/orders', {
       method: 'POST',
       headers: {
         'Authorization': authHeader,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        amount: Math.round(amountToCharge * 100), // Razorpay expects amount in paise (smallest currency unit), rounded to nearest integer
+        amount: amountInPaise,
         currency: 'INR',
-        receipt: `receipt_${Date.now()}`
+        receipt: `rcpt_${Date.now()}`
       }),
     })
 
-    const data = await response.json()
+    const razorpayData = await razorpayResponse.json()
 
-    if (!response.ok) {
-      console.error('Razorpay Error:', data)
-      throw new Error(data.error?.description || 'Failed to create Razorpay order')
+    if (!razorpayResponse.ok) {
+      console.error('Razorpay API Error:', razorpayData)
+      throw new Error(razorpayData.error?.description || 'Failed to create Razorpay order')
     }
 
-    return new Response(JSON.stringify({ order_id: data.id }), {
+    // 6. Return the Razorpay Order ID to the frontend
+    return new Response(JSON.stringify({ order_id: razorpayData.id }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     })
+
   } catch (error: any) {
-    console.error('Error creating order:', error)
+    console.error('Create Order Error:', error)
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
