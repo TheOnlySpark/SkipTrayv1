@@ -213,7 +213,7 @@
   width: 2px;
   height: 12px;
   background: #e2e8f0;
-  transition: transform 0.525s ease;
+  transition: transform 0.35s ease;
 }
 .door-top {
   top: 1px;
@@ -262,5 +262,5 @@
 /* 4. Drive Out */
 .truck-button[data-step="DRIVE_OUT"] .truck {
   transform: translateX(300px); /* Drives forward offscreen right */
-  transition: transform 0.75s ease-in;
+  transition: transform 0.6s ease-in;
 }
