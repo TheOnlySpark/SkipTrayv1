@@ -135,6 +135,7 @@ export interface Database {
           otp_attempts: number
           otp_code: string
           pickup_time: string
+          is_takeaway: boolean
           ready_at: string | null
           status: Database["public"]["Enums"]["order_status"]
           user_id: string
@@ -148,6 +149,7 @@ export interface Database {
           otp_attempts?: number
           otp_code: string
           pickup_time: string
+          is_takeaway?: boolean
           ready_at?: string | null
           status?: Database["public"]["Enums"]["order_status"]
           user_id: string
@@ -161,6 +163,7 @@ export interface Database {
           otp_attempts?: number
           otp_code?: string
           pickup_time?: string
+          is_takeaway?: boolean
           ready_at?: string | null
           status?: Database["public"]["Enums"]["order_status"]
           user_id?: string
@@ -227,6 +230,7 @@ export interface Database {
         Args: {
           p_pickup_time: string
           p_items: Json
+          p_is_takeaway?: boolean
         }
         Returns: string
       }

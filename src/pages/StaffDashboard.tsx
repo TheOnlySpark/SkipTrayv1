@@ -509,6 +509,9 @@ export default function StaffDashboard() {
               <span className="text-xs font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">
                 {formatPickupTime(order.pickup_time)}
               </span>
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase ${order.is_takeaway ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-emerald-100 text-emerald-700 border border-emerald-200'}`}>
+                {order.is_takeaway ? 'TAKEAWAY' : 'DINE-IN'}
+              </span>
             </div>
             <h4 className="font-bold text-sm text-slate-800 truncate mt-1">{order.profiles?.name || 'Student'}</h4>
             <div className="text-[11px] text-slate-400 font-mono">ID: {order.profiles?.id_number || order.id.split('-')[0].toUpperCase()}</div>
@@ -649,7 +652,7 @@ export default function StaffDashboard() {
               <span className="px-3 py-1 bg-indigo-500/20 text-indigo-300 text-xs font-bold uppercase tracking-wider rounded-full border border-indigo-500/30">
                 Staff Operations Portal
               </span>
-              <span className="text-xs text-slate-400">Lunch Window: 12:30 PM – 1:40 PM</span>
+              <span className="text-xs text-slate-400">Lunch Window: 11:30 AM – 2:30 PM</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-white mt-2 leading-tight">
               Order Command Center
