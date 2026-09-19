@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/ModalDialogContext';
 import { supabase } from '../lib/supabase';
+import { loadRazorpayScript } from '../lib/razorpay';
 import { Database } from '../types/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { 
@@ -309,28 +310,107 @@ export default function StudentDashboard() {
     setSubmitting(true);
     setError('');
 
+    // TEMPORARY BYPASS: Use RPC directly to test without Razorpay
     const itemsJson = cart.map(c => ({
       menu_item_id: c.item.id,
       quantity: c.quantity
     }));
 
-    const { data, error } = await supabase.rpc('place_order_with_otp', {
+    const { data: orderId, error: rpcError } = await supabase.rpc('place_order_with_otp', {
       p_pickup_time: pickupTime,
       p_items: itemsJson
     });
 
-    if (error) {
-      setError(error.message);
-    } else {
-      // Fetch the newly created order
-      const { data: newOrder } = await supabase.from('orders').select('*').eq('id', data).single();
-      if (newOrder) {
-        setActiveOrder(newOrder);
-      }
-      setCart([]);
-      setPickupTime('');
+    if (rpcError) {
+      setError('Failed to place order: ' + rpcError.message);
+      setSubmitting(false);
+      return;
     }
+
+    const { data: newOrder } = await supabase.from('orders').select('*').eq('id', orderId).single();
+    if (newOrder) {
+      setActiveOrder(newOrder);
+    }
+    setCart([]);
+    setPickupTime('');
     setSubmitting(false);
+    return;
+    
+    /* Razorpay Implementation Commented Out for Testing
+    const isLoaded = await loadRazorpayScript();
+    if (!isLoaded) {
+      setError('Failed to load Razorpay SDK. Please check your connection.');
+      setSubmitting(false);
+      return;
+    }
+
+    // 1. Create Razorpay Order
+    const { data: orderData, error: orderError } = await supabase.functions.invoke('create-razorpay-order', {
+      body: { items: itemsJson }
+    });
+
+    if (orderError || !orderData?.order_id) {
+      setError('Failed to create payment order. ' + (orderError?.message || ''));
+      setSubmitting(false);
+      return;
+    }
+
+    // 2. Open Razorpay Widget
+    const options = {
+      key: import.meta.env.VITE_RAZORPAY_KEY_ID || 'rzp_test_dummy',
+      amount: cartTotalPrice * 100,
+      currency: 'INR',
+      name: 'SkipTray',
+      description: 'Food Order Payment',
+      order_id: orderData.order_id,
+      handler: async function (response: any) {
+        // 3. Verify Payment and Create Order in DB
+        const { data: verifyData, error: verifyError } = await supabase.functions.invoke('verify-and-create-order', {
+          body: {
+            razorpay_payment_id: response.razorpay_payment_id,
+            razorpay_order_id: response.razorpay_order_id,
+            razorpay_signature: response.razorpay_signature,
+            pickup_time: pickupTime,
+            items: itemsJson
+          }
+        });
+
+        if (verifyError || !verifyData?.success) {
+          setError('Payment verification failed. If money was deducted, contact admin.');
+          setSubmitting(false);
+          return;
+        }
+
+        // Fetch the newly created order
+        const { data: newOrder } = await supabase.from('orders').select('*').eq('id', verifyData.order.id).single();
+        if (newOrder) {
+          setActiveOrder(newOrder);
+        }
+        setCart([]);
+        setPickupTime('');
+        setSubmitting(false);
+      },
+      prefill: {
+        name: profile?.name || '',
+      },
+      theme: {
+        color: '#4f46e5',
+      },
+      modal: {
+        ondismiss: function() {
+          setSubmitting(false);
+        }
+      }
+    };
+
+    const rzp1 = new (window as any).Razorpay(options);
+    rzp1.on('payment.failed', function (response: any) {
+      setError(`Payment Failed: ${response.error.description}`);
+      setSubmitting(false);
+    });
+    
+    rzp1.open();
+    */
   };
 
   const handleCancelOrder = async () => {
