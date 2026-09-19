@@ -114,7 +114,7 @@
   transform: translateX(-50%);
   z-index: 10;
   opacity: 0;
-  transition: all 0.25s ease-in;
+  transition: all 0.5s ease-in;
 }
 
 /* Step 1: Drop the Box */
@@ -137,7 +137,7 @@
   left: 50%; /* Start relative to center */
   top: 50%;
   margin-top: -13px;
-  transition: transform 0.5s ease-out;
+  transition: transform 1s ease-out;
   transform: translateX(-200px); /* Start offscreen left */
   z-index: 20;
 }
@@ -213,7 +213,7 @@
   width: 2px;
   height: 12px;
   background: #e2e8f0;
-  transition: transform 0.35s ease;
+  transition: transform 0.7s ease;
 }
 .door-top {
   top: 1px;
@@ -262,5 +262,5 @@
 /* 4. Drive Out */
 .truck-button[data-step="DRIVE_OUT"] .truck {
   transform: translateX(300px); /* Drives forward offscreen right */
-  transition: transform 0.5s ease-in;
+  transition: transform 1s ease-in;
 }

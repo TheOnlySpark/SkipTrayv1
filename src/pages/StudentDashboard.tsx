@@ -319,11 +319,14 @@ export default function StudentDashboard() {
       quantity: c.quantity
     }));
 
-    const { data, error } = await supabase.rpc('place_order_with_otp', {
-      p_pickup_time: pickupTime,
-      p_items: itemsJson,
-      p_is_takeaway: isTakeaway
-    });
+    const [{ data, error }] = await Promise.all([
+      supabase.rpc('place_order_with_otp', {
+        p_pickup_time: pickupTime,
+        p_items: itemsJson,
+        p_is_takeaway: isTakeaway
+      }),
+      new Promise(r => setTimeout(r, 7200)) // Wait for truck animation to finish (slowed down to 7.2s)
+    ]);
 
     if (error) {
       setError(error.message);

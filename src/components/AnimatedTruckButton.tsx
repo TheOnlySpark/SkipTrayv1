@@ -9,14 +9,14 @@ interface AnimatedTruckButtonProps {
 }
 
 const BASE_TIMINGS = {
-  BOX_DROP: 250,
-  TRUCK_ENTRY: 500,
-  DOORS_OPEN: 350,
-  REVERSE_LOAD: 750,
-  DOORS_CLOSE: 300,
-  FORWARD_START: 500,
-  LIGHTS_ON: 400,
-  DRIVE_OUT: 500,
+  BOX_DROP: 500,
+  TRUCK_ENTRY: 1000,
+  DOORS_OPEN: 700,
+  REVERSE_LOAD: 1500,
+  DOORS_CLOSE: 600,
+  FORWARD_START: 1000,
+  LIGHTS_ON: 800,
+  DRIVE_OUT: 1000,
   AUTO_RESET_DELAY: 2500
 };
 
@@ -34,12 +34,16 @@ export const AnimatedTruckButton: React.FC<AnimatedTruckButtonProps> = ({
   const startAnimation = async () => {
     if (disabled || step !== 'IDLE') return;
     
-    // Trigger onClick immediately for UX responsiveness, or you can await it
-    // depending on requirements.
+    // Start the first step immediately so isAnimating becomes true
+    setStep('BOX_DROP');
+
+    // Trigger onClick immediately for UX responsiveness
+    // We don't await it so the animation isn't delayed
     try {
-      await onClick();
+      onClick();
     } catch (e) {
-      // If error, cancel animation
+      console.error('Order failed', e);
+      setStep('IDLE');
       return;
     }
 
