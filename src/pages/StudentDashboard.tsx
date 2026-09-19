@@ -55,7 +55,7 @@ export default function StudentDashboard() {
   
   const [cart, setCart] = useState<{item: MenuItem, quantity: number}[]>([]);
   const [pickupTime, setPickupTime] = useState('');
-  const [isTakeaway, setIsTakeaway] = useState(false);
+  const [isTakeaway, setIsTakeaway] = useState<boolean | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [cartOpen, setCartOpen] = useState(false);
@@ -299,6 +299,10 @@ export default function StudentDashboard() {
       return;
     }
     if (cart.length === 0 || !pickupTime) return;
+    if (isTakeaway === null) {
+      setError('Please select whether you want Dine-in or Take-away.');
+      return;
+    }
 
     const slotAvail = getSlotAvailability(pickupTime);
     if (!slotAvail.isAvailable) {
@@ -330,7 +334,7 @@ export default function StudentDashboard() {
       }
       setCart([]);
       setPickupTime('');
-      setIsTakeaway(false);
+      setIsTakeaway(null);
     }
     setSubmitting(false);
   };
@@ -916,9 +920,9 @@ export default function StudentDashboard() {
                             borderRadius: '0.75rem',
                             fontSize: '0.875rem',
                             fontWeight: 600,
-                            border: isTakeaway ? '1px solid #334155' : '1px solid #6366f1',
-                            background: isTakeaway ? '#1e293b' : 'rgba(99,102,241,0.15)',
-                            color: isTakeaway ? '#94a3b8' : '#818cf8',
+                            border: isTakeaway === false ? '1px solid #6366f1' : '1px solid #334155',
+                            background: isTakeaway === false ? 'rgba(99,102,241,0.15)' : '#1e293b',
+                            color: isTakeaway === false ? '#818cf8' : '#94a3b8',
                             transition: 'all 0.2s',
                             cursor: 'pointer'
                           }}
@@ -934,9 +938,9 @@ export default function StudentDashboard() {
                             borderRadius: '0.75rem',
                             fontSize: '0.875rem',
                             fontWeight: 600,
-                            border: !isTakeaway ? '1px solid #334155' : '1px solid #6366f1',
-                            background: !isTakeaway ? '#1e293b' : 'rgba(99,102,241,0.15)',
-                            color: !isTakeaway ? '#94a3b8' : '#818cf8',
+                            border: isTakeaway === true ? '1px solid #6366f1' : '1px solid #334155',
+                            background: isTakeaway === true ? 'rgba(99,102,241,0.15)' : '#1e293b',
+                            color: isTakeaway === true ? '#818cf8' : '#94a3b8',
                             transition: 'all 0.2s',
                             cursor: 'pointer'
                           }}
