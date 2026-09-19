@@ -58,6 +58,10 @@ serve(async (req: any) => {
     // Convert to paise (Razorpay expects smallest currency unit, rounded)
     const amountInPaise = Math.round(finalAmount * 100);
 
+    if (amountInPaise < 100) {
+      throw new Error("Order amount must be at least ₹1.00 (100 paise)")
+    }
+
     // 4. Get Razorpay Credentials
     // @ts-ignore
     const keyId = Deno.env.get('RAZORPAY_KEY_ID')
@@ -91,7 +95,11 @@ serve(async (req: any) => {
     }
 
     // 6. Return the Razorpay Order ID to the frontend
-    return new Response(JSON.stringify({ order_id: razorpayData.id }), {
+    return new Response(JSON.stringify({ 
+      order_id: razorpayData.id,
+      amount: amountInPaise,
+      currency: 'INR'
+    }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     })
@@ -100,7 +108,7 @@ serve(async (req: any) => {
     console.error('Create Order Error:', error)
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 500,
+      status: 500, // Handle Razorpay errors as 500
     })
   }
 })
