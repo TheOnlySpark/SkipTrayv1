@@ -115,6 +115,7 @@ export default function StudentDashboard() {
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewText, setReviewText] = useState('');
   const [submittingReview, setSubmittingReview] = useState(false);
+  const isSubmittingRef = React.useRef(false);
 
   useEffect(() => {
     if (!profile?.id) return;
@@ -128,6 +129,11 @@ export default function StudentDashboard() {
         table: 'orders',
         filter: `user_id=eq.${profile.id}`
       }, (payload) => {
+        if (isSubmittingRef.current && payload.eventType === 'INSERT') {
+          // Ignore INSERT events while the truck animation is playing.
+          // handlePlaceOrder will manually set the active order after the animation finishes.
+          return;
+        }
         const updatedOrder = payload.new as Order;
         if (['PLACED', 'ACCEPTED', 'PREPARING', 'READY'].includes(updatedOrder.status)) {
           setActiveOrder(updatedOrder);
@@ -312,6 +318,7 @@ export default function StudentDashboard() {
     }
 
     setSubmitting(true);
+    isSubmittingRef.current = true;
     setError('');
 
     const itemsJson = cart.map(c => ({
@@ -341,6 +348,7 @@ export default function StudentDashboard() {
       setIsTakeaway(null);
     }
     setSubmitting(false);
+    isSubmittingRef.current = false;
   };
 
   const handleCancelOrder = async () => {
