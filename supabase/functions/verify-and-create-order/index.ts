@@ -35,6 +35,7 @@ serve(async (req: any) => {
       razorpay_order_id, 
       razorpay_signature,
       pickup_time,
+      is_takeaway,
       items // Array of { menu_item_id, quantity }
     } = await req.json()
 
@@ -141,6 +142,7 @@ serve(async (req: any) => {
       .insert({
         user_id: user.id,
         pickup_time,
+        is_takeaway,
         otp_code,
         payment_id: paymentRecord.id,
         status: 'PLACED'
