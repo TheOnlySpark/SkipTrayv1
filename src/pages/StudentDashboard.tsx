@@ -17,6 +17,7 @@ import {
   IconMaximize
 } from '../components/Icons';
 import { QRCodeSVG } from '../components/QRCode';
+import { AnimatedTruckButton } from '../components/AnimatedTruckButton';
 
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 type Order = Database['public']['Tables']['orders']['Row'];
@@ -1004,42 +1005,24 @@ export default function StudentDashboard() {
                         </div>
                       )}
 
-                      <button
-                        type="submit"
-                        disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out)}
-                        style={{
-                          width: '100%',
-                          padding: '0.875rem',
-                          background: isSuspended
-                            ? '#ef4444'
-                            : isSunday
-                              ? '#64748b'
-                              : isBeforeOpeningTime
-                                ? '#4f46e5'
-                                : isLunchClosedForToday
-                                  ? '#64748b'
-                                  : (cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out))
-                                    ? 'rgba(99,102,241,0.4)' : '#6366f1',
-                          color: 'white',
-                          borderRadius: '0.875rem',
-                          fontWeight: 700,
-                          fontSize: '0.875rem',
-                          border: 'none',
-                          cursor: isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cart.length === 0 || !pickupTime || submitting ? 'not-allowed' : 'pointer',
-                          transition: 'background 0.2s',
-                          marginBottom: '1rem',
+                      <AnimatedTruckButton
+                        onClick={async () => {
+                          await handlePlaceOrder({ preventDefault: () => {} } as any);
                         }}
-                      >
-                        {isSuspended
-                          ? 'Account Deactivated (3-Day Penalty)'
-                          : isSunday
-                            ? 'Closed on Sundays'
-                            : isBeforeOpeningTime
-                              ? 'Lunch Booking Opens at 9:30 AM'
-                              : isLunchClosedForToday
-                                ? 'Lunch Ordering Closed Today'
-                                : (submitting ? 'Placing...' : `Place Order (${cartTotalItems} items • ₹${cartTotalPrice.toFixed(2)})`)}
-                      </button>
+                        disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out)}
+                        text={
+                          isSuspended
+                            ? 'Account Deactivated (3-Day Penalty)'
+                            : isSunday
+                              ? 'Closed on Sundays'
+                              : isBeforeOpeningTime
+                                ? 'Lunch Booking Opens at 9:30 AM'
+                                : isLunchClosedForToday
+                                  ? 'Lunch Ordering Closed Today'
+                                  : `Place Order (${cartTotalItems} items • ₹${cartTotalPrice.toFixed(2)})`
+                        }
+                        className="mb-4"
+                      />
                     </form>
                   </div>
                 )}

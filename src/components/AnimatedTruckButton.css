@@ -1,0 +1,250 @@
+.truck-button {
+  --color: #fff;
+  --background: #1e293b; /* slate-800 */
+  --tick: #16bf78;
+  --base: #0d0f18;
+  --wheel: #2b3044;
+  --wheel-inner: #646b8c;
+  --wheel-dot: #fff;
+  --back: #6d58ff;
+  --back-inner: #362a89;
+  --back-inner-shadow: #2d246b;
+  --drop: #eceef4;
+  --front: #1f2335;
+  --front-shadow: #151823;
+  --front-light: #fff8b1;
+  --window: #2b3044;
+  --window-light: #404660;
+  --street: #646b8c;
+  --street-fill: #404660;
+  --box: #dcb97a;
+  --box-shadow: #b89b66;
+  
+  padding: 12px 0;
+  width: 100%;
+  cursor: pointer;
+  text-align: center;
+  position: relative;
+  border: none;
+  outline: none;
+  color: var(--color);
+  background: var(--background);
+  border-radius: 12px;
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  transition: background 0.3s, transform 0.2s;
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 48px;
+  font-family: inherit;
+}
+
+.truck-button:hover {
+  background: #334155; /* slate-700 */
+}
+
+.truck-button:active {
+  transform: scale(0.98);
+}
+
+.truck-button.is-animating {
+  pointer-events: none;
+}
+
+.truck-button .default-text {
+  font-size: 1rem;
+  font-weight: 600;
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+.truck-button.is-animating .default-text {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+
+.truck-button .success-text {
+  position: absolute;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--tick);
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+.truck-button.is-completed .success-text {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* The Truck Animation Wrapper */
+.truck-button .truck-wrapper {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.truck-button.is-animating .truck-wrapper {
+  opacity: 1;
+}
+
+/* Base Top-Down Truck Structure */
+/* The box that drops */
+.truck-box {
+  width: 20px;
+  height: 20px;
+  background: #fff;
+  border-radius: 2px;
+  position: absolute;
+  left: 50%;
+  top: -30px;
+  transform: translateX(-50%);
+  z-index: 10;
+  opacity: 0;
+  transition: all 0.25s ease-in;
+}
+
+/* Step 1: Drop the Box */
+.truck-button[data-step="BOX_DROP"] .truck-box,
+.truck-button[data-step="TRUCK_ENTRY"] .truck-box,
+.truck-button[data-step="DOORS_OPEN"] .truck-box,
+.truck-button[data-step="REVERSE_LOAD"] .truck-box {
+  top: 50%;
+  margin-top: -10px;
+  opacity: 1;
+}
+
+/* The Truck itself */
+.truck {
+  position: absolute;
+  width: 70px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  left: 100%; /* Start outside right */
+  top: 50%;
+  margin-top: -13px;
+  transition: transform 0.5s ease-out;
+  transform: translateX(20px);
+  z-index: 20;
+}
+
+.truck-trailer {
+  width: 48px;
+  height: 26px;
+  background: #fff;
+  border-radius: 2px;
+  position: relative;
+  z-index: 2;
+}
+
+.truck-cab {
+  width: 18px;
+  height: 22px;
+  background: #3b82f6; /* blue-500 */
+  border-radius: 0 4px 4px 0;
+  position: relative;
+  margin-left: 2px;
+  z-index: 3;
+}
+
+/* Cab windshield */
+.truck-cab::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 2px;
+  bottom: 2px;
+  width: 8px;
+  background: rgba(0,0,0,0.3);
+  border-radius: 0 2px 2px 0;
+}
+
+/* Headlights */
+.truck-lights {
+  position: absolute;
+  right: -10px;
+  top: 0;
+  bottom: 0;
+  width: 30px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s;
+  background: linear-gradient(90deg, rgba(255,255,150,0.4) 0%, rgba(255,255,150,0) 100%);
+  clip-path: polygon(0 4px, 100% 0, 100% 100%, 0 18px);
+}
+
+.truck-button[data-step="LIGHTS_ON"] .truck-lights,
+.truck-button[data-step="DRIVE_OUT"] .truck-lights {
+  opacity: 1;
+}
+
+
+/* Trailer Doors (Top-down view) */
+.door-top, .door-bottom {
+  position: absolute;
+  left: -2px;
+  width: 4px;
+  height: 12px;
+  background: #e2e8f0;
+  transform-origin: right center;
+  transition: transform 0.35s ease;
+}
+.door-top {
+  top: 1px;
+}
+.door-bottom {
+  bottom: 1px;
+}
+
+/* Steps execution */
+/* 1. Truck Entry */
+.truck-button[data-step="TRUCK_ENTRY"] .truck,
+.truck-button[data-step="DOORS_OPEN"] .truck {
+  transform: translateX(-30px); /* Stop before the box */
+}
+
+/* 2. Doors Open */
+.truck-button[data-step="DOORS_OPEN"] .door-top,
+.truck-button[data-step="REVERSE_LOAD"] .door-top {
+  transform: rotate(-120deg);
+}
+.truck-button[data-step="DOORS_OPEN"] .door-bottom,
+.truck-button[data-step="REVERSE_LOAD"] .door-bottom {
+  transform: rotate(120deg);
+}
+
+/* 3. Reverse Load */
+.truck-button[data-step="REVERSE_LOAD"] .truck,
+.truck-button[data-step="DOORS_CLOSE"] .truck,
+.truck-button[data-step="FORWARD_START"] .truck,
+.truck-button[data-step="LIGHTS_ON"] .truck {
+  transform: translateX(calc(-50vw + 50% + 24px)); /* Adjust depending on parent width, we use centered logic */
+  left: 50%;
+  transform: translateX(-14px); /* Box is at center, truck trailer is 48px. Back of trailer is left of truck. */
+}
+
+/* Once the truck reverses, the box goes INSIDE the truck */
+.truck-button[data-step="REVERSE_LOAD"] .truck-box,
+.truck-button[data-step="DOORS_CLOSE"] .truck-box,
+.truck-button[data-step="FORWARD_START"] .truck-box,
+.truck-button[data-step="LIGHTS_ON"] .truck-box,
+.truck-button[data-step="DRIVE_OUT"] .truck-box {
+  opacity: 0;
+  transition: opacity 0s 0.2s; /* hides instantly once covered */
+}
+
+/* 4. Drive Out */
+.truck-button[data-step="DRIVE_OUT"] .truck {
+  left: 50%;
+  transform: translateX(300px);
+  transition: transform 0.5s ease-in;
+}
