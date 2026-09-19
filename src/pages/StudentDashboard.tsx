@@ -332,7 +332,7 @@ export default function StudentDashboard() {
         p_items: itemsJson,
         p_is_takeaway: isTakeaway
       }),
-      new Promise(r => setTimeout(r, 7200)) // Wait for truck animation to finish (slowed down to 7.2s)
+      new Promise(r => setTimeout(r, 5400)) // Wait for truck animation to finish (slowed down to 5.4s)
     ]);
 
     if (error) {
