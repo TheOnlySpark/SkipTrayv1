@@ -110,7 +110,7 @@ serve(async (req: any) => {
 
     // 4. Get User ID
     const { data: { user }, error: userError } = await supabaseClient.auth.getUser()
-    if (userError || !user) throw new Error("Unauthorized")
+    if (userError || !user) throw new Error("Unauthorized: " + (userError?.message || "No user found") + " | Token: " + (req.headers.get('Authorization') ? "Present" : "Missing"))
 
     // 5. Create Payment Record
     const { data: paymentRecord, error: paymentError } = await supabaseAdmin
