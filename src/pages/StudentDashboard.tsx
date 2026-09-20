@@ -57,7 +57,7 @@ export default function StudentDashboard() {
   const [cart, setCart] = useState<{item: MenuItem, quantity: number}[]>([]);
   const [pickupTime, setPickupTime] = useState('');
   const [isTakeaway, setIsTakeaway] = useState<boolean>(false);
-  const [testMode, setTestMode] = useState<boolean>(true);
+  const [testMode, setTestMode] = useState<boolean>(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [cartOpen, setCartOpen] = useState(false);
@@ -93,7 +93,7 @@ export default function StudentDashboard() {
     slotDate.setHours(hours, minutes, 0, 0);
 
     const diffMinutes = (slotDate.getTime() - now.getTime()) / (1000 * 60);
-    const isAvailable = !isBeforeOpeningTime && diffMinutes >= 30;
+    const isAvailable = testMode || (!isBeforeOpeningTime && diffMinutes >= 30);
     
     let reason = '';
     if (!isAvailable) {
@@ -242,7 +242,7 @@ export default function StudentDashboard() {
       });
       return;
     }
-    if (isSunday) {
+    if (isSunday && !testMode) {
       showAlert({
         title: 'Canteen Closed',
         message: 'Orders cannot be placed on Sundays. The canteen is closed.',
@@ -250,7 +250,7 @@ export default function StudentDashboard() {
       });
       return;
     }
-    if (isBeforeOpeningTime) {
+    if (isBeforeOpeningTime && !testMode) {
       showAlert({
         title: 'Ordering Not Open Yet',
         message: 'Lunch booking opens at 9:30 AM in the morning.',
@@ -258,7 +258,7 @@ export default function StudentDashboard() {
       });
       return;
     }
-    if (isLunchClosedForToday) {
+    if (isLunchClosedForToday && !testMode) {
       showAlert({
         title: 'Booking Window Closed',
         message: 'Lunch ordering for today is closed. Orders must be placed at least 30 minutes in advance of Lunch slots (12:30 PM – 1:40 PM).',
@@ -288,22 +288,22 @@ export default function StudentDashboard() {
 
   const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSunday) {
+    if (isSunday && !testMode) {
       setError('Orders cannot be placed on Sundays. The canteen is closed.');
       return;
     }
-    if (isBeforeOpeningTime) {
+    if (isBeforeOpeningTime && !testMode) {
       setError('Lunch booking opens at 9:30 AM in the morning.');
       return;
     }
-    if (isLunchClosedForToday) {
+    if (isLunchClosedForToday && !testMode) {
       setError('Lunch ordering for today is closed. Orders must be placed at least 30 minutes before the pickup slot.');
       return;
     }
     if (cart.length === 0 || !pickupTime) return;
 
     const slotAvail = getSlotAvailability(pickupTime);
-    if (!slotAvail.isAvailable) {
+    if (!slotAvail.isAvailable && !testMode) {
       setError(`Selected pickup slot is no longer available (${slotAvail.reason}). Please select another Lunch slot.`);
       return;
     }
@@ -497,7 +497,22 @@ export default function StudentDashboard() {
                 </span>
               )}
             </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-3 leading-tight">Welcome, {profile?.name || 'User'}</h1>
+            
+            {/* Test Mode Toggle for Dev Branch */}
+            <div className="mt-4 flex items-center gap-3">
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input 
+                  type="checkbox" 
+                  className="sr-only peer"
+                  checked={testMode}
+                  onChange={(e) => setTestMode(e.target.checked)}
+                />
+                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                <span className="ml-3 text-sm font-bold text-slate-700">Developer Test Mode (Bypass Time & Payment)</span>
+              </label>
+            </div>
+            
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-4 leading-tight">Welcome, {profile?.name || 'User'}</h1>
             
             {strikeCount === 1 && !isSuspended && (
               <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50/80 border border-amber-200/60 p-2.5 rounded-xl mt-3 font-medium">
@@ -766,12 +781,12 @@ export default function StudentDashboard() {
                 <h2 className="text-xl font-bold text-slate-800">Menu</h2>
                 <p className="text-xs text-slate-500 mt-0.5">Lunch Pickup: 11:30 AM – 2:30 PM • Booking Opens: 9:30 AM (Min 30m Notice)</p>
               </div>
-              {isSunday ? (
+              {isSunday && !testMode ? (
                 <span className="self-start sm:self-auto px-3 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm">
                   <IconBan size={14} className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                   <span>Closed on Sundays</span>
                 </span>
-              ) : isBeforeOpeningTime ? (
+              ) : isBeforeOpeningTime && !testMode ? (
                 <span className="self-start sm:self-auto px-3 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm">
                   <IconClock size={14} className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
                   <span>Lunch Booking Opens at 9:30 AM</span>
