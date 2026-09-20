@@ -100,7 +100,7 @@ serve(async (req: any) => {
     });
 
     const gatewayFee = calculatedTotal * 0.025;
-    const expectedAmountPaid = Math.round((calculatedTotal + gatewayFee) * 100) / 100;
+    const expectedAmountPaid = Math.round((calculatedTotal + gatewayFee + 4) * 100) / 100;
 
     // Allow for a small rounding difference
     if (Math.abs(expectedAmountPaid - amountPaid) > 0.02) {

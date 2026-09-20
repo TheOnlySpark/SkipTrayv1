@@ -1112,7 +1112,7 @@ export default function StudentDashboard() {
                           <div style={{ borderTop: '1px solid #334155', margin: '0.25rem 0' }}></div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span style={{ color: '#f8fafc', fontSize: '0.95rem', fontWeight: 700 }}>Total Amount</span>
-                            <span style={{ color: '#38bdf8', fontSize: '1.125rem', fontWeight: 700 }}>₹{(cartTotalPrice + cartTotalPrice * 0.025).toFixed(2)}</span>
+                            <span style={{ color: '#38bdf8', fontSize: '1.125rem', fontWeight: 700 }}>₹{(cartTotalPrice + (cartTotalPrice * 0.025) + 4).toFixed(2)}</span>
                           </div>
                         </div>
                       )}
@@ -1188,7 +1188,7 @@ export default function StudentDashboard() {
                     <span style={{ color: '#f1f5f9', fontWeight: 700, fontSize: '0.95rem' }}>Your Order</span>
                     {cartTotalItems > 0 && (
                       <span style={{ color: '#818cf8', fontSize: '0.75rem', fontWeight: 600 }}>
-                        ₹{(cartTotalPrice + cartTotalPrice * 0.025).toFixed(2)} • {cartTotalItems} item{cartTotalItems > 1 ? 's' : ''}
+                        ₹{(cartTotalPrice + (cartTotalPrice * 0.025) + 4).toFixed(2)} • {cartTotalItems} item{cartTotalItems > 1 ? 's' : ''}
                       </span>
                     )}
                   </div>
