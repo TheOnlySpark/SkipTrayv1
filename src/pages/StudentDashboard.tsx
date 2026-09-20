@@ -316,29 +316,7 @@ export default function StudentDashboard() {
       quantity: c.quantity
     }));
 
-    if (testMode) {
-      // Bypass payment gateway for testing
-      const { data: orderId, error: rpcError } = await supabase.rpc('place_order_with_otp', {
-        p_pickup_time: pickupTime,
-        p_items: itemsJson
-      });
 
-      if (rpcError) {
-        setError('Failed to place order (Test Mode): ' + rpcError.message);
-        setSubmitting(false);
-        return;
-      }
-
-      const { data: newOrder } = await supabase.from('orders').select('*').eq('id', orderId).single();
-      if (newOrder) {
-        setActiveOrder(newOrder);
-      }
-      setCart([]);
-      setPickupTime('');
-      setIsTakeaway(false);
-      setSubmitting(false);
-      return;
-    }
 
     // 1. Create Cashfree Order
     const { data: orderData, error: orderError } = await supabase.functions.invoke('create-cashfree-order', {
@@ -508,7 +486,7 @@ export default function StudentDashboard() {
                   onChange={(e) => setTestMode(e.target.checked)}
                 />
                 <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
-                <span className="ml-3 text-sm font-bold text-slate-700">Developer Test Mode (Bypass Time & Payment)</span>
+                <span className="ml-3 text-sm font-bold text-slate-700">Developer Test Mode (Bypass Time Restrictions)</span>
               </label>
             </div>
             
