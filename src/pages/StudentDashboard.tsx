@@ -1049,40 +1049,6 @@ export default function StudentDashboard() {
                         </button>
                       </div>
 
-                      {/* Test Mode Toggle */}
-                      <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.75rem 1rem', background: '#1e293b', borderRadius: '0.75rem', border: '1px solid #334155' }}>
-                        <div>
-                          <div style={{ color: '#e2e8f0', fontSize: '0.875rem', fontWeight: 600 }}>Test Mode (Bypass Payment)</div>
-                          <div style={{ color: '#94a3b8', fontSize: '0.7rem', marginTop: '0.125rem' }}>Places order instantly via RPC</div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setTestMode(!testMode)}
-                          style={{
-                            width: '3rem',
-                            height: '1.5rem',
-                            borderRadius: '9999px',
-                            background: testMode ? '#6366f1' : '#334155',
-                            position: 'relative',
-                            transition: 'background 0.3s',
-                            border: 'none',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          <div style={{
-                            width: '1.125rem',
-                            height: '1.125rem',
-                            background: 'white',
-                            borderRadius: '50%',
-                            position: 'absolute',
-                            top: '0.1875rem',
-                            left: testMode ? '1.6875rem' : '0.1875rem',
-                            transition: 'left 0.3s, transform 0.3s',
-                            boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
-                          }} />
-                        </button>
-                      </div>
-
                       {/* Total Amount Summary */}
                       {cart.length > 0 && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem', padding: '0.75rem 1rem', background: '#1e293b', borderRadius: '0.75rem' }}>
@@ -1091,13 +1057,13 @@ export default function StudentDashboard() {
                             <span style={{ color: '#94a3b8', fontSize: '0.875rem', fontWeight: 600 }}>₹{cartTotalPrice.toFixed(2)}</span>
                           </div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span style={{ color: '#94a3b8', fontSize: '0.875rem', fontWeight: 600 }}>Gateway Fee (2.36%)</span>
-                            <span style={{ color: '#94a3b8', fontSize: '0.875rem', fontWeight: 600 }}>₹{(cartTotalPrice * 0.0236).toFixed(2)}</span>
+                            <span style={{ color: '#94a3b8', fontSize: '0.875rem', fontWeight: 600 }}>Gateway Fee (2.5%)</span>
+                            <span style={{ color: '#94a3b8', fontSize: '0.875rem', fontWeight: 600 }}>₹{(cartTotalPrice * 0.025).toFixed(2)}</span>
                           </div>
                           <div style={{ borderTop: '1px solid #334155', margin: '0.25rem 0' }}></div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span style={{ color: '#f8fafc', fontSize: '0.95rem', fontWeight: 700 }}>Total Amount</span>
-                            <span style={{ color: '#38bdf8', fontSize: '1.125rem', fontWeight: 700 }}>₹{(cartTotalPrice + cartTotalPrice * 0.0236).toFixed(2)}</span>
+                            <span style={{ color: '#38bdf8', fontSize: '1.125rem', fontWeight: 700 }}>₹{(cartTotalPrice + cartTotalPrice * 0.025).toFixed(2)}</span>
                           </div>
                         </div>
                       )}
@@ -1106,17 +1072,17 @@ export default function StudentDashboard() {
 
                       <button
                         type="submit"
-                        disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out)}
+                        disabled={isSuspended || (!testMode && (isSunday || isBeforeOpeningTime || isLunchClosedForToday)) || cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out)}
                         style={{
                           width: '100%',
                           padding: '0.875rem',
                           background: isSuspended
                             ? '#ef4444'
-                            : isSunday
+                            : (isSunday && !testMode)
                               ? '#64748b'
-                              : isBeforeOpeningTime
+                              : (isBeforeOpeningTime && !testMode)
                                 ? '#4f46e5'
-                                : isLunchClosedForToday
+                                : (isLunchClosedForToday && !testMode)
                                   ? '#64748b'
                                   : (cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out))
                                     ? 'rgba(99,102,241,0.4)' : '#6366f1',
@@ -1125,20 +1091,20 @@ export default function StudentDashboard() {
                           fontWeight: 700,
                           fontSize: '0.875rem',
                           border: 'none',
-                          cursor: isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cart.length === 0 || !pickupTime || submitting ? 'not-allowed' : 'pointer',
+                          cursor: isSuspended || (!testMode && (isSunday || isBeforeOpeningTime || isLunchClosedForToday)) || cart.length === 0 || !pickupTime || submitting ? 'not-allowed' : 'pointer',
                           transition: 'background 0.2s',
                           marginBottom: '1rem',
                         }}
                       >
                         {isSuspended
                           ? 'Account Deactivated (3-Day Penalty)'
-                          : isSunday
+                          : (isSunday && !testMode)
                             ? 'Closed on Sundays'
-                            : isBeforeOpeningTime
+                            : (isBeforeOpeningTime && !testMode)
                               ? 'Lunch Booking Opens at 9:30 AM'
-                              : isLunchClosedForToday
+                              : (isLunchClosedForToday && !testMode)
                                 ? 'Lunch Ordering Closed Today'
-                                : (submitting ? 'Placing...' : `Place Order (${cartTotalItems} items • ₹${(cartTotalPrice + cartTotalPrice * 0.0236).toFixed(2)})`)}
+                                : (submitting ? 'Placing...' : `Place Order (${cartTotalItems} items • ₹${(cartTotalPrice + cartTotalPrice * 0.025).toFixed(2)})`)}
                       </button>
                     </form>
                   </div>
@@ -1173,7 +1139,7 @@ export default function StudentDashboard() {
                     <span style={{ color: '#f1f5f9', fontWeight: 700, fontSize: '0.95rem' }}>Your Order</span>
                     {cartTotalItems > 0 && (
                       <span style={{ color: '#818cf8', fontSize: '0.75rem', fontWeight: 600 }}>
-                        ₹{(cartTotalPrice + cartTotalPrice * 0.0236).toFixed(2)} • {cartTotalItems} item{cartTotalItems > 1 ? 's' : ''}
+                        ₹{(cartTotalPrice + cartTotalPrice * 0.025).toFixed(2)} • {cartTotalItems} item{cartTotalItems > 1 ? 's' : ''}
                       </span>
                     )}
                   </div>
