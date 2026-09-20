@@ -70,6 +70,38 @@ export default function StudentDashboard() {
     return () => clearInterval(timer);
   }, []);
 
+  // Handle Cashfree redirects (if the page reloaded during payment)
+  useEffect(() => {
+    const checkPendingPayment = async () => {
+      const pendingStr = localStorage.getItem('pendingCashfreeOrder');
+      if (pendingStr) {
+        try {
+          const pending = JSON.parse(pendingStr);
+          localStorage.removeItem('pendingCashfreeOrder'); // clear to prevent infinite loops
+
+          const { data: verifyData, error: verifyError } = await supabase.functions.invoke('verify-and-create-order', {
+            body: {
+              order_id: pending.order_id,
+              pickup_time: pending.pickup_time,
+              items: pending.items
+            }
+          });
+
+          if (!verifyError && verifyData?.success) {
+            const { data: newOrder } = await supabase.from('orders').select('*').eq('id', verifyData.order.id).single();
+            if (newOrder) {
+              setActiveOrder(newOrder);
+              setCart([]);
+            }
+          }
+        } catch (e) {
+          console.error("Error recovering pending payment:", e);
+        }
+      }
+    };
+    checkPendingPayment();
+  }, []);
+
   // Anti-Screenshot Live Security Watermark Ticker (1-second precision)
   const [liveTickerTime, setLiveTickerTime] = useState(() => new Date().toLocaleTimeString());
   useEffect(() => {
@@ -337,12 +369,20 @@ export default function StudentDashboard() {
     try {
       const cashfree = await loadCashfree();
 
+      // Save pending order details to localStorage in case the page redirects during payment
+      localStorage.setItem('pendingCashfreeOrder', JSON.stringify({
+        order_id: orderData.order_id,
+        pickup_time: pickupTime,
+        items: itemsJson
+      }));
+
       const checkoutResult = await cashfree.checkout({
         paymentSessionId: orderData.payment_session_id,
         redirectTarget: '_modal',
       });
 
       if (checkoutResult.error) {
+        localStorage.removeItem('pendingCashfreeOrder');
         setError(`Payment Failed: ${checkoutResult.error.message}`);
         setSubmitting(false);
         return;
@@ -356,6 +396,8 @@ export default function StudentDashboard() {
           items: itemsJson
         }
       });
+      
+      localStorage.removeItem('pendingCashfreeOrder');
 
       if (verifyError || !verifyData?.success) {
         setError('Payment verification failed. If money was deducted, contact admin.');
