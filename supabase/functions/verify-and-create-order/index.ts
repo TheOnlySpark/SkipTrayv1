@@ -121,7 +121,7 @@ serve(async (req: any) => {
         user_id: user.id,
         cf_order_id: order_id,
         cf_payment_id: cfPaymentId,
-        amount: amountPaid,
+        amount: Math.round(Number(amountPaid) * 100),
         status: 'SUCCESS'
       })
       .select()
