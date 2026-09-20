@@ -87,7 +87,10 @@ export default function StudentDashboard() {
             }
           });
 
-          if (!verifyError && verifyData?.success) {
+          if (verifyError || !verifyData?.success) {
+            const backendError = verifyError?.message || verifyData?.error || 'Unknown error';
+            setError(`Payment verification failed: ${backendError}. If money was deducted, contact admin.`);
+          } else {
             const { data: newOrder } = await supabase.from('orders').select('*').eq('id', verifyData.order.id).single();
             if (newOrder) {
               setActiveOrder(newOrder);
@@ -400,7 +403,8 @@ export default function StudentDashboard() {
       localStorage.removeItem('pendingCashfreeOrder');
 
       if (verifyError || !verifyData?.success) {
-        setError('Payment verification failed. If money was deducted, contact admin.');
+        const backendError = verifyError?.message || verifyData?.error || 'Unknown error';
+        setError(`Payment verification failed: ${backendError}. If money was deducted, contact admin.`);
         setSubmitting(false);
         return;
       }
