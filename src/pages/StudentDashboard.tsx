@@ -799,7 +799,7 @@ export default function StudentDashboard() {
                     {!item.is_sold_out ? (
                       <button 
                         onClick={() => addToCart(item)}
-                        disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cartTotalItems >= 5}
+                        disabled={isSuspended || (!testMode && (isSunday || isBeforeOpeningTime || isLunchClosedForToday)) || cartTotalItems >= 5}
                         className="w-10 h-10 flex items-center justify-center bg-indigo-50 text-indigo-600 rounded-xl font-bold hover:bg-indigo-600 hover:text-white transition-colors disabled:opacity-50 disabled:hover:bg-indigo-50 disabled:hover:text-indigo-600 shadow-sm"
                       >
                         +
