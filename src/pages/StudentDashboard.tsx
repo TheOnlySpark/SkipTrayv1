@@ -1106,7 +1106,7 @@ export default function StudentDashboard() {
                             <span style={{ color: '#94a3b8', fontSize: '0.875rem', fontWeight: 600 }}>₹{cartTotalPrice.toFixed(2)}</span>
                           </div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span style={{ color: '#94a3b8', fontSize: '0.875rem', fontWeight: 600 }}>Gateway Fee (2.5%)</span>
+                            <span style={{ color: '#94a3b8', fontSize: '0.875rem', fontWeight: 600 }}>GST + Other</span>
                             <span style={{ color: '#94a3b8', fontSize: '0.875rem', fontWeight: 600 }}>₹{(cartTotalPrice * 0.025).toFixed(2)}</span>
                           </div>
                           <div style={{ borderTop: '1px solid #334155', margin: '0.25rem 0' }}></div>
