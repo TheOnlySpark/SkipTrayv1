@@ -72,6 +72,8 @@ export default function StudentDashboard() {
 
   // Handle Cashfree redirects (if the page reloaded during payment)
   useEffect(() => {
+    if (!profile?.id) return;
+
     const checkPendingPayment = async () => {
       const pendingStr = localStorage.getItem('pendingCashfreeOrder');
       if (pendingStr) {
@@ -103,7 +105,7 @@ export default function StudentDashboard() {
       }
     };
     checkPendingPayment();
-  }, []);
+  }, [profile?.id]);
 
   // Anti-Screenshot Live Security Watermark Ticker (1-second precision)
   const [liveTickerTime, setLiveTickerTime] = useState(() => new Date().toLocaleTimeString());
