@@ -969,7 +969,7 @@ export default function StudentDashboard() {
                         <select
                           value={pickupTime}
                           onChange={e => setPickupTime(e.target.value)}
-                          disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday}
+                          disabled={isSuspended || (!testMode && (isSunday || isBeforeOpeningTime || isLunchClosedForToday))}
                           style={{
                             width: '100%',
                             background: '#1e293b',
@@ -978,17 +978,17 @@ export default function StudentDashboard() {
                             padding: '0.625rem 0.875rem',
                             borderRadius: '0.75rem',
                             fontSize: '0.875rem',
-                            cursor: (isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday) ? 'not-allowed' : 'pointer',
-                            opacity: (isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday) ? 0.6 : 1,
+                            cursor: (isSuspended || (!testMode && (isSunday || isBeforeOpeningTime || isLunchClosedForToday))) ? 'not-allowed' : 'pointer',
+                            opacity: (isSuspended || (!testMode && (isSunday || isBeforeOpeningTime || isLunchClosedForToday))) ? 0.6 : 1,
                             appearance: 'none' as const,
                           }}
                         >
                           <option value="">
-                            {isSunday 
+                            {(isSunday && !testMode)
                               ? 'Closed on Sundays' 
-                              : isBeforeOpeningTime
+                              : (isBeforeOpeningTime && !testMode)
                                 ? 'Lunch Booking Opens at 9:30 AM'
-                                : isLunchClosedForToday 
+                                : (isLunchClosedForToday && !testMode)
                                   ? 'Lunch Ordering Closed for Today' 
                                   : 'Select a Lunch Slot (30-min intervals)...'}
                           </option>
