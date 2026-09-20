@@ -373,7 +373,8 @@ export default function StudentDashboard() {
       setIsTakeaway(false);
       setSubmitting(false);
     } catch (sdkError: any) {
-      setError('Failed to load payment SDK. Please check your connection.');
+      console.error('Checkout error:', sdkError);
+      setError('Checkout Error: ' + (sdkError?.message || 'Failed to load payment SDK. Please check your connection.'));
       setSubmitting(false);
     }
   };
