@@ -361,7 +361,7 @@ export default function StudentDashboard() {
 
       const checkoutResult = await cashfree.checkout({
         paymentSessionId: orderData.payment_session_id,
-        returnUrl: window.location.href,
+        redirectTarget: '_modal',
       });
 
       if (checkoutResult.error) {
