@@ -2,25 +2,25 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 // @ts-ignore
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
-import * as crypto from "node:crypto"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-// @ts-ignore
 serve(async (req: any) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
   try {
-    const { razorpay_payment_id, razorpay_order_id, razorpay_signature, pickup_time, items } = await req.json()
-
-    // 1. Get user from auth header
-    const authHeader = req.headers.get('Authorization')
-    if (!authHeader) throw new Error("Missing Authorization header")
+    const supabaseClient = createClient(
+      // @ts-ignore
+      Deno.env.get('SUPABASE_URL') ?? '',
+      // @ts-ignore
+      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
+    )
 
     const supabaseAdmin = createClient(
       // @ts-ignore
@@ -29,117 +29,144 @@ serve(async (req: any) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
 
-    const token = authHeader.replace('Bearer ', '')
-    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token)
-    
-    if (userError || !user) {
-      throw new Error("Unauthorized: " + (userError?.message || 'No user found'))
-    }
+    const {
+      order_id,       // The order_id we generated when creating the Cashfree order
+      pickup_time,
+      items           // Array of { menu_item_id, quantity }
+    } = await req.json()
 
-    // 2. Verify Razorpay Signature
     // @ts-ignore
-    const keySecret = Deno.env.get('RAZORPAY_KEY_SECRET')
-    if (!keySecret) throw new Error("Razorpay secret not configured in Supabase Secrets")
+    const appId = Deno.env.get('CASHFREE_APP_ID')
+    // @ts-ignore
+    const secretKey = Deno.env.get('CASHFREE_SECRET_KEY')
+    if (!appId || !secretKey) throw new Error("Cashfree keys not configured")
 
-    const signatureBody = razorpay_order_id + "|" + razorpay_payment_id;
-    const expectedSignature = crypto
-      .createHmac("sha256", keySecret)
-      .update(signatureBody.toString())
-      .digest("hex");
+    // @ts-ignore
+    const baseUrl = (Deno.env.get('CASHFREE_ENV') === 'production')
+      ? 'https://api.cashfree.com'
+      : 'https://sandbox.cashfree.com'
 
-    if (expectedSignature !== razorpay_signature) {
-      throw new Error("Payment signature verification failed. Possible tampering.")
+    // 1. Verify payment by fetching from Cashfree API (server-side, no client signatures needed)
+    const paymentResponse = await fetch(`${baseUrl}/pg/orders/${order_id}/payments`, {
+      headers: {
+        'x-client-id': appId,
+        'x-client-secret': secretKey,
+        'x-api-version': '2025-01-01',
+      }
+    })
+    const payments = await paymentResponse.json()
+
+    if (!Array.isArray(payments) || payments.length === 0) {
+      throw new Error("No payments found for this order")
     }
 
-    // 3. Verify Prices and Calculate Totals
+    // Find the successful payment
+    const successfulPayment = payments.find((p: any) => p.payment_status === 'SUCCESS')
+    if (!successfulPayment) {
+      throw new Error("Payment not successful")
+    }
+
+    const cfPaymentId = String(successfulPayment.cf_payment_id)
+    const amountPaid = successfulPayment.payment_amount
+
+    // 2. Prevent Replay Attacks: Check if cf_payment_id already exists
+    const { data: existingPayment } = await supabaseAdmin
+      .from('payments')
+      .select('id')
+      .eq('cf_payment_id', cfPaymentId)
+      .maybeSingle()
+
+    if (existingPayment) {
+      throw new Error("Payment already processed (Replay attack detected)")
+    }
+
+    // 3. Validate exact item cost from database to prevent Cart Tampering
     const itemIds = items.map((i: any) => i.menu_item_id)
     const { data: menuItems, error: menuError } = await supabaseAdmin
       .from('menu_items')
-      .select('*')
+      .select('id, price')
       .in('id', itemIds)
 
-    if (menuError || !menuItems) throw new Error("Could not fetch menu items")
-
-    let baseTotal = 0
-    const orderItemsForDb = []
-
-    for (const reqItem of items) {
-      const dbItem = menuItems.find((m: any) => m.id === reqItem.menu_item_id)
-      if (!dbItem) throw new Error(`Menu item not found: ${reqItem.menu_item_id}`)
-      if (dbItem.is_sold_out) throw new Error(`${dbItem.name} is currently sold out`)
-
-      const lineTotal = dbItem.price * reqItem.quantity
-      baseTotal += lineTotal
-      
-      orderItemsForDb.push({
-        menu_item_id: dbItem.id,
-        quantity: reqItem.quantity,
-        price_at_time: dbItem.price
-      })
+    if (menuError || !menuItems) {
+      throw new Error("Could not fetch menu items for validation")
     }
 
-    const gatewayFee = baseTotal * 0.0236
-    const finalAmount = baseTotal + gatewayFee
+    let calculatedTotal = 0;
+    items.forEach((reqItem: any) => {
+      const dbItem = menuItems.find((m: any) => m.id === reqItem.menu_item_id);
+      if (dbItem && typeof dbItem.price === 'number') {
+        calculatedTotal += dbItem.price * reqItem.quantity;
+      }
+    });
 
-    // 4. Create the Order in the DB
-    const { data: order, error: orderInsertError } = await supabaseAdmin
+    const gatewayFee = calculatedTotal * 0.025;
+    const expectedAmountPaid = Math.round((calculatedTotal + gatewayFee) * 100) / 100;
+
+    // Allow for a small rounding difference
+    if (Math.abs(expectedAmountPaid - amountPaid) > 0.02) {
+      console.error(`Tampering detected! Paid: ${amountPaid}, Expected: ${expectedAmountPaid} (Cart: ${calculatedTotal})`)
+      throw new Error("Payment amount mismatch. Order rejected.")
+    }
+
+    // 4. Get User ID
+    const { data: { user }, error: userError } = await supabaseClient.auth.getUser()
+    if (userError || !user) throw new Error("Unauthorized")
+
+    // 5. Create Payment Record
+    const { data: paymentRecord, error: paymentError } = await supabaseAdmin
+      .from('payments')
+      .insert({
+        user_id: user.id,
+        cf_order_id: order_id,
+        cf_payment_id: cfPaymentId,
+        amount: amountPaid,
+        status: 'SUCCESS'
+      })
+      .select()
+      .single()
+
+    if (paymentError) throw new Error("Failed to record payment: " + paymentError.message)
+
+    // 6. Create Order
+    const otp_code = Math.floor(100000 + Math.random() * 900000).toString();
+
+    const { data: orderRecord, error: orderError } = await supabaseAdmin
       .from('orders')
       .insert({
         user_id: user.id,
-        pickup_time: pickup_time,
-        total_amount: finalAmount,
+        pickup_time,
+        otp_code,
+        payment_id: paymentRecord.id,
         status: 'PLACED'
       })
       .select()
       .single()
 
-    if (orderInsertError || !order) {
-      throw new Error("Failed to create order: " + orderInsertError?.message)
-    }
+    if (orderError) throw new Error("Failed to create order: " + orderError.message)
 
-    // 5. Insert Order Items
-    const { error: itemsInsertError } = await supabaseAdmin
+    // 7. Insert order items
+    const orderItemsToInsert = items.map((item: any) => ({
+      order_id: orderRecord.id,
+      menu_item_id: item.menu_item_id,
+      quantity: item.quantity
+    }))
+
+    const { error: itemsError } = await supabaseAdmin
       .from('order_items')
-      .insert(
-        orderItemsForDb.map(item => ({
-          order_id: order.id,
-          ...item
-        }))
-      )
+      .insert(orderItemsToInsert)
 
-    if (itemsInsertError) {
-      throw new Error("Failed to save order items: " + itemsInsertError.message)
-    }
+    if (itemsError) throw new Error("Failed to insert order items: " + itemsError.message)
 
-    // 6. Record Payment
-    const { error: paymentError } = await supabaseAdmin
-      .from('payments')
-      .insert({
-        order_id: order.id,
-        user_id: user.id,
-        razorpay_payment_id: razorpay_payment_id,
-        razorpay_order_id: razorpay_order_id,
-        amount: finalAmount,
-        currency: 'INR',
-        status: 'CAPTURED'
-      })
-
-    if (paymentError) {
-      console.error("Warning: Order succeeded but payment record failed:", paymentError)
-      // We don't fail the order here because money was captured and order is placed, 
-      // but we log it.
-    }
-
-    return new Response(JSON.stringify({ success: true, order }), {
+    return new Response(JSON.stringify({ success: true, order: orderRecord }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     })
 
   } catch (error: any) {
-    console.error('Verify Payment Error:', error)
+    console.error('Error verifying payment:', error)
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 500,
+      status: 400,
     })
   }
 })
