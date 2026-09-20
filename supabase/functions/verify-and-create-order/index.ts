@@ -2,7 +2,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 // @ts-ignore
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
-import crypto from "node:crypto"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -30,62 +29,58 @@ serve(async (req: any) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
 
-    const { 
-      razorpay_payment_id, 
-      razorpay_order_id, 
-      razorpay_signature,
+    const {
+      order_id,       // The order_id we generated when creating the Cashfree order
       pickup_time,
-      items // Array of { menu_item_id, quantity }
+      items           // Array of { menu_item_id, quantity }
     } = await req.json()
 
     // @ts-ignore
-    const keySecret = Deno.env.get('RAZORPAY_KEY_SECRET')
-    if (!keySecret) throw new Error("Razorpay secret not configured")
-
-    // 1. Verify Signature
-    const body = razorpay_order_id + "|" + razorpay_payment_id;
-    const expectedSignature = crypto
-      .createHmac("sha256", keySecret)
-      .update(body.toString())
-      .digest("hex");
-
-    if (expectedSignature !== razorpay_signature) {
-      throw new Error("Invalid payment signature")
-    }
-
-    // 2. Calculate amount from DB to be safe (or fetch payment details from Razorpay)
-    // For simplicity, let's fetch the payment amount from Razorpay using API
+    const appId = Deno.env.get('CASHFREE_APP_ID')
     // @ts-ignore
-    const keyId = Deno.env.get('RAZORPAY_KEY_ID')
-    const authHeader = `Basic ${btoa(`${keyId}:${keySecret}`)}`
-    
-    const paymentResponse = await fetch(`https://api.razorpay.com/v1/payments/${razorpay_payment_id}`, {
-      headers: { 'Authorization': authHeader }
+    const secretKey = Deno.env.get('CASHFREE_SECRET_KEY')
+    if (!appId || !secretKey) throw new Error("Cashfree keys not configured")
+
+    // @ts-ignore
+    const baseUrl = (Deno.env.get('CASHFREE_ENV') === 'production')
+      ? 'https://api.cashfree.com'
+      : 'https://sandbox.cashfree.com'
+
+    // 1. Verify payment by fetching from Cashfree API (server-side, no client signatures needed)
+    const paymentResponse = await fetch(`${baseUrl}/pg/orders/${order_id}/payments`, {
+      headers: {
+        'x-client-id': appId,
+        'x-client-secret': secretKey,
+        'x-api-version': '2025-01-01',
+      }
     })
-    const paymentData = await paymentResponse.json()
-    
-    if (paymentData.error) {
-      throw new Error("Could not fetch payment details from Razorpay")
+    const payments = await paymentResponse.json()
+
+    if (!Array.isArray(payments) || payments.length === 0) {
+      throw new Error("No payments found for this order")
     }
 
-    if (paymentData.status !== 'captured' && paymentData.status !== 'authorized') {
-      throw new Error("Payment not captured")
+    // Find the successful payment
+    const successfulPayment = payments.find((p: any) => p.payment_status === 'SUCCESS')
+    if (!successfulPayment) {
+      throw new Error("Payment not successful")
     }
 
-    const amountPaid = paymentData.amount / 100 // Convert from paise
+    const cfPaymentId = String(successfulPayment.cf_payment_id)
+    const amountPaid = successfulPayment.payment_amount
 
-    // 3. Prevent Replay Attacks: Check if payment ID already exists
+    // 2. Prevent Replay Attacks: Check if cf_payment_id already exists
     const { data: existingPayment } = await supabaseAdmin
       .from('payments')
       .select('id')
-      .eq('razorpay_payment_id', razorpay_payment_id)
+      .eq('cf_payment_id', cfPaymentId)
       .maybeSingle()
 
     if (existingPayment) {
       throw new Error("Payment already processed (Replay attack detected)")
     }
 
-    // 4. Validate exact item cost from database to prevent Cart Tampering
+    // 3. Validate exact item cost from database to prevent Cart Tampering
     const itemIds = items.map((i: any) => i.menu_item_id)
     const { data: menuItems, error: menuError } = await supabaseAdmin
       .from('menu_items')
@@ -104,27 +99,26 @@ serve(async (req: any) => {
       }
     });
 
-    const gatewayFee = calculatedTotal * 0.0236;
+    const gatewayFee = calculatedTotal * 0.025;
     const expectedAmountPaid = Math.round((calculatedTotal + gatewayFee) * 100) / 100;
 
-    // Allow for a 1 paisa rounding difference just in case
+    // Allow for a small rounding difference
     if (Math.abs(expectedAmountPaid - amountPaid) > 0.02) {
       console.error(`Tampering detected! Paid: ${amountPaid}, Expected: ${expectedAmountPaid} (Cart: ${calculatedTotal})`)
       throw new Error("Payment amount mismatch. Order rejected.")
     }
 
-    // 5. Get User ID
+    // 4. Get User ID
     const { data: { user }, error: userError } = await supabaseClient.auth.getUser()
     if (userError || !user) throw new Error("Unauthorized")
 
-    // 6. Create Payment Record
+    // 5. Create Payment Record
     const { data: paymentRecord, error: paymentError } = await supabaseAdmin
       .from('payments')
       .insert({
         user_id: user.id,
-        razorpay_order_id,
-        razorpay_payment_id,
-        razorpay_signature,
+        cf_order_id: order_id,
+        cf_payment_id: cfPaymentId,
         amount: amountPaid,
         status: 'SUCCESS'
       })
@@ -133,7 +127,7 @@ serve(async (req: any) => {
 
     if (paymentError) throw new Error("Failed to record payment: " + paymentError.message)
 
-    // 7. Create Order
+    // 6. Create Order
     const otp_code = Math.floor(100000 + Math.random() * 900000).toString();
 
     const { data: orderRecord, error: orderError } = await supabaseAdmin
@@ -150,7 +144,7 @@ serve(async (req: any) => {
 
     if (orderError) throw new Error("Failed to create order: " + orderError.message)
 
-    // 8. Insert order items
+    // 7. Insert order items
     const orderItemsToInsert = items.map((item: any) => ({
       order_id: orderRecord.id,
       menu_item_id: item.menu_item_id,

@@ -9,13 +9,12 @@ const corsHeaders = {
 }
 
 serve(async (req: any) => {
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
   try {
-    const { items } = await req.json()
+    const { items, customer_id, customer_phone } = await req.json()
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return new Response(JSON.stringify({ error: 'Invalid or empty cart' }), {
@@ -53,44 +52,59 @@ serve(async (req: any) => {
     if (calculatedTotal <= 0) {
       throw new Error("Cart total must be greater than zero")
     }
-    
-    // Use simple math as requested: just add exactly 2.36% to the cart total
-    const gatewayFee = calculatedTotal * 0.0236;
-    const amountToCharge = calculatedTotal + gatewayFee;
+
+    // 2.5% gateway fee
+    const gatewayFee = calculatedTotal * 0.025;
+    const amountToCharge = Math.round((calculatedTotal + gatewayFee) * 100) / 100;
 
     // @ts-ignore
-    const keyId = Deno.env.get('RAZORPAY_KEY_ID')
+    const appId = Deno.env.get('CASHFREE_APP_ID')
     // @ts-ignore
-    const keySecret = Deno.env.get('RAZORPAY_KEY_SECRET')
+    const secretKey = Deno.env.get('CASHFREE_SECRET_KEY')
 
-    if (!keyId || !keySecret) {
-      throw new Error("Razorpay keys not configured")
+    if (!appId || !secretKey) {
+      throw new Error("Cashfree keys not configured")
     }
 
-    // Call Razorpay API to create an order
-    const authHeader = `Basic ${btoa(`${keyId}:${keySecret}`)}`
-    
-    const response = await fetch('https://api.razorpay.com/v1/orders', {
+    // Determine environment URL
+    // @ts-ignore
+    const baseUrl = (Deno.env.get('CASHFREE_ENV') === 'production')
+      ? 'https://api.cashfree.com'
+      : 'https://sandbox.cashfree.com'
+
+    const orderId = `order_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+
+    const response = await fetch(`${baseUrl}/pg/orders`, {
       method: 'POST',
       headers: {
-        'Authorization': authHeader,
+        'x-client-id': appId,
+        'x-client-secret': secretKey,
+        'x-api-version': '2025-01-01',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        amount: Math.round(amountToCharge * 100), // Razorpay expects amount in paise (smallest currency unit), rounded to nearest integer
-        currency: 'INR',
-        receipt: `receipt_${Date.now()}`
+        order_id: orderId,
+        order_amount: amountToCharge,
+        order_currency: 'INR',
+        customer_details: {
+          customer_id: customer_id || `cust_${Date.now()}`,
+          customer_phone: customer_phone || '9999999999',
+        },
       }),
     })
 
     const data = await response.json()
 
     if (!response.ok) {
-      console.error('Razorpay Error:', data)
-      throw new Error(data.error?.description || 'Failed to create Razorpay order')
+      console.error('Cashfree Error:', data)
+      throw new Error(data.message || 'Failed to create Cashfree order')
     }
 
-    return new Response(JSON.stringify({ order_id: data.id }), {
+    return new Response(JSON.stringify({
+      payment_session_id: data.payment_session_id,
+      cf_order_id: data.cf_order_id,
+      order_id: data.order_id,
+    }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     })
