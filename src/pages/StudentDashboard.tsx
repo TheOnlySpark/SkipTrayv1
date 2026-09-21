@@ -393,6 +393,15 @@ export default function StudentDashboard() {
         return;
       }
 
+      if (checkoutResult.redirect) {
+        console.log("Payment will be redirected");
+        return; // The browser will redirect, so we stop here. Verification happens on page reload.
+      }
+
+      if (checkoutResult.paymentDetails) {
+        console.log("Payment has been completed, checking payment status...");
+      }
+
       // 3. Verify Payment and Create Order in DB (server-side verification)
       const { data: verifyData, error: verifyError } = await supabase.functions.invoke('verify-and-create-order', {
         body: {
