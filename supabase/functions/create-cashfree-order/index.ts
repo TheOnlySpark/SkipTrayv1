@@ -53,9 +53,15 @@ serve(async (req: any) => {
       throw new Error("Cart total must be greater than zero")
     }
 
-    // 2.5% gateway fee
-    const gatewayFee = calculatedTotal * 0.025;
-    const amountToCharge = Math.round((calculatedTotal + gatewayFee) * 100) / 100;
+    const gst = calculatedTotal * 0.026;
+    let platformFee = 0;
+    if (calculatedTotal > 210) {
+      platformFee = 5;
+    } else {
+      platformFee = calculatedTotal * 0.015;
+    }
+    const totalFee = gst + platformFee;
+    const amountToCharge = Math.round((calculatedTotal + totalFee) * 100) / 100;
 
     // @ts-ignore
     const appId = Deno.env.get('CASHFREE_APP_ID')

@@ -99,8 +99,15 @@ serve(async (req: any) => {
       }
     });
 
-    const gatewayFee = calculatedTotal * 0.025;
-    const expectedAmountPaid = Math.round((calculatedTotal + gatewayFee + 4) * 100) / 100;
+    const gst = calculatedTotal * 0.026;
+    let platformFee = 0;
+    if (calculatedTotal > 210) {
+      platformFee = 5;
+    } else {
+      platformFee = calculatedTotal * 0.015;
+    }
+    const totalFee = gst + platformFee;
+    const expectedAmountPaid = Math.round((calculatedTotal + totalFee) * 100) / 100;
 
     // Allow for a small rounding difference
     if (Math.abs(expectedAmountPaid - amountPaid) > 0.02) {
