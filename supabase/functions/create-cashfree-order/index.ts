@@ -100,7 +100,9 @@ serve(async (req: any) => {
         customer_phone: customer_phone || '9999999999',
       },
       order_meta: {
+        // @ts-ignore
         return_url: Deno.env.get('RETURN_URL') || "https://skiptray.example.com/checkout?order_id={order_id}",
+        // @ts-ignore
         notify_url: Deno.env.get('NOTIFY_URL') || "https://skiptray.example.com/api/webhook/cashfree",
         payment_methods: "cc,dc,upi"
       },
