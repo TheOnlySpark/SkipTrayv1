@@ -34,7 +34,7 @@ serve(async (req: any) => {
     const itemIds = items.map((i: any) => i.menu_item_id)
     const { data: menuItems, error: menuError } = await supabaseAdmin
       .from('menu_items')
-      .select('id, price')
+      .select('id, price, name')
       .in('id', itemIds)
 
     if (menuError || !menuItems) {
@@ -53,9 +53,15 @@ serve(async (req: any) => {
       throw new Error("Cart total must be greater than zero")
     }
 
-    // 2.5% gateway fee
-    const gatewayFee = calculatedTotal * 0.025;
-    const amountToCharge = Math.round((calculatedTotal + gatewayFee) * 100) / 100;
+    const gst = calculatedTotal * 0.026;
+    let platformFee = 0;
+    if (calculatedTotal > 210) {
+      platformFee = 5;
+    } else {
+      platformFee = calculatedTotal * 0.015;
+    }
+    const totalFee = gst + platformFee;
+    const amountToCharge = Math.round((calculatedTotal + totalFee) * 100) / 100;
 
     // @ts-ignore
     const appId = Deno.env.get('CASHFREE_APP_ID')
@@ -74,6 +80,44 @@ serve(async (req: any) => {
 
     const orderId = `order_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 
+    // Calculate order expiry time (e.g. 30 minutes from now)
+    const expiryDate = new Date();
+    expiryDate.setMinutes(expiryDate.getMinutes() + 30);
+    const orderExpiryTime = expiryDate.toISOString();
+
+    const cart_items = items.map((reqItem: any) => {
+      const dbItem = menuItems.find((m: any) => m.id === reqItem.menu_item_id);
+      return {
+        item_id: reqItem.menu_item_id,
+        item_name: dbItem?.name || "SkipTray Item",
+        item_original_unit_price: dbItem?.price || 0,
+        item_discounted_unit_price: dbItem?.price || 0,
+        item_quantity: reqItem.quantity,
+        item_currency: "INR"
+      };
+    });
+
+    const orderPayload = {
+      order_id: orderId,
+      order_amount: amountToCharge,
+      order_currency: 'INR',
+      customer_details: {
+        customer_id: customer_id || `cust_${Date.now()}`,
+        customer_phone: customer_phone || '9999999999',
+      },
+      order_meta: {
+        // @ts-ignore
+        return_url: Deno.env.get('RETURN_URL') || "https://skiptray.example.com/checkout?order_id={order_id}",
+        // @ts-ignore
+        notify_url: Deno.env.get('NOTIFY_URL') || "https://skiptray.example.com/api/webhook/cashfree",
+        payment_methods: "cc,dc,upi"
+      },
+      cart_details: {
+        cart_items: cart_items
+      },
+      order_expiry_time: orderExpiryTime
+    };
+
     const response = await fetch(`${baseUrl}/pg/orders`, {
       method: 'POST',
       headers: {
@@ -82,15 +126,7 @@ serve(async (req: any) => {
         'x-api-version': '2025-01-01',
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        order_id: orderId,
-        order_amount: amountToCharge,
-        order_currency: 'INR',
-        customer_details: {
-          customer_id: customer_id || `cust_${Date.now()}`,
-          customer_phone: customer_phone || '9999999999',
-        },
-      }),
+      body: JSON.stringify(orderPayload),
     })
 
     const data = await response.json()

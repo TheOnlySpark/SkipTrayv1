@@ -270,6 +270,24 @@ export default function StudentDashboard() {
   const cartTotalItems = cart.reduce((acc, c) => acc + c.quantity, 0);
   const cartTotalPrice = cart.reduce((acc, c) => acc + (Number(c.item.price || 0) * c.quantity), 0);
 
+  const calculateFees = (total: number) => {
+    const gst = total * 0.026;
+    let platformFee = 0;
+    if (total > 210) {
+      platformFee = 5;
+    } else {
+      platformFee = total * 0.015;
+    }
+    const totalFee = gst + platformFee;
+    return {
+      gst,
+      platformFee,
+      totalFee,
+      totalToPay: total + totalFee
+    };
+  };
+  const { totalFee, totalToPay } = calculateFees(cartTotalPrice);
+
   const addToCart = (item: MenuItem) => {
     if (isSuspended) {
       showAlert({
@@ -391,6 +409,15 @@ export default function StudentDashboard() {
         setError(`Payment Failed: ${checkoutResult.error.message}`);
         setSubmitting(false);
         return;
+      }
+
+      if (checkoutResult.redirect) {
+        console.log("Payment will be redirected");
+        return; // The browser will redirect, so we stop here. Verification happens on page reload.
+      }
+
+      if (checkoutResult.paymentDetails) {
+        console.log("Payment has been completed, checking payment status...");
       }
 
       // 3. Verify Payment and Create Order in DB (server-side verification)
@@ -1106,13 +1133,13 @@ export default function StudentDashboard() {
                             <span style={{ color: '#94a3b8', fontSize: '0.875rem', fontWeight: 600 }}>₹{cartTotalPrice.toFixed(2)}</span>
                           </div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span style={{ color: '#94a3b8', fontSize: '0.875rem', fontWeight: 600 }}>GST + Other</span>
-                            <span style={{ color: '#94a3b8', fontSize: '0.875rem', fontWeight: 600 }}>₹{(cartTotalPrice * 0.025).toFixed(2)}</span>
+                            <span style={{ color: '#94a3b8', fontSize: '0.875rem', fontWeight: 600 }}>Platform Fee + GST</span>
+                            <span style={{ color: '#94a3b8', fontSize: '0.875rem', fontWeight: 600 }}>₹{totalFee.toFixed(2)}</span>
                           </div>
                           <div style={{ borderTop: '1px solid #334155', margin: '0.25rem 0' }}></div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span style={{ color: '#f8fafc', fontSize: '0.95rem', fontWeight: 700 }}>Total Amount</span>
-                            <span style={{ color: '#38bdf8', fontSize: '1.125rem', fontWeight: 700 }}>₹{(cartTotalPrice + cartTotalPrice * 0.025).toFixed(2)}</span>
+                            <span style={{ color: '#38bdf8', fontSize: '1.125rem', fontWeight: 700 }}>₹{totalToPay.toFixed(2)}</span>
                           </div>
                         </div>
                       )}
@@ -1153,7 +1180,7 @@ export default function StudentDashboard() {
                               ? 'Lunch Booking Opens at 9:30 AM'
                               : (isLunchClosedForToday && !testMode)
                                 ? 'Lunch Ordering Closed Today'
-                                : (submitting ? 'Placing...' : `Place Order (${cartTotalItems} items • ₹${(cartTotalPrice + cartTotalPrice * 0.025).toFixed(2)})`)}
+                                : (submitting ? 'Placing...' : `Place Order (${cartTotalItems} items • ₹${totalToPay.toFixed(2)})`)}
                       </button>
                     </form>
                   </div>
@@ -1188,7 +1215,7 @@ export default function StudentDashboard() {
                     <span style={{ color: '#f1f5f9', fontWeight: 700, fontSize: '0.95rem' }}>Your Order</span>
                     {cartTotalItems > 0 && (
                       <span style={{ color: '#818cf8', fontSize: '0.75rem', fontWeight: 600 }}>
-                        ₹{(cartTotalPrice + cartTotalPrice * 0.025).toFixed(2)} • {cartTotalItems} item{cartTotalItems > 1 ? 's' : ''}
+                        ₹{(cartTotalPrice + (cartTotalPrice * 0.025) + 4).toFixed(2)} • {cartTotalItems} item{cartTotalItems > 1 ? 's' : ''}
                       </span>
                     )}
                   </div>
