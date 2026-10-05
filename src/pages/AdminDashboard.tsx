@@ -290,6 +290,13 @@ export default function AdminDashboard() {
     const { error } = await supabase.from('menu_items').delete().eq('id', id);
     if (!error) {
       setMenuItems(menuItems.filter(item => item.id !== id));
+    } else {
+      // Typically fails due to foreign key constraints from order_items
+      showAlert({
+        title: 'Delete Failed',
+        message: 'Cannot delete this item because it has existing orders. Please mark it as "Sold Out" instead to hide it from students.',
+        type: 'error'
+      });
     }
   };
 
@@ -301,6 +308,12 @@ export default function AdminDashboard() {
 
     if (!error) {
       setMenuItems(menuItems.map(item => item.id === id ? { ...item, is_sold_out: !currentStatus } : item));
+    } else {
+      showAlert({
+        title: 'Action Failed',
+        message: `Failed to update sold out status: ${error.message}`,
+        type: 'error'
+      });
     }
   };
 
