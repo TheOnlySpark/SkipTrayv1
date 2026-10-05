@@ -286,20 +286,6 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleDeleteItem = async (id: string) => {
-    const { error } = await supabase.from('menu_items').delete().eq('id', id);
-    if (!error) {
-      setMenuItems(menuItems.filter(item => item.id !== id));
-    } else {
-      // Typically fails due to foreign key constraints from order_items
-      showAlert({
-        title: 'Delete Failed',
-        message: 'Cannot delete this item because it has existing orders. Please mark it as "Sold Out" instead to hide it from students.',
-        type: 'error'
-      });
-    }
-  };
-
   const handleToggleSoldOut = async (id: string, currentStatus: boolean) => {
     const { error } = await supabase.rpc('toggle_sold_out', {
       item_id: id,
@@ -477,12 +463,6 @@ export default function AdminDashboard() {
                     className="text-[10px] sm:text-xs font-semibold text-slate-500 bg-slate-100 px-2 sm:px-3 py-1.5 rounded-lg hover:bg-slate-200 transition-colors"
                   >
                     {item.is_sold_out ? 'Mark Available' : 'Mark Sold Out'}
-                  </button>
-                  <button
-                    onClick={() => handleDeleteItem(item.id)}
-                    className="text-[10px] sm:text-xs font-semibold text-red-500 bg-red-50 px-2 sm:px-3 py-1.5 rounded-lg hover:bg-red-100 transition-colors"
-                  >
-                    Delete
                   </button>
                 </div>
               </div>
