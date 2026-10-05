@@ -75,22 +75,26 @@ export default function StudentDashboard() {
     return () => clearInterval(ticker);
   }, []);
 
-  const isSunday = new Date(currentTime).getDay() === 0;
+  // Get current time in IST to avoid browser timezone issues
+  const getISTDate = () => {
+    return new Date(new Date(currentTime).toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  };
+
+  const istDate = getISTDate();
+  const isSunday = istDate.getDay() === 0;
+  const currentHour = istDate.getHours();
+  const currentMinute = istDate.getMinutes();
+  const currentISTMinutes = currentHour * 60 + currentMinute;
 
   // Check if current time is before 9:30 AM opening time
-  const nowObj = new Date(currentTime);
-  const currentHour = nowObj.getHours();
-  const currentMinute = nowObj.getMinutes();
   const isBeforeOpeningTime = !isSunday && (currentHour < 9 || (currentHour === 9 && currentMinute < 30));
 
   // Helper to determine slot availability (must be placed >= 30 mins before pickup slot today)
   const getSlotAvailability = (slotValue: string) => {
-    const now = new Date(currentTime);
     const [hours, minutes] = slotValue.split(':').map(Number);
-    const slotDate = new Date(now);
-    slotDate.setHours(hours, minutes, 0, 0);
+    const slotMinutes = hours * 60 + minutes;
 
-    const diffMinutes = (slotDate.getTime() - now.getTime()) / (1000 * 60);
+    const diffMinutes = slotMinutes - currentISTMinutes;
     const isAvailable = !isBeforeOpeningTime && diffMinutes >= 30;
     
     let reason = '';
