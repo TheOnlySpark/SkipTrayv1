@@ -18,6 +18,7 @@ export interface Database {
           price: number
           updated_at: string
           veg_non_veg: Database["public"]["Enums"]["food_type"]
+          tenant_id: string
         }
         Insert: {
           created_at?: string
@@ -27,6 +28,7 @@ export interface Database {
           price?: number
           updated_at?: string
           veg_non_veg: Database["public"]["Enums"]["food_type"]
+          tenant_id: string
         }
         Update: {
           created_at?: string
@@ -36,8 +38,16 @@ export interface Database {
           price?: number
           updated_at?: string
           veg_non_veg?: Database["public"]["Enums"]["food_type"]
+          tenant_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "menu_items_tenant_id_fkey"
+            columns: ["tenant_id"]
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          }
+        ]
       }
       item_reviews: {
         Row: {
@@ -49,6 +59,7 @@ export interface Database {
           order_id: string
           rating: number
           user_id: string
+          tenant_id: string
         }
         Insert: {
           admin_reply?: string | null
@@ -59,6 +70,7 @@ export interface Database {
           order_id: string
           rating: number
           user_id: string
+          tenant_id: string
         }
         Update: {
           admin_reply?: string | null
@@ -69,6 +81,7 @@ export interface Database {
           order_id?: string
           rating?: number
           user_id?: string
+          tenant_id?: string
         }
         Relationships: [
           {
@@ -139,6 +152,7 @@ export interface Database {
           ready_at: string | null
           status: Database["public"]["Enums"]["order_status"]
           user_id: string
+          tenant_id: string
         }
         Insert: {
           accepted_at?: string | null
@@ -153,6 +167,7 @@ export interface Database {
           ready_at?: string | null
           status?: Database["public"]["Enums"]["order_status"]
           user_id: string
+          tenant_id: string
         }
         Update: {
           accepted_at?: string | null
@@ -167,6 +182,7 @@ export interface Database {
           ready_at?: string | null
           status?: Database["public"]["Enums"]["order_status"]
           user_id?: string
+          tenant_id?: string
         }
         Relationships: [
           {
@@ -186,6 +202,7 @@ export interface Database {
           role: Database["public"]["Enums"]["user_role"]
           strike_count: number
           suspended_until: string | null
+          tenant_id: string
         }
         Insert: {
           created_at?: string
@@ -195,6 +212,7 @@ export interface Database {
           role?: Database["public"]["Enums"]["user_role"]
           strike_count?: number
           suspended_until?: string | null
+          tenant_id: string
         }
         Update: {
           created_at?: string
@@ -204,12 +222,71 @@ export interface Database {
           role?: Database["public"]["Enums"]["user_role"]
           strike_count?: number
           suspended_until?: string | null
+          tenant_id?: string
         }
         Relationships: [
           {
             foreignKeyName: "profiles_id_fkey"
             columns: ["id"]
             referencedRelation: "users"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      tenants: {
+        Row: {
+          id: string
+          slug: string
+          name: string
+          is_active: boolean
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          slug: string
+          name: string
+          is_active?: boolean
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          slug?: string
+          name?: string
+          is_active?: boolean
+          created_at?: string
+        }
+        Relationships: []
+      }
+      tenant_settings: {
+        Row: {
+          tenant_id: string
+          display_name: string | null
+          logo_url: string | null
+          primary_color: string | null
+          timezone: string | null
+          updated_at: string
+        }
+        Insert: {
+          tenant_id: string
+          display_name?: string | null
+          logo_url?: string | null
+          primary_color?: string | null
+          timezone?: string | null
+          updated_at?: string
+        }
+        Update: {
+          tenant_id?: string
+          display_name?: string | null
+          logo_url?: string | null
+          primary_color?: string | null
+          timezone?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_settings_tenant_id_fkey"
+            columns: ["tenant_id"]
+            referencedRelation: "tenants"
             referencedColumns: ["id"]
           }
         ]
@@ -267,6 +344,35 @@ export interface Database {
         }
         Returns: Json
       }
+      create_tenant: {
+        Args: {
+          p_slug: string
+          p_name: string
+        }
+        Returns: string
+      }
+      update_tenant_settings: {
+        Args: {
+          p_display_name?: string
+          p_logo_url?: string
+          p_primary_color?: string
+          p_timezone?: string
+        }
+        Returns: undefined
+      }
+      admin_toggle_tenant: {
+        Args: {
+          p_tenant_id: string
+          p_is_active: boolean
+        }
+        Returns: undefined
+      }
+      admin_delete_tenant_cascade: {
+        Args: {
+          p_tenant_id: string
+        }
+        Returns: Json
+      }
     }
     Enums: {
       food_type: "VEG" | "NON_VEG"
@@ -277,7 +383,7 @@ export interface Database {
         | "PREPARING"
         | "READY"
         | "COLLECTED"
-      user_role: "STUDENT" | "TEACHER" | "STAFF" | "ADMIN"
+      user_role: "STUDENT" | "TEACHER" | "STAFF" | "ADMIN" | "SUPER_ADMIN"
     }
     CompositeTypes: {
       [_ in never]: never
