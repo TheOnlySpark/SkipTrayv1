@@ -379,6 +379,7 @@ export default function StudentDashboard() {
       order_id: reviewingItem.orderId,
       menu_item_id: reviewingItem.menuItemId,
       user_id: profile.id,
+      tenant_id: profile.tenant_id,
       rating: reviewRating,
       feedback_text: reviewText
     });
