@@ -27,6 +27,7 @@ export default function SuperAdminDashboard() {
   const [newName, setNewName] = useState('');
   const [adminName, setAdminName] = useState('');
   const [adminEmail, setAdminEmail] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
   const [creating, setCreating] = useState(false);
 
   // Edit form state
@@ -154,7 +155,8 @@ export default function SuperAdminDashboard() {
           slug: newSlug,
           name: newName,
           admin_name: adminName,
-          admin_email: adminEmail
+          admin_email: adminEmail,
+          admin_password: adminPassword
         })
       });
 
@@ -172,6 +174,7 @@ export default function SuperAdminDashboard() {
       setNewName('');
       setAdminName('');
       setAdminEmail('');
+      setAdminPassword('');
       
       fetchTenants();
       setTimeout(() => setSuccess(''), 5000);
@@ -331,7 +334,19 @@ export default function SuperAdminDashboard() {
                     onChange={(e) => setAdminEmail(e.target.value)}
                     className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                   />
-                  <p className="text-xs text-slate-500 mt-1">They will receive a password setup email.</p>
+                </div>
+                
+                <div className="space-y-2">
+                  <label className="text-sm font-bold text-slate-700">Admin Password</label>
+                  <input
+                    type="password"
+                    required
+                    minLength={6}
+                    placeholder="Min. 6 characters"
+                    value={adminPassword}
+                    onChange={(e) => setAdminPassword(e.target.value)}
+                    className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  />
                 </div>
               </div>
             </div>
