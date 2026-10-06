@@ -211,6 +211,64 @@ export default function AdminDashboard() {
     queryClient.invalidateQueries({ queryKey: ['tenantUsers'] });
   };
 
+  const [isCreatingStaff, setIsCreatingStaff] = useState(false);
+  const [newStaffName, setNewStaffName] = useState('');
+  const [newStaffEmail, setNewStaffEmail] = useState('');
+  const [newStaffPassword, setNewStaffPassword] = useState('');
+  const [creatingStaff, setCreatingStaff] = useState(false);
+
+  const handleCreateStaff = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreatingStaff(true);
+    try {
+      const functionsUrl = import.meta.env.VITE_SUPABASE_URL
+        ? `${import.meta.env.VITE_SUPABASE_URL.replace('/rest/v1', '')}/functions/v1`
+        : 'http://localhost:54321/functions/v1';
+
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      const response = await fetch(`${functionsUrl}/create-tenant-user`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token}`
+        },
+        body: JSON.stringify({
+          name: newStaffName,
+          email: newStaffEmail,
+          password: newStaffPassword,
+          role: 'STAFF'
+        })
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to create staff');
+      }
+
+      showAlert({
+        title: 'Staff Created',
+        message: `Successfully created staff account for ${newStaffEmail}`,
+        type: 'success'
+      });
+      
+      setNewStaffName('');
+      setNewStaffEmail('');
+      setNewStaffPassword('');
+      setIsCreatingStaff(false);
+      queryClient.invalidateQueries({ queryKey: ['tenantUsers'] });
+    } catch (err: any) {
+      showAlert({
+        title: 'Error',
+        message: err.message,
+        type: 'error'
+      });
+    } finally {
+      setCreatingStaff(false);
+    }
+  };
+
   const handleResetStudentStrikes = async (studentId: string, studentName: string) => {
     const confirmed = await showConfirm({
       title: 'Reset Strikes & Lift Suspension',
@@ -691,14 +749,71 @@ export default function AdminDashboard() {
       <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 shadow-sm flex flex-col">
         <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-6">
           <h2 className="text-xl font-bold text-slate-800">Manage Staff</h2>
-          <input
-            type="text"
-            placeholder="Search users to promote..."
-            value={staffSearchText}
-            onChange={(e) => setStaffSearchText(e.target.value)}
-            className="px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none w-full sm:w-64"
-          />
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <input
+              type="text"
+              placeholder="Search users..."
+              value={staffSearchText}
+              onChange={(e) => setStaffSearchText(e.target.value)}
+              className="px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none w-full sm:w-64"
+            />
+            <button
+              onClick={() => setIsCreatingStaff(!isCreatingStaff)}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 transition shrink-0"
+            >
+              + Add Staff
+            </button>
+          </div>
         </div>
+        
+        {isCreatingStaff && (
+          <form onSubmit={handleCreateStaff} className="mb-6 bg-slate-50 p-6 rounded-2xl border border-slate-200">
+            <h3 className="font-bold text-slate-800 mb-4">Create New Staff User</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <input
+                type="text"
+                required
+                placeholder="Full Name"
+                value={newStaffName}
+                onChange={(e) => setNewStaffName(e.target.value)}
+                className="px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+              />
+              <input
+                type="email"
+                required
+                placeholder="Email Address"
+                value={newStaffEmail}
+                onChange={(e) => setNewStaffEmail(e.target.value)}
+                className="px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+              />
+              <input
+                type="password"
+                required
+                minLength={6}
+                placeholder="Password (Min. 6 chars)"
+                value={newStaffPassword}
+                onChange={(e) => setNewStaffPassword(e.target.value)}
+                className="px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsCreatingStaff(false)}
+                className="px-4 py-2 text-sm font-semibold text-slate-500 hover:text-slate-700 transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={creatingStaff}
+                className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition"
+              >
+                {creatingStaff ? 'Creating...' : 'Create Staff'}
+              </button>
+            </div>
+          </form>
+        )}
 
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">

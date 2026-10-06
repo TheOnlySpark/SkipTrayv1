@@ -36,11 +36,16 @@ export default function Login() {
 
   useEffect(() => {
     if (user && profile) {
+      // Prevent navigation if cross-tenant login
+      if (profile.role !== 'SUPER_ADMIN' && profile.tenant_id !== tenantId) {
+        return;
+      }
+
       if (profile.id_number || ['STAFF', 'ADMIN', 'SUPER_ADMIN'].includes(profile.role)) {
         navigate('/dashboard');
       }
     }
-  }, [user, profile, navigate]);
+  }, [user, profile, navigate, tenantId]);
 
   // ── LOGIN ──────────────────────────────────────────────────────────────────
   const handleLogin = async (e: React.FormEvent) => {
@@ -48,7 +53,20 @@ export default function Login() {
     setLoading(true);
     setError('');
 
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+    // 1. Verify they belong to this tenant FIRST (to prevent cross-tenant password guessing)
+    const { data: hasAccess, error: accessError } = await supabase.rpc('check_user_tenant_access', {
+      p_email: email,
+      p_tenant_id: tenantId
+    });
+
+    if (hasAccess === false) {
+      setError('This account is not registered with this institution.');
+      setLoading(false);
+      return;
+    }
+
+    // 2. Only if they belong to this tenant, check their password
+    const { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
 
     if (signInError) {
       if (signInError.message.toLowerCase().includes('invalid login credentials')) {

@@ -373,6 +373,13 @@ export interface Database {
         }
         Returns: Json
       }
+      check_user_tenant_access: {
+        Args: {
+          p_email: string
+          p_tenant_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
       food_type: "VEG" | "NON_VEG"
