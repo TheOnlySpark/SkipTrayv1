@@ -38,14 +38,14 @@ function extractSlug(hostname: string): string {
     return parts[0];
   }
 
-  return 'default';
+  return 'system';
 }
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'http://localhost:54321';
 
 export const TenantProvider = ({ children }: { children: React.ReactNode }) => {
   const [tenantId, setTenantId]     = useState<string | null>(null);
-  const [tenantSlug, setTenantSlug] = useState<string>('default');
+  const [tenantSlug, setTenantSlug] = useState<string>('system');
   const [tenantName, setTenantName] = useState<string>('SkipTray');
   const [settings, setSettings]     = useState<TenantSettings | null>(null);
   const [isActive, setIsActive]     = useState<boolean>(true);

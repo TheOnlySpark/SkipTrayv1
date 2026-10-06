@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/ModalDialogContext';
 import { supabase } from '../lib/supabase';
+import { useTenant } from '../contexts/TenantContext';
 import { Database } from '../types/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatPickupTime } from './StudentDashboard';
@@ -23,6 +24,7 @@ type Review = Database['public']['Tables']['item_reviews']['Row'] & {
 
 export default function AdminDashboard() {
   const { profile, signOut } = useAuth();
+  const { tenantId } = useTenant();
   const { showAlert, showConfirm } = useDialog();
   const queryClient = useQueryClient();
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
@@ -159,6 +161,56 @@ export default function AdminDashboard() {
     }
   });
 
+  const [staffSearchText, setStaffSearchText] = useState('');
+  const { data: tenantUsers = [], isLoading: usersLoading } = useQuery({
+    queryKey: ['tenantUsers', staffSearchText],
+    queryFn: async () => {
+      let q = supabase
+        .from('profiles')
+        .select('*')
+        .in('role', ['STAFF', 'STUDENT'])
+        .order('role', { ascending: true })
+        .order('name');
+        
+      if (staffSearchText) {
+        q = q.ilike('name', `%${staffSearchText}%`);
+      }
+      
+      const { data } = await q.limit(20);
+      return (data as any[]) || [];
+    }
+  });
+
+  const handleToggleStaffRole = async (userId: string, currentRole: string) => {
+    const newRole = currentRole === 'STAFF' ? 'STUDENT' : 'STAFF';
+    
+    const confirmed = await showConfirm({
+      title: 'Change Role',
+      message: `Are you sure you want to change this user's role to ${newRole}?`,
+      confirmText: 'Yes, Change Role',
+      cancelText: 'Cancel',
+      type: 'info'
+    });
+    
+    if (!confirmed) return;
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({ role: newRole })
+      .eq('id', userId);
+
+    if (error) {
+      showAlert({
+        title: 'Error',
+        message: `Failed to update role: ${error.message}`,
+        type: 'error'
+      });
+      return;
+    }
+    
+    queryClient.invalidateQueries({ queryKey: ['tenantUsers'] });
+  };
+
   const handleResetStudentStrikes = async (studentId: string, studentName: string) => {
     const confirmed = await showConfirm({
       title: 'Reset Strikes & Lift Suspension',
@@ -276,8 +328,18 @@ export default function AdminDashboard() {
     const { data, error } = await supabase.from('menu_items').insert({
       name: newItemName,
       veg_non_veg: newItemType,
-      price: parsedPrice
+      price: parsedPrice,
+      tenant_id: tenantId
     }).select().single();
+
+    if (error) {
+      showAlert({
+        title: 'Error',
+        message: `Failed to add item: ${error.message}`,
+        type: 'error'
+      });
+      return;
+    }
 
     if (data) {
       setMenuItems([data, ...menuItems]);
@@ -623,6 +685,68 @@ export default function AdminDashboard() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Manage Staff Section */}
+      <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 shadow-sm flex flex-col">
+        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-6">
+          <h2 className="text-xl font-bold text-slate-800">Manage Staff</h2>
+          <input
+            type="text"
+            placeholder="Search users to promote..."
+            value={staffSearchText}
+            onChange={(e) => setStaffSearchText(e.target.value)}
+            className="px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none w-full sm:w-64"
+          />
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-200">
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Name</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">ID Number</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Role</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {usersLoading ? (
+                <tr>
+                  <td colSpan={4} className="px-6 py-8 text-center text-slate-500">Loading users...</td>
+                </tr>
+              ) : tenantUsers.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="px-6 py-8 text-center text-slate-500">No users found.</td>
+                </tr>
+              ) : (
+                tenantUsers.map((u) => (
+                  <tr key={u.id} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-6 py-4 text-sm font-bold text-slate-800">{u.name || 'Unnamed'}</td>
+                    <td className="px-6 py-4 text-sm font-mono text-slate-600">{u.id_number || 'N/A'}</td>
+                    <td className="px-6 py-4">
+                      <span className={`px-2 py-1 text-xs font-bold rounded-full ${
+                        u.role === 'STAFF' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'
+                      }`}>
+                        {u.role}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <button
+                        onClick={() => handleToggleStaffRole(u.id, u.role)}
+                        className={`text-sm font-bold ${
+                          u.role === 'STAFF' ? 'text-red-600 hover:text-red-800' : 'text-indigo-600 hover:text-indigo-800'
+                        }`}
+                      >
+                        {u.role === 'STAFF' ? 'Demote to Student' : 'Promote to Staff'}
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Student Penalties & Account Suspensions */}

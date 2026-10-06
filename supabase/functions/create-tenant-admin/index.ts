@@ -42,10 +42,10 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { slug, name, admin_email, admin_name } = await req.json();
+    const { slug, name, admin_email, admin_name, admin_password } = await req.json();
 
-    if (!slug || !name || !admin_email || !admin_name) {
-      return new Response(JSON.stringify({ error: 'Missing required fields: slug, name, admin_email, admin_name' }), {
+    if (!slug || !name || !admin_email || !admin_name || !admin_password) {
+      return new Response(JSON.stringify({ error: 'Missing required fields: slug, name, admin_email, admin_name, admin_password' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -69,12 +69,11 @@ Deno.serve(async (req) => {
     //    tenant_id goes in app_metadata (server-only, not user-editable)
     const { data: newUser, error: userError } = await adminClient.auth.admin.createUser({
       email: admin_email,
+      password: admin_password,
       email_confirm: true,
-      app_metadata: {
-        tenant_id: tenantId,
-      },
       user_metadata: {
         name: admin_name,
+        tenant_id: tenantId,
       },
     });
 
@@ -100,18 +99,12 @@ Deno.serve(async (req) => {
       });
     }
 
-    // 4. Send a password reset email so the admin can set their password
-    await adminClient.auth.admin.generateLink({
-      type: 'recovery',
-      email: admin_email,
-    });
-
     return new Response(
       JSON.stringify({
         success: true,
         tenant_id: tenantId,
         admin_user_id: newUser.user.id,
-        message: `Tenant "${name}" created. Password setup email sent to ${admin_email}.`,
+        message: `Tenant "${name}" created with the provided admin password.`,
       }),
       {
         status: 200,
