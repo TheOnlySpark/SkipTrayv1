@@ -46,7 +46,11 @@ function NavigationHeader() {
 
         {/* Mobile Toggle */}
         <button
-          className="md:hidden p-2 text-slate-600"
+          type="button"
+          aria-label={isOpen ? 'Close menu' : 'Open menu'}
+          aria-expanded={isOpen}
+          aria-controls="mobile-navigation"
+          className="md:hidden p-2 text-slate-600 rounded-lg focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
           onClick={() => setIsOpen(!isOpen)}
         >
           {isOpen ? <X size={24} /> : <Menu size={24} />}
@@ -55,7 +59,7 @@ function NavigationHeader() {
 
       {/* Mobile Nav Dropdown */}
       {isOpen && (
-        <div className="md:hidden absolute top-full left-4 right-4 mt-2 p-4 bg-white rounded-2xl shadow-xl border border-slate-100 flex flex-col gap-2 z-50">
+        <div id="mobile-navigation" className="md:hidden absolute top-full left-4 right-4 mt-2 p-4 bg-white rounded-2xl shadow-xl border border-slate-100 flex flex-col gap-2 z-50">
           <Link to="/" onClick={() => setIsOpen(false)} className="px-4 py-3 text-slate-700 font-medium hover:bg-slate-50 rounded-xl">Home</Link>
           {!user && !isLoginPage && (
             <Link to="/login" onClick={() => setIsOpen(false)} className="px-4 py-3 bg-indigo-50 text-indigo-700 font-semibold rounded-xl text-center mt-2">Login</Link>
@@ -90,6 +94,9 @@ function Landing() {
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ModalDialogProvider } from './contexts/ModalDialogContext';
+import { NotificationProvider } from './contexts/NotificationContext';
+import { NotificationToast } from './components/NotificationToast';
+import { NotificationBell } from './components/NotificationBell';
 
 const queryClient = new QueryClient();
 
@@ -115,6 +122,7 @@ function TopStickyHeader() {
       </div>
       {!isLoginPage && user && (
         <div className="flex items-center gap-1.5 md:gap-3">
+          <NotificationBell />
           <Link
             to="/dashboard"
             className="px-2.5 py-1.5 md:px-4 md:py-2 bg-indigo-50 text-indigo-700 text-xs md:text-sm font-semibold rounded-lg hover:bg-indigo-100 transition flex items-center gap-1.5"
@@ -142,9 +150,11 @@ export default function App() {
     <TenantProvider>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
-          <ModalDialogProvider>
-            <Router>
-              <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center font-sans text-slate-900 p-4 pt-20 md:p-6 md:pt-24">
+          <NotificationProvider>
+            <ModalDialogProvider>
+              <Router>
+                <NotificationToast />
+                <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center font-sans text-slate-900 p-4 pt-20 md:p-6 md:pt-24">
                 <TopStickyHeader />
                 <NavigationHeader />
 
@@ -196,6 +206,7 @@ export default function App() {
             <SpeedInsights />
           </Router>
         </ModalDialogProvider>
+        </NotificationProvider>
       </AuthProvider>
     </QueryClientProvider>
     </TenantProvider>

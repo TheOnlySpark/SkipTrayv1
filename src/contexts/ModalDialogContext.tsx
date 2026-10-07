@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useRef, useCallback } from 'react';
+import React, { createContext, useContext, useState, useRef, useCallback, useEffect } from 'react';
 import { 
   IconAlertTriangle, 
   IconBan, 
@@ -90,6 +90,20 @@ export function ModalDialogProvider({ children }: { children: React.ReactNode })
     if (resolverRef.current) resolverRef.current(false);
   };
 
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        handleCancel();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen]);
+
   function getDefaultTitle(t: DialogType): string {
     switch (t) {
       case 'warning': return 'Notice';
@@ -141,6 +155,9 @@ export function ModalDialogProvider({ children }: { children: React.ReactNode })
             className="bg-white rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl border border-slate-100 flex flex-col gap-4 relative animate-in zoom-in-95 duration-200"
             role="dialog"
             aria-modal="true"
+            aria-labelledby="modal-dialog-title"
+            aria-describedby="modal-dialog-message"
+            tabIndex={-1}
           >
             {/* Close cross for dismiss */}
             <button
@@ -155,10 +172,10 @@ export function ModalDialogProvider({ children }: { children: React.ReactNode })
             <div className="flex items-start gap-4">
               {renderIcon()}
               <div className="flex-1 pt-0.5">
-                <h3 className="text-lg font-extrabold text-slate-900 leading-snug">
+                <h3 id="modal-dialog-title" className="text-lg font-extrabold text-slate-900 leading-snug">
                   {title}
                 </h3>
-                <div className="text-sm text-slate-600 mt-1.5 whitespace-pre-line leading-relaxed font-normal">
+                <div id="modal-dialog-message" className="text-sm text-slate-600 mt-1.5 whitespace-pre-line leading-relaxed font-normal">
                   {message}
                 </div>
               </div>
