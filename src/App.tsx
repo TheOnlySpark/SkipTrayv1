@@ -90,6 +90,9 @@ function Landing() {
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ModalDialogProvider } from './contexts/ModalDialogContext';
+import { NotificationProvider } from './contexts/NotificationContext';
+import { NotificationToast } from './components/NotificationToast';
+import { NotificationBell } from './components/NotificationBell';
 
 const queryClient = new QueryClient();
 
@@ -115,6 +118,7 @@ function TopStickyHeader() {
       </div>
       {!isLoginPage && user && (
         <div className="flex items-center gap-1.5 md:gap-3">
+          <NotificationBell />
           <Link
             to="/dashboard"
             className="px-2.5 py-1.5 md:px-4 md:py-2 bg-indigo-50 text-indigo-700 text-xs md:text-sm font-semibold rounded-lg hover:bg-indigo-100 transition flex items-center gap-1.5"
@@ -142,9 +146,11 @@ export default function App() {
     <TenantProvider>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
-          <ModalDialogProvider>
-            <Router>
-              <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center font-sans text-slate-900 p-4 pt-20 md:p-6 md:pt-24">
+          <NotificationProvider>
+            <ModalDialogProvider>
+              <Router>
+                <NotificationToast />
+                <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center font-sans text-slate-900 p-4 pt-20 md:p-6 md:pt-24">
                 <TopStickyHeader />
                 <NavigationHeader />
 
@@ -196,6 +202,7 @@ export default function App() {
             <SpeedInsights />
           </Router>
         </ModalDialogProvider>
+        </NotificationProvider>
       </AuthProvider>
     </QueryClientProvider>
     </TenantProvider>
