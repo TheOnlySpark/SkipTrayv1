@@ -1,10 +1,15 @@
 import React from "react";
 import { createContext, useContext, useEffect, useState } from 'react';
-import { User, Session } from '@supabase/supabase-js';
+import { User, Session, AuthError } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { Database } from '../types/supabase';
 
 type Profile = Database['public']['Tables']['profiles']['Row'];
+
+interface SignUpResult {
+  error: AuthError | null;
+  userId: string | null;
+}
 
 interface AuthContextType {
   session: Session | null;
@@ -13,6 +18,12 @@ interface AuthContextType {
   loading: boolean;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  /**
+   * Signs up a new user with email + password.
+   * tenant_id is injected into options.data so it flows into
+   * raw_app_meta_data → handle_new_user trigger → profiles.tenant_id
+   */
+  signUp: (email: string, password: string, tenantId: string) => Promise<SignUpResult>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -71,8 +82,21 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     await supabase.auth.signOut();
   };
 
+  const signUp = async (email: string, password: string, tenantId: string): Promise<SignUpResult> => {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        // tenant_id in options.data → raw_app_meta_data in JWT
+        // Picked up by handle_new_user trigger → profiles.tenant_id
+        data: { tenant_id: tenantId },
+      },
+    });
+    return { error, userId: data.user?.id ?? null };
+  };
+
   return (
-    <AuthContext.Provider value={{ session, user, profile, loading, signOut, refreshProfile: () => user ? fetchProfile(user.id) : Promise.resolve() }}>
+    <AuthContext.Provider value={{ session, user, profile, loading, signOut, refreshProfile: () => user ? fetchProfile(user.id) : Promise.resolve(), signUp }}>
       {children}
     </AuthContext.Provider>
   );

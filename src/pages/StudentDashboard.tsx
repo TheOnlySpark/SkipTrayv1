@@ -5,13 +5,13 @@ import { useDialog } from '../contexts/ModalDialogContext';
 import { supabase } from '../lib/supabase';
 import { Database } from '../types/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { 
-  IconAlertTriangle, 
-  IconBan, 
-  IconClock, 
+import {
+  IconAlertTriangle,
+  IconBan,
+  IconClock,
   IconHourglass,
-  IconStar, 
-  IconX, 
+  IconStar,
+  IconX,
   IconChevronUp,
   IconQrCode,
   IconMaximize
@@ -28,13 +28,14 @@ type PastOrder = Order & {
 };
 
 export const LUNCH_SLOTS = [
-  { value: '11:30', label: '11:30 AM' },
-  { value: '12:00', label: '12:00 PM' },
   { value: '12:30', label: '12:30 PM' },
+  { value: '12:40', label: '12:40 PM' },
+  { value: '12:50', label: '12:50 PM' },
   { value: '13:00', label: '1:00 PM' },
+  { value: '13:10', label: '1:10 PM' },
+  { value: '13:20', label: '1:20 PM' },
   { value: '13:30', label: '1:30 PM' },
-  { value: '14:00', label: '2:00 PM' },
-  { value: '14:30', label: '2:30 PM' },
+  { value: '13:40', label: '1:40 PM' },
 ];
 
 export const formatPickupTime = (timeStr?: string | null) => {
@@ -53,10 +54,9 @@ export default function StudentDashboard() {
   const [activeOrder, setActiveOrder] = useState<Order | null>(null);
   const [pastOrders, setPastOrders] = useState<PastOrder[]>([]);
   const [showHistory, setShowHistory] = useState(false);
-  
-  const [cart, setCart] = useState<{item: MenuItem, quantity: number}[]>([]);
+
+  const [cart, setCart] = useState<{ item: MenuItem, quantity: number }[]>([]);
   const [pickupTime, setPickupTime] = useState('');
-  const [isTakeaway, setIsTakeaway] = useState<boolean | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [cartOpen, setCartOpen] = useState(false);
@@ -76,24 +76,28 @@ export default function StudentDashboard() {
     return () => clearInterval(ticker);
   }, []);
 
-  const isSunday = new Date(currentTime).getDay() === 0;
+  // Get current time in IST to avoid browser timezone issues
+  const getISTDate = () => {
+    return new Date(new Date(currentTime).toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  };
+
+  const istDate = getISTDate();
+  const isSunday = istDate.getDay() === 0;
+  const currentHour = istDate.getHours();
+  const currentMinute = istDate.getMinutes();
+  const currentISTMinutes = currentHour * 60 + currentMinute;
 
   // Check if current time is before 9:30 AM opening time
-  const nowObj = new Date(currentTime);
-  const currentHour = nowObj.getHours();
-  const currentMinute = nowObj.getMinutes();
   const isBeforeOpeningTime = !isSunday && (currentHour < 9 || (currentHour === 9 && currentMinute < 30));
 
   // Helper to determine slot availability (must be placed >= 30 mins before pickup slot today)
   const getSlotAvailability = (slotValue: string) => {
-    const now = new Date(currentTime);
     const [hours, minutes] = slotValue.split(':').map(Number);
-    const slotDate = new Date(now);
-    slotDate.setHours(hours, minutes, 0, 0);
+    const slotMinutes = hours * 60 + minutes;
 
-    const diffMinutes = (slotDate.getTime() - now.getTime()) / (1000 * 60);
+    const diffMinutes = slotMinutes - currentISTMinutes;
     const isAvailable = !isBeforeOpeningTime && diffMinutes >= 30;
-    
+
     let reason = '';
     if (!isAvailable) {
       if (isBeforeOpeningTime) {
@@ -123,9 +127,9 @@ export default function StudentDashboard() {
     // Listen to changes on our active order and past orders
     const orderSub = supabase
       .channel('public:orders')
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
         table: 'orders',
         filter: `user_id=eq.${profile.id}`
       }, (payload) => {
@@ -156,9 +160,9 @@ export default function StudentDashboard() {
     // Listen to changes on item reviews (e.g. admin reply)
     const reviewSub = supabase
       .channel('public:item_reviews')
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
         table: 'item_reviews',
         filter: `user_id=eq.${profile.id}`
       }, () => {
@@ -266,14 +270,14 @@ export default function StudentDashboard() {
     if (isLunchClosedForToday) {
       showAlert({
         title: 'Booking Window Closed',
-        message: 'Lunch ordering for today is closed. Orders must be placed at least 30 minutes in advance of Lunch slots (11:30 AM – 2:30 PM).',
+        message: 'Lunch ordering for today is closed. Orders must be placed at least 30 minutes in advance of Lunch slots (12:30 PM – 1:40 PM).',
         type: 'warning'
       });
       return;
     }
     if (item.is_sold_out) return;
     if (cartTotalItems >= 5) return;
-    
+
     const existing = cart.find(c => c.item.id === item.id);
     if (existing) {
       setCart(cart.map(c => c.item.id === item.id ? { ...c, quantity: c.quantity + 1 } : c));
@@ -306,10 +310,6 @@ export default function StudentDashboard() {
       return;
     }
     if (cart.length === 0 || !pickupTime) return;
-    if (isTakeaway === null) {
-      setError('Please select whether you want Dine-in or Take-away.');
-      return;
-    }
 
     const slotAvail = getSlotAvailability(pickupTime);
     if (!slotAvail.isAvailable) {
@@ -345,7 +345,6 @@ export default function StudentDashboard() {
       }
       setCart([]);
       setPickupTime('');
-      setIsTakeaway(null);
     }
     setSubmitting(false);
     isSubmittingRef.current = false;
@@ -361,12 +360,12 @@ export default function StudentDashboard() {
       isDangerous: true
     });
     if (!confirmed) return;
-    
+
     // In Phase 7, we use an RPC to enforce the 5 min rule securely
     const { error } = await supabase.rpc('cancel_order', {
       p_order_id: activeOrder.id
     });
-    
+
     if (error) {
       showAlert({
         title: 'Cancellation Failed',
@@ -388,15 +387,16 @@ export default function StudentDashboard() {
     e.preventDefault();
     if (!reviewingItem || !profile?.id) return;
     setSubmittingReview(true);
-    
+
     const { error } = await supabase.from('item_reviews').insert({
       order_id: reviewingItem.orderId,
       menu_item_id: reviewingItem.menuItemId,
       user_id: profile.id,
+      tenant_id: profile.tenant_id,
       rating: reviewRating,
       feedback_text: reviewText
     });
-    
+
     if (error) {
       showAlert({
         title: 'Submission Failed',
@@ -449,7 +449,7 @@ export default function StudentDashboard() {
               )}
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-3 leading-tight">Welcome, {profile?.name || 'User'}</h1>
-            
+
             {strikeCount === 1 && !isSuspended && (
               <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50/80 border border-amber-200/60 p-2.5 rounded-xl mt-3 font-medium">
                 <IconAlertTriangle size={16} className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
@@ -499,9 +499,7 @@ export default function StudentDashboard() {
                   <div className="flex justify-between items-center border-b border-slate-100 pb-3">
                     <div>
                       <div className="font-bold text-slate-800 text-lg">Order #{o.order_number}</div>
-                      <div className="text-xs text-slate-500 font-mono font-medium mb-1">
-                        ID: {o.id.split('-')[0].toUpperCase()} • {o.is_takeaway ? 'Take-away' : 'Dine-in'}
-                      </div>
+                      <div className="text-xs text-slate-500 font-mono font-medium mb-1">ID: {o.id.split('-')[0].toUpperCase()}</div>
                       <div className="text-xs text-slate-500 font-medium mb-1">Placed on: {new Date(o.created_at).toLocaleDateString()}</div>
                       <div className="text-sm text-slate-600 mt-1">Pickup: {formatPickupTime(o.pickup_time)} (Lunch)</div>
                     </div>
@@ -509,14 +507,14 @@ export default function StudentDashboard() {
                       {o.status}
                     </div>
                   </div>
-                  
+
                   {o.order_items && o.order_items.length > 0 && (
                     <div className="space-y-3">
                       {o.order_items.map((oi, idx) => {
                         const menuItem = oi.menu_items;
                         if (!menuItem) return null;
                         const existingReview = o.item_reviews?.find(r => r.menu_item_id === menuItem.id);
-                        
+
                         return (
                           <div key={idx} className="flex flex-col gap-2 p-3 bg-slate-50 rounded-lg border border-slate-100">
                             <div className="flex justify-between items-center">
@@ -535,17 +533,17 @@ export default function StudentDashboard() {
                                 </button>
                               )}
                             </div>
-                            
+
                             {/* Existing Review Display */}
                             {existingReview && (
                               <div className="mt-1 bg-white p-3 rounded-lg border border-indigo-100 shadow-sm">
                                 <div className="flex items-center gap-1 mb-1">
                                   {Array.from({ length: 5 }).map((_, i) => (
-                                    <IconStar 
-                                      key={i} 
-                                      size={14} 
-                                      className={`w-3.5 h-3.5 ${i < existingReview.rating ? 'text-yellow-400 fill-yellow-400' : 'text-slate-200'}`} 
-                                      filled={i < existingReview.rating} 
+                                    <IconStar
+                                      key={i}
+                                      size={14}
+                                      className={`w-3.5 h-3.5 ${i < existingReview.rating ? 'text-yellow-400 fill-yellow-400' : 'text-slate-200'}`}
+                                      filled={i < existingReview.rating}
                                     />
                                   ))}
                                 </div>
@@ -580,10 +578,10 @@ export default function StudentDashboard() {
                                         onClick={() => setReviewRating(star)}
                                         className="p-0.5 transition-transform hover:scale-110 focus:outline-none"
                                       >
-                                        <IconStar 
-                                          size={22} 
-                                          className={`w-5.5 h-5.5 ${star <= reviewRating ? 'text-yellow-400 fill-yellow-400' : 'text-slate-200'}`} 
-                                          filled={star <= reviewRating} 
+                                        <IconStar
+                                          size={22}
+                                          className={`w-5.5 h-5.5 ${star <= reviewRating ? 'text-yellow-400 fill-yellow-400' : 'text-slate-200'}`}
+                                          filled={star <= reviewRating}
                                         />
                                       </button>
                                     ))}
@@ -625,7 +623,7 @@ export default function StudentDashboard() {
           <div className="w-full flex justify-end h-10 mb-2">
             {/* Cancel button if within 5 mins and not preparing */}
             {['PLACED', 'ACCEPTED'].includes(activeOrder.status) && (new Date().getTime() - new Date(activeOrder.created_at).getTime()) < 5 * 60 * 1000 && (
-              <button 
+              <button
                 onClick={handleCancelOrder}
                 className="bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-xl text-sm font-semibold transition-colors"
               >
@@ -640,77 +638,74 @@ export default function StudentDashboard() {
               <span className="text-indigo-200 bg-white/10 px-2 py-1 rounded text-xs font-mono tracking-wider border border-white/20">
                 ID: {activeOrder.id.split('-')[0].toUpperCase()}
               </span>
-              <span className={`px-2 py-1 rounded text-xs font-bold border ${activeOrder.is_takeaway ? 'bg-amber-500/20 text-amber-200 border-amber-500/40' : 'bg-emerald-500/20 text-emerald-200 border-emerald-500/40'}`}>
-                {activeOrder.is_takeaway ? 'Take-away' : 'Dine-in'}
-              </span>
             </div>
             <p className="text-indigo-200 font-medium tracking-wide mb-4 text-sm">Your Order Status</p>
-          
-          <div className={`mt-2 px-6 py-2 rounded-full font-bold text-sm tracking-wider uppercase ${getStatusColor(activeOrder.status).replace('100', '900').replace('600', '100')}`}>
-            {activeOrder.status}
-          </div>
-          
-          {/* Security Gatekeeper: Live Anti-Screenshot Pass only illuminates when READY */}
-          {activeOrder.status === 'READY' ? (
-            <div className="mt-6 flex flex-col items-center gap-3 w-full max-w-xs animate-in fade-in zoom-in-95 duration-300">
-              {/* Anti-Screenshot Live Security Watermark */}
-              <div className="flex items-center justify-center gap-2 bg-emerald-500/20 text-emerald-200 px-3.5 py-1.5 rounded-full text-xs font-extrabold border border-emerald-400/40 shadow-inner">
-                <span className="relative flex h-2.5 w-2.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400"></span>
-                </span>
-                <span className="tracking-wide font-mono">🔴 LIVE PASS • {liveTickerTime}</span>
-              </div>
 
-              {/* High-Contrast QR Code Card with Pulsing Security Halo */}
-              <div 
-                onClick={() => setShowQrModal(true)}
-                className="bg-white p-4 rounded-3xl shadow-[0_0_30px_rgba(52,211,153,0.35)] cursor-pointer hover:scale-105 transition-all relative group border-4 border-emerald-400"
-                title="Click to Enlarge QR Code"
-              >
-                <QRCodeSVG 
-                  value={`SKIPTRAY:${activeOrder.id}:${activeOrder.otp_code}`} 
-                  size={180}
-                  className="rounded-xl"
-                />
-                <div className="absolute inset-0 bg-indigo-950/70 backdrop-blur-xs rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white gap-1.5 p-2">
-                  <IconMaximize size={24} className="w-6 h-6 text-white" />
-                  <span className="text-[11px] font-extrabold uppercase tracking-wider">Tap to Enlarge</span>
+            <div className={`mt-2 px-6 py-2 rounded-full font-bold text-sm tracking-wider uppercase ${getStatusColor(activeOrder.status).replace('100', '900').replace('600', '100')}`}>
+              {activeOrder.status}
+            </div>
+
+            {/* Security Gatekeeper: Live Anti-Screenshot Pass only illuminates when READY */}
+            {activeOrder.status === 'READY' ? (
+              <div className="mt-6 flex flex-col items-center gap-3 w-full max-w-xs animate-in fade-in zoom-in-95 duration-300">
+                {/* Anti-Screenshot Live Security Watermark */}
+                <div className="flex items-center justify-center gap-2 bg-emerald-500/20 text-emerald-200 px-3.5 py-1.5 rounded-full text-xs font-extrabold border border-emerald-400/40 shadow-inner">
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400"></span>
+                  </span>
+                  <span className="tracking-wide font-mono">🔴 LIVE PASS • {liveTickerTime}</span>
+                </div>
+
+                {/* High-Contrast QR Code Card with Pulsing Security Halo */}
+                <div
+                  onClick={() => setShowQrModal(true)}
+                  className="bg-white p-4 rounded-3xl shadow-[0_0_30px_rgba(52,211,153,0.35)] cursor-pointer hover:scale-105 transition-all relative group border-4 border-emerald-400"
+                  title="Click to Enlarge QR Code"
+                >
+                  <QRCodeSVG
+                    value={`SKIPTRAY:${activeOrder.id}:${activeOrder.otp_code}`}
+                    size={180}
+                    className="rounded-xl"
+                  />
+                  <div className="absolute inset-0 bg-indigo-950/70 backdrop-blur-xs rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white gap-1.5 p-2">
+                    <IconMaximize size={24} className="w-6 h-6 text-white" />
+                    <span className="text-[11px] font-extrabold uppercase tracking-wider">Tap to Enlarge</span>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setShowQrModal(true)}
+                  className="text-xs text-indigo-100 hover:text-white flex items-center gap-1.5 font-medium transition-colors"
+                >
+                  <IconQrCode size={14} className="w-3.5 h-3.5" />
+                  <span>Show QR at counter for instant scan</span>
+                </button>
+
+                {/* Manual 6-Digit OTP Box (Fallback / Backup) */}
+                <div className="bg-white/10 px-4 py-2.5 rounded-2xl border border-white/20 text-center w-full shadow-inner mt-1">
+                  <p className="text-indigo-200 text-[10px] font-bold uppercase tracking-widest mb-0.5">Or Give 6-Digit OTP</p>
+                  <p className="text-3xl font-mono font-black tracking-[0.25em] text-white">{activeOrder.otp_code}</p>
                 </div>
               </div>
+            ) : (
+              /* Kitchen Preparing State Card (QR Locked Until Ready) */
+              <div className="mt-6 flex flex-col items-center justify-center bg-white/10 border border-white/20 rounded-3xl p-6 text-center max-w-xs w-full backdrop-blur-xs">
+                <div className="w-14 h-14 rounded-full bg-white/15 flex items-center justify-center mb-3 text-amber-300">
+                  <IconHourglass size={28} className="animate-spin" style={{ animationDuration: '4s' }} />
+                </div>
+                <h4 className="font-extrabold text-base text-white">Kitchen is preparing your meal</h4>
+                <p className="text-xs text-indigo-100 mt-1">
+                  Your food is currently being cooked and boxed.
+                </p>
+                <div className="mt-4 px-3 py-2 bg-indigo-950/40 rounded-2xl border border-indigo-300/20 text-[11px] text-indigo-200 flex items-center gap-2">
+                  <span className="text-amber-300 font-bold">🔒 Secure Pass</span>
+                  <span>• Unlocks automatically when READY</span>
+                </div>
+              </div>
+            )}
 
-              <button
-                onClick={() => setShowQrModal(true)}
-                className="text-xs text-indigo-100 hover:text-white flex items-center gap-1.5 font-medium transition-colors"
-              >
-                <IconQrCode size={14} className="w-3.5 h-3.5" />
-                <span>Show QR at counter for instant scan</span>
-              </button>
-
-              {/* Manual 6-Digit OTP Box (Fallback / Backup) */}
-              <div className="bg-white/10 px-4 py-2.5 rounded-2xl border border-white/20 text-center w-full shadow-inner mt-1">
-                <p className="text-indigo-200 text-[10px] font-bold uppercase tracking-widest mb-0.5">Or Give 6-Digit OTP</p>
-                <p className="text-3xl font-mono font-black tracking-[0.25em] text-white">{activeOrder.otp_code}</p>
-              </div>
-            </div>
-          ) : (
-            /* Kitchen Preparing State Card (QR Locked Until Ready) */
-            <div className="mt-6 flex flex-col items-center justify-center bg-white/10 border border-white/20 rounded-3xl p-6 text-center max-w-xs w-full backdrop-blur-xs">
-              <div className="w-14 h-14 rounded-full bg-white/15 flex items-center justify-center mb-3 text-amber-300">
-                <IconHourglass size={28} className="animate-spin" style={{ animationDuration: '4s' }} />
-              </div>
-              <h4 className="font-extrabold text-base text-white">Kitchen is preparing your meal</h4>
-              <p className="text-xs text-indigo-100 mt-1">
-                Your food is currently being cooked and boxed.
-              </p>
-              <div className="mt-4 px-3 py-2 bg-indigo-950/40 rounded-2xl border border-indigo-300/20 text-[11px] text-indigo-200 flex items-center gap-2">
-                <span className="text-amber-300 font-bold">🔒 Secure Pass</span>
-                <span>• Unlocks automatically when READY</span>
-              </div>
-            </div>
-          )}
-          
-          <p className="mt-5 text-xs text-indigo-200">Requested Pickup Time: <span className="font-semibold text-white">{formatPickupTime(activeOrder.pickup_time)} (Lunch)</span></p>
+            <p className="mt-5 text-xs text-indigo-200">Requested Pickup Time: <span className="font-semibold text-white">{formatPickupTime(activeOrder.pickup_time)} (Lunch)</span></p>
           </div>
         </div>
       ) : (
@@ -720,7 +715,7 @@ export default function StudentDashboard() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
               <div>
                 <h2 className="text-xl font-bold text-slate-800">Menu</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Lunch Pickup: 11:30 AM – 2:30 PM • Booking Opens: 9:30 AM (Min 30m Notice)</p>
+                <p className="text-xs text-slate-500 mt-0.5">Lunch Pickup: 12:30 PM – 1:40 PM • Booking Opens: 9:30 AM (Min 30m Notice)</p>
               </div>
               {isSunday ? (
                 <span className="self-start sm:self-auto px-3 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm">
@@ -740,7 +735,7 @@ export default function StudentDashboard() {
               ) : (
                 <span className="self-start sm:self-auto px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span>Lunch Slots Open (11:30 AM – 2:30 PM)</span>
+                  <span>Lunch Slots Open (12:30 PM – 1:40 PM)</span>
                 </span>
               )}
             </div>
@@ -756,11 +751,11 @@ export default function StudentDashboard() {
                     <h3 className="font-bold text-slate-800 leading-tight">{item.name}</h3>
                     <div className="text-sm font-extrabold text-indigo-600 mt-1.5">₹{Number(item.price || 0).toFixed(2)}</div>
                   </div>
-                  
+
                   <div className="mt-4 flex items-center justify-between">
                     <span className="text-xs font-medium text-slate-400">{item.veg_non_veg === 'VEG' ? 'Veg' : 'Non-Veg'}</span>
                     {!item.is_sold_out ? (
-                      <button 
+                      <button
                         onClick={() => addToCart(item)}
                         disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cartTotalItems >= 5}
                         className="w-10 h-10 flex items-center justify-center bg-indigo-50 text-indigo-600 rounded-xl font-bold hover:bg-indigo-600 hover:text-white transition-colors disabled:opacity-50 disabled:hover:bg-indigo-50 disabled:hover:text-indigo-600 shadow-sm"
@@ -833,7 +828,7 @@ export default function StudentDashboard() {
                         <IconClock size={20} className="w-5 h-5 text-indigo-400 shrink-0" />
                         <div>
                           <div style={{ color: '#818cf8', fontSize: '0.8125rem', fontWeight: 700 }}>Lunch Booking Opens at 9:30 AM</div>
-                          <div style={{ color: '#c7d2fe', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders open at 9:30 AM today (Lunch Slots: 11:30 AM – 2:30 PM, Min 30m notice).</div>
+                          <div style={{ color: '#c7d2fe', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders open at 9:30 AM today (Lunch Slots: 12:30 PM – 1:40 PM, Min 30m notice).</div>
                         </div>
                       </div>
                     )}
@@ -844,7 +839,7 @@ export default function StudentDashboard() {
                         <IconClock size={20} className="w-5 h-5 text-rose-400 shrink-0" />
                         <div>
                           <div style={{ color: '#f87171', fontSize: '0.8125rem', fontWeight: 700 }}>Lunch Ordering Closed Today</div>
-                          <div style={{ color: '#fca5a5', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders must be placed at least 30 mins before pickup (Lunch: 11:30 AM – 2:30 PM).</div>
+                          <div style={{ color: '#fca5a5', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders must be placed at least 30 mins before pickup (Lunch: 12:30 PM – 1:40 PM).</div>
                         </div>
                       </div>
                     )}
@@ -920,51 +915,10 @@ export default function StudentDashboard() {
                     {/* Pickup time */}
                     <form onSubmit={handlePlaceOrder} style={{ paddingTop: '1rem', borderTop: '1px solid #1e293b' }}>
                       {error && <div style={{ color: '#f87171', fontSize: '0.75rem', marginBottom: '0.75rem', fontWeight: 600 }}>{error}</div>}
-                      
-                      {/* Dine-in vs Takeaway Toggle */}
-                      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
-                        <button
-                          type="button"
-                          onClick={() => setIsTakeaway(false)}
-                          style={{
-                            flex: 1,
-                            padding: '0.625rem',
-                            borderRadius: '0.75rem',
-                            fontSize: '0.875rem',
-                            fontWeight: 600,
-                            border: isTakeaway === false ? '1px solid #6366f1' : '1px solid #334155',
-                            background: isTakeaway === false ? 'rgba(99,102,241,0.15)' : '#1e293b',
-                            color: isTakeaway === false ? '#818cf8' : '#94a3b8',
-                            transition: 'all 0.2s',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          Dine-in
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setIsTakeaway(true)}
-                          style={{
-                            flex: 1,
-                            padding: '0.625rem',
-                            borderRadius: '0.75rem',
-                            fontSize: '0.875rem',
-                            fontWeight: 600,
-                            border: isTakeaway === true ? '1px solid #6366f1' : '1px solid #334155',
-                            background: isTakeaway === true ? 'rgba(99,102,241,0.15)' : '#1e293b',
-                            color: isTakeaway === true ? '#818cf8' : '#94a3b8',
-                            transition: 'all 0.2s',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          Take-away
-                        </button>
-                      </div>
-
                       <div style={{ marginBottom: '1rem' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
                           <label style={{ fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em' }}>
-                            Lunch Pickup Slot (11:30 AM – 2:30 PM)
+                            Lunch Pickup Slot (12:30 PM – 1:40 PM)
                           </label>
                           <span style={{ fontSize: '0.65rem', color: '#818cf8', fontWeight: 600, background: 'rgba(99,102,241,0.15)', padding: '2px 6px', borderRadius: '4px' }}>
                             Min 30m notice
@@ -989,13 +943,13 @@ export default function StudentDashboard() {
                           }}
                         >
                           <option value="">
-                            {isSunday 
-                              ? 'Closed on Sundays' 
+                            {isSunday
+                              ? 'Closed on Sundays'
                               : isBeforeOpeningTime
                                 ? 'Lunch Booking Opens at 9:30 AM'
-                                  : isLunchClosedForToday 
-                                    ? 'Lunch Ordering Closed for Today' 
-                                    : 'Select a Lunch Slot (30-min intervals)...'}
+                                : isLunchClosedForToday
+                                  ? 'Lunch Ordering Closed for Today'
+                                  : 'Select a Lunch Slot (10-min intervals)...'}
                           </option>
                           {LUNCH_SLOTS.map(slot => {
                             const { isAvailable, reason } = getSlotAvailability(slot.value);
@@ -1018,7 +972,7 @@ export default function StudentDashboard() {
 
                       <AnimatedTruckButton
                         onClick={async () => {
-                          await handlePlaceOrder({ preventDefault: () => {} } as any);
+                          await handlePlaceOrder({ preventDefault: () => { } } as any);
                         }}
                         disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out)}
                         text={
@@ -1085,7 +1039,7 @@ export default function StudentDashboard() {
       {showQrModal && activeOrder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-in fade-in">
           <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-sm w-full text-center flex flex-col items-center gap-4 shadow-2xl relative">
-            <button 
+            <button
               onClick={() => setShowQrModal(false)}
               className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-700 rounded-full hover:bg-slate-100 transition-colors"
             >
@@ -1102,8 +1056,8 @@ export default function StudentDashboard() {
             </div>
 
             <div className="p-3 bg-slate-50 border-2 border-slate-100 rounded-2xl shadow-inner">
-              <QRCodeSVG 
-                value={`SKIPTRAY:${activeOrder.id}:${activeOrder.otp_code}`} 
+              <QRCodeSVG
+                value={`SKIPTRAY:${activeOrder.id}:${activeOrder.otp_code}`}
                 size={230}
               />
             </div>

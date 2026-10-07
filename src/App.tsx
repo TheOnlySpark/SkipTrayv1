@@ -4,6 +4,8 @@
  */
 
 import { BrowserRouter as Router, Routes, Route, Link, Navigate, useLocation } from 'react-router-dom';
+import { Analytics } from '@vercel/analytics/react';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { useState } from 'react';
@@ -13,8 +15,10 @@ import Dashboard from './pages/Dashboard';
 import StudentDashboard from './pages/StudentDashboard';
 import StaffDashboard from './pages/StaffDashboard';
 import AdminDashboard from './pages/AdminDashboard';
+import SuperAdminDashboard from './pages/SuperAdminDashboard';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfService from './pages/TermsOfService';
+import { TenantProvider, useTenant } from './contexts/TenantContext';
 
 function NavigationHeader() {
   const { user } = useAuth();
@@ -91,16 +95,23 @@ const queryClient = new QueryClient();
 
 function TopStickyHeader() {
   const { user, signOut } = useAuth();
+  const { tenantName, settings, error } = useTenant();
   const location = useLocation();
   const isLoginPage = location.pathname === '/login';
+
+  // If there's a tenant error (like NOT_FOUND or INACTIVE), we can still show the signout button
+  // so the user isn't trapped.
 
   return (
     <div className={`fixed top-0 left-0 w-full z-[100] bg-white border-b border-slate-200 shadow-sm py-2 px-3 md:py-3 md:px-6 flex items-center ${isLoginPage ? 'justify-center' : 'justify-between'}`}>
       <div className="flex items-center gap-2 md:gap-4">
-        <span className="text-slate-500 font-semibold text-[10px] md:text-xs uppercase tracking-wider hidden sm:inline">A Collaborative Project By</span>
-        <img src="/assets/vistas-logo.png" alt="VISTAS" className="h-7 md:h-10 object-contain" />
-        <span className="text-slate-400 font-medium text-[10px] md:text-sm">x</span>
-        <img src="/assets/mh-logo.png" alt="MH Cognition" className="h-5 md:h-7 object-contain" />
+        {error ? (
+          <span className="font-bold text-lg md:text-xl text-slate-400 tracking-tight">System / No Tenant</span>
+        ) : settings?.logo_url ? (
+          <img src={settings.logo_url} alt={tenantName} className="h-7 md:h-10 object-contain" />
+        ) : (
+          <span className="font-bold text-lg md:text-xl text-slate-800 tracking-tight">{tenantName}</span>
+        )}
       </div>
       {!isLoginPage && user && (
         <div className="flex items-center gap-1.5 md:gap-3">
@@ -128,15 +139,16 @@ function TopStickyHeader() {
 
 export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <ModalDialogProvider>
-          <Router>
-            <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center font-sans text-slate-900 p-4 pt-20 md:p-6 md:pt-24">
-              <TopStickyHeader />
-              <NavigationHeader />
+    <TenantProvider>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <ModalDialogProvider>
+            <Router>
+              <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center font-sans text-slate-900 p-4 pt-20 md:p-6 md:pt-24">
+                <TopStickyHeader />
+                <NavigationHeader />
 
-              <main className="w-full flex-grow flex flex-col items-center justify-center">
+                <main className="w-full flex-grow flex flex-col items-center justify-center">
                 <Routes>
                   <Route path="/" element={<Landing />} />
                   <Route path="/privacy" element={<PrivacyPolicy />} />
@@ -158,8 +170,13 @@ export default function App() {
                     </ProtectedRoute>
                   } />
                   <Route path="/admin" element={
-                    <ProtectedRoute allowedRoles={['ADMIN']}>
+                    <ProtectedRoute allowedRoles={['ADMIN', 'SUPER_ADMIN']}>
                       <AdminDashboard />
+                    </ProtectedRoute>
+                  } />
+                  <Route path="/super-admin" element={
+                    <ProtectedRoute allowedRoles={['SUPER_ADMIN']}>
+                      <SuperAdminDashboard />
                     </ProtectedRoute>
                   } />
                 </Routes>
@@ -175,9 +192,12 @@ export default function App() {
                 </div>
               </footer>
             </div>
+            <Analytics />
+            <SpeedInsights />
           </Router>
         </ModalDialogProvider>
       </AuthProvider>
     </QueryClientProvider>
+    </TenantProvider>
   );
 }

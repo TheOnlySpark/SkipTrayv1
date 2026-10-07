@@ -12,6 +12,8 @@ export default function Dashboard() {
     return <Navigate to="/staff" replace />;
   } else if (profile?.role === 'ADMIN') {
     return <Navigate to="/admin" replace />;
+  } else if (profile?.role === 'SUPER_ADMIN') {
+    return <Navigate to="/super-admin" replace />;
   }
 
   return (
