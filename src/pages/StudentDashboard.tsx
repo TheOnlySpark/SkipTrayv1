@@ -644,9 +644,17 @@ export default function StudentDashboard() {
               </div>
 
               {/* High-Contrast QR Code Card with Pulsing Security Halo */}
-              <div 
+              <button
+                type="button"
                 onClick={() => setShowQrModal(true)}
-                className="bg-white p-4 rounded-3xl shadow-[0_0_30px_rgba(52,211,153,0.35)] cursor-pointer hover:scale-105 transition-all relative group border-4 border-emerald-400"
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    setShowQrModal(true);
+                  }
+                }}
+                aria-label="Enlarge order QR code"
+                className="bg-white p-4 rounded-3xl shadow-[0_0_30px_rgba(52,211,153,0.35)] cursor-pointer hover:scale-105 transition-all relative group border-4 border-emerald-400 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-emerald-200"
                 title="Click to Enlarge QR Code"
               >
                 <QRCodeSVG 
@@ -658,7 +666,7 @@ export default function StudentDashboard() {
                   <IconMaximize size={24} className="w-6 h-6 text-white" />
                   <span className="text-[11px] font-extrabold uppercase tracking-wider">Tap to Enlarge</span>
                 </div>
-              </div>
+              </button>
 
               <button
                 onClick={() => setShowQrModal(true)}
