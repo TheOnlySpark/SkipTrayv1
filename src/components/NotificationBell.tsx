@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { useNotifications, OrderNotification } from '../contexts/NotificationContext';
 import { 
   Bell, 
@@ -8,8 +8,7 @@ import {
   CheckCircle2, 
   ChefHat, 
   Sparkles, 
-  Volume2, 
-  ShieldAlert 
+  Volume2 
 } from 'lucide-react';
 
 // Format helper for timestamps (both relative and exact time)
@@ -44,12 +43,41 @@ export function NotificationBell() {
     clearAll,
     browserPermission,
     requestBrowserPermission,
-    triggerTestNotification,
   } = useNotifications();
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const [filterTab, setFilterTab] = useState<'ALL' | 'UNREAD'>('ALL');
+  
+  // Track which notifications were unread when this dropdown was opened
+  // so they stay highlighted for the duration of the current view
+  const [sessionUnreadIds, setSessionUnreadIds] = useState<Set<string>>(new Set());
 
-  // Close when clicking outside
+  // Capture unread IDs when opened
+  useEffect(() => {
+    if (isDrawerOpen) {
+      const currentUnreads = new Set(notifications.filter((n) => !n.read).map((n) => n.id));
+      setSessionUnreadIds(currentUnreads);
+    } else {
+      setSessionUnreadIds(new Set());
+    }
+  }, [isDrawerOpen]);
+
+  // Automatic Mark-As-Read: After 1.5 seconds of viewing (or immediately upon closing),
+  // mark all unread notifications as read
+  useEffect(() => {
+    if (!isDrawerOpen || unreadCount === 0) return;
+
+    const timer = setTimeout(() => {
+      markAllAsRead();
+    }, 1500);
+
+    return () => {
+      clearTimeout(timer);
+      markAllAsRead();
+    };
+  }, [isDrawerOpen, unreadCount, markAllAsRead]);
+
+  // Close when clicking outside or pressing Escape
   useEffect(() => {
     if (!isDrawerOpen) return;
 
@@ -80,28 +108,28 @@ export function NotificationBell() {
         return {
           icon: <CheckCircle2 size={16} className="text-blue-600 shrink-0" />,
           bg: 'bg-blue-50 text-blue-700 border-blue-200',
-          dot: 'bg-blue-500',
         };
       case 'PREPARING':
         return {
           icon: <ChefHat size={16} className="text-amber-600 shrink-0" />,
           bg: 'bg-amber-50 text-amber-700 border-amber-200',
-          dot: 'bg-amber-500',
         };
       case 'READY':
         return {
           icon: <Sparkles size={16} className="text-emerald-600 shrink-0" />,
           bg: 'bg-emerald-50 text-emerald-700 border-emerald-300',
-          dot: 'bg-emerald-500',
         };
       default:
         return {
           icon: <CheckCircle2 size={16} className="text-indigo-600 shrink-0" />,
           bg: 'bg-indigo-50 text-indigo-700 border-indigo-200',
-          dot: 'bg-indigo-500',
         };
     }
   };
+
+  const filteredNotifications = filterTab === 'UNREAD'
+    ? notifications.filter((n) => !n.read || sessionUnreadIds.has(n.id))
+    : notifications;
 
   return (
     <div className="relative inline-block" ref={containerRef}>
@@ -124,20 +152,20 @@ export function NotificationBell() {
         )}
       </button>
 
-      {/* Notification Dropdown Drawer */}
+      {/* Floating Dropdown Panel Directly Under Bell Icon */}
       {isDrawerOpen && (
         <div
           role="region"
           aria-label="Notification Center"
-          className="fixed inset-x-3 top-16 sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-96 bg-white rounded-3xl shadow-2xl border border-slate-200 z-[160] overflow-hidden flex flex-col max-h-[80vh] sm:max-h-[32rem] animate-in fade-in zoom-in-95 duration-200"
+          className="absolute right-0 top-full mt-2 w-80 sm:w-96 max-w-[calc(100vw-1.5rem)] bg-white rounded-3xl shadow-2xl border border-slate-200 z-[160] overflow-hidden flex flex-col max-h-[78vh] sm:max-h-[32rem] animate-in fade-in zoom-in-95 duration-200"
         >
           {/* Header */}
-          <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/60 backdrop-blur-xs">
+          <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/70 backdrop-blur-xs">
             <div className="flex items-center gap-2">
               <h3 className="font-extrabold text-sm text-slate-900 tracking-tight">Notifications</h3>
               {unreadCount > 0 ? (
                 <span className="px-2 py-0.5 rounded-full text-[11px] font-black bg-rose-100 text-rose-700">
-                  {unreadCount} new
+                  {unreadCount} unread
                 </span>
               ) : (
                 <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-500">
@@ -179,6 +207,39 @@ export function NotificationBell() {
             </div>
           </div>
 
+          {/* Filter Tabs: All vs Unread */}
+          <div className="flex items-center px-4 py-2 border-b border-slate-100 bg-white gap-2">
+            <button
+              type="button"
+              onClick={() => setFilterTab('ALL')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                filterTab === 'ALL'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              All ({notifications.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterTab('UNREAD')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                filterTab === 'UNREAD'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <span>Unread</span>
+              {unreadCount > 0 && (
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+                  filterTab === 'UNREAD' ? 'bg-white text-indigo-700' : 'bg-rose-500 text-white'
+                }`}>
+                  {unreadCount}
+                </span>
+              )}
+            </button>
+          </div>
+
           {/* Optional Browser Push Notification Banner */}
           {browserPermission === 'default' && (
             <div className="bg-gradient-to-r from-indigo-500/10 via-purple-500/10 to-indigo-500/10 border-b border-indigo-100 p-3 flex items-start gap-2.5">
@@ -203,27 +264,34 @@ export function NotificationBell() {
 
           {/* Notifications Scroll Area */}
           <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
-            {notifications.length === 0 ? (
+            {filteredNotifications.length === 0 ? (
               <div className="py-12 px-6 text-center flex flex-col items-center justify-center">
                 <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-400 mb-3">
                   <Bell size={22} className="opacity-60" />
                 </div>
-                <h4 className="text-sm font-bold text-slate-700">No notifications yet</h4>
-                <p className="text-xs text-slate-400 mt-1 max-w-[200px] leading-relaxed">
-                  You will receive real-time alerts when your order is accepted, preparing, or ready!
+                <h4 className="text-sm font-bold text-slate-700">
+                  {filterTab === 'UNREAD' ? 'No unread notifications' : 'No notifications yet'}
+                </h4>
+                <p className="text-xs text-slate-400 mt-1 max-w-[220px] leading-relaxed">
+                  {filterTab === 'UNREAD'
+                    ? 'All notifications have been read. Switch to "All" to view history.'
+                    : 'You will receive real-time alerts when your order is accepted, preparing, or ready!'}
                 </p>
               </div>
             ) : (
-              notifications.map((item) => {
+              filteredNotifications.map((item) => {
                 const { exact, relative } = formatNotificationTime(item.timestamp);
                 const badge = getStatusBadge(item.status);
+                const isItemUnread = !item.read || sessionUnreadIds.has(item.id);
 
                 return (
                   <div
                     key={item.id}
                     onClick={() => markAsRead(item.id)}
-                    className={`p-3.5 transition-colors cursor-pointer flex items-start gap-3 relative ${
-                      item.read ? 'bg-white hover:bg-slate-50/80' : 'bg-indigo-50/40 hover:bg-indigo-50/70'
+                    className={`p-3.5 transition-all cursor-pointer flex items-start gap-3 relative ${
+                      isItemUnread 
+                        ? 'bg-indigo-50/40 hover:bg-indigo-50/70 border-l-4 border-l-indigo-600' 
+                        : 'bg-white hover:bg-slate-50/80'
                     }`}
                   >
                     {/* Status Icon */}
@@ -234,9 +302,16 @@ export function NotificationBell() {
                     {/* Content */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-1 mb-1">
-                        <span className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full border ${badge.bg}`}>
-                          {item.status}
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full border ${badge.bg}`}>
+                            {item.status}
+                          </span>
+                          {isItemUnread && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-rose-100 text-rose-700">
+                              NEW
+                            </span>
+                          )}
+                        </div>
                         <div className="text-[10px] text-slate-400 font-medium text-right whitespace-nowrap">
                           <span>{relative}</span>
                           <span className="mx-1">•</span>
@@ -244,7 +319,7 @@ export function NotificationBell() {
                         </div>
                       </div>
 
-                      <h4 className={`text-xs font-bold leading-tight ${item.read ? 'text-slate-800' : 'text-indigo-950 font-extrabold'}`}>
+                      <h4 className={`text-xs leading-tight ${isItemUnread ? 'text-indigo-950 font-black' : 'text-slate-800 font-bold'}`}>
                         {item.title}
                       </h4>
                       <p className="text-xs text-slate-600 mt-0.5 leading-relaxed">
@@ -252,9 +327,9 @@ export function NotificationBell() {
                       </p>
                     </div>
 
-                    {/* Unread Dot */}
-                    {!item.read && (
-                      <span className="w-2 h-2 rounded-full bg-indigo-600 shrink-0 mt-1.5" title="Unread" />
+                    {/* Unread Dot Indicator */}
+                    {isItemUnread && (
+                      <span className="w-2.5 h-2.5 rounded-full bg-indigo-600 ring-2 ring-indigo-200 shrink-0 mt-1" title="Unread" />
                     )}
                   </div>
                 );

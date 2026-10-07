@@ -134,3 +134,4 @@ export function triggerHapticFeedback(status: OrderNotificationStatus): void {
     // Gracefully ignore devices that don't support vibration
   }
 }
+
