@@ -13,6 +13,8 @@ coverage/
 .env.*
 .env.local*
 .local
+.env.Local
+.env*
 .env.local
 
 # Agent and Local Tooling Metadata

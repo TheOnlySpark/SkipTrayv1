@@ -286,13 +286,6 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleDeleteItem = async (id: string) => {
-    const { error } = await supabase.from('menu_items').delete().eq('id', id);
-    if (!error) {
-      setMenuItems(menuItems.filter(item => item.id !== id));
-    }
-  };
-
   const handleToggleSoldOut = async (id: string, currentStatus: boolean) => {
     const { error } = await supabase.rpc('toggle_sold_out', {
       item_id: id,
@@ -301,6 +294,12 @@ export default function AdminDashboard() {
 
     if (!error) {
       setMenuItems(menuItems.map(item => item.id === id ? { ...item, is_sold_out: !currentStatus } : item));
+    } else {
+      showAlert({
+        title: 'Action Failed',
+        message: `Failed to update sold out status: ${error.message}`,
+        type: 'error'
+      });
     }
   };
 
@@ -464,12 +463,6 @@ export default function AdminDashboard() {
                     className="text-[10px] sm:text-xs font-semibold text-slate-500 bg-slate-100 px-2 sm:px-3 py-1.5 rounded-lg hover:bg-slate-200 transition-colors"
                   >
                     {item.is_sold_out ? 'Mark Available' : 'Mark Sold Out'}
-                  </button>
-                  <button
-                    onClick={() => handleDeleteItem(item.id)}
-                    className="text-[10px] sm:text-xs font-semibold text-red-500 bg-red-50 px-2 sm:px-3 py-1.5 rounded-lg hover:bg-red-100 transition-colors"
-                  >
-                    Delete
                   </button>
                 </div>
               </div>
