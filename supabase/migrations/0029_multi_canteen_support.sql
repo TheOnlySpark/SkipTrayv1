@@ -24,18 +24,18 @@ ALTER TABLE public.profiles   ADD COLUMN IF NOT EXISTS canteen_id uuid REFERENCE
 ALTER TABLE public.menu_items ADD COLUMN IF NOT EXISTS canteen_id uuid REFERENCES public.canteens(id) ON DELETE CASCADE;
 ALTER TABLE public.orders     ADD COLUMN IF NOT EXISTS canteen_id uuid REFERENCES public.canteens(id) ON DELETE RESTRICT;
 
--- 3. Seed deterministic Ground Floor Canteen for default tenant
-INSERT INTO public.canteens (id, tenant_id, name, code, is_active)
-VALUES ('00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', 'Ground Floor Canteen', 'GFC', true)
-ON CONFLICT (id) DO NOTHING;
-
--- 4. Seed Ground Floor Canteen for any other existing tenants
+-- 3. Seed a Ground Floor Canteen for each tenant that does not have one yet.
+-- Resolve tenant IDs from the database instead of assuming fixed UUIDs.
 INSERT INTO public.canteens (tenant_id, name, code, is_active)
 SELECT t.id, 'Ground Floor Canteen', 'GFC', true
 FROM public.tenants t
-WHERE t.id NOT IN (SELECT c.tenant_id FROM public.canteens c);
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM public.canteens c
+  WHERE c.tenant_id = t.id
+);
 
--- 5. Backfill existing menu_items, orders, and staff profiles
+-- 4. Backfill existing menu_items, orders, and staff profiles
 UPDATE public.menu_items m
 SET canteen_id = (SELECT c.id FROM public.canteens c WHERE c.tenant_id = m.tenant_id ORDER BY c.created_at ASC LIMIT 1)
 WHERE canteen_id IS NULL;
@@ -48,17 +48,17 @@ UPDATE public.profiles p
 SET canteen_id = (SELECT c.id FROM public.canteens c WHERE c.tenant_id = p.tenant_id ORDER BY c.created_at ASC LIMIT 1)
 WHERE p.role = 'STAFF' AND p.canteen_id IS NULL;
 
--- 6. Enforce NOT NULL on menu_items and orders
+-- 5. Enforce NOT NULL on menu_items and orders
 ALTER TABLE public.menu_items ALTER COLUMN canteen_id SET NOT NULL;
 ALTER TABLE public.orders     ALTER COLUMN canteen_id SET NOT NULL;
 
--- 7. Indexes for performance
+-- 6. Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_canteens_tenant      ON public.canteens(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_menu_items_canteen   ON public.menu_items(canteen_id);
 CREATE INDEX IF NOT EXISTS idx_orders_canteen       ON public.orders(canteen_id);
 CREATE INDEX IF NOT EXISTS idx_profiles_canteen     ON public.profiles(canteen_id);
 
--- 8. RLS Policies for canteens table
+-- 7. RLS Policies for canteens table
 CREATE POLICY "Tenant users can view active canteens"
   ON public.canteens FOR SELECT
   TO authenticated
@@ -92,7 +92,7 @@ CREATE POLICY "SUPER_ADMIN full access on canteens"
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.canteens TO authenticated;
 
--- 9. Update orders policies for strict staff lockdown by canteen
+-- 8. Update orders policies for strict staff lockdown by canteen
 DROP POLICY IF EXISTS "Staff and Admin can view tenant orders"   ON public.orders;
 DROP POLICY IF EXISTS "Staff and Admin can update tenant orders" ON public.orders;
 
@@ -119,7 +119,7 @@ CREATE POLICY "Staff can update assigned canteen orders and Admin can update ten
     (public.get_user_role() IN ('ADMIN', 'SUPER_ADMIN') AND tenant_id = public.get_my_tenant_id())
   );
 
--- 10. Update place_order_with_otp RPC with single active order rule & canteen scoping
+-- 9. Update place_order_with_otp RPC with single active order rule & canteen scoping
 DROP FUNCTION IF EXISTS public.place_order_with_otp(TEXT, JSON);
 DROP FUNCTION IF EXISTS public.place_order_with_otp(TEXT, JSON, BOOLEAN);
 DROP FUNCTION IF EXISTS public.place_order_with_otp(TEXT, JSON, BOOLEAN, UUID);
@@ -283,7 +283,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 GRANT EXECUTE ON FUNCTION public.place_order_with_otp(TEXT, JSON, BOOLEAN, UUID) TO authenticated;
 
--- 11. Update update_order_status RPC with staff canteen lockdown
+-- 10. Update update_order_status RPC with staff canteen lockdown
 CREATE OR REPLACE FUNCTION public.update_order_status(
   p_order_id uuid,
   p_status   public.order_status
