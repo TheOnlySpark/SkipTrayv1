@@ -99,7 +99,12 @@ export default function StudentDashboard() {
     const slotMinutes = hours * 60 + minutes;
 
     const diffMinutes = slotMinutes - currentISTMinutes;
-    const isAvailable = !isBeforeOpeningTime && diffMinutes >= 30;
+    let isAvailable = !isBeforeOpeningTime && diffMinutes >= 30;
+    
+    // Developer Override
+    if (localStorage.getItem('dev_ignore_time_constraints') === 'true') {
+      isAvailable = true;
+    }
     
     let reason = '';
     if (!isAvailable) {
