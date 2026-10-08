@@ -291,6 +291,61 @@ export interface Database {
           }
         ]
       }
+      inv_products: {
+        Row: {
+          id: string
+          tenant_id: string
+          product_name: string
+          category: string | null
+          product_type: Database["public"]["Enums"]["inventory_product_type"]
+          sku: string | null
+          purchase_price: number | null
+          selling_price: number
+          current_stock: number
+          min_stock: number
+          expiry_date: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          tenant_id?: string
+          product_name: string
+          category?: string | null
+          product_type: Database["public"]["Enums"]["inventory_product_type"]
+          sku?: string | null
+          purchase_price?: number | null
+          selling_price: number
+          current_stock?: number
+          min_stock?: number
+          expiry_date?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          tenant_id?: string
+          product_name?: string
+          category?: string | null
+          product_type?: Database["public"]["Enums"]["inventory_product_type"]
+          sku?: string | null
+          purchase_price?: number | null
+          selling_price?: number
+          current_stock?: number
+          min_stock?: number
+          expiry_date?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inv_products_tenant_id_fkey"
+            columns: ["tenant_id"]
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -383,6 +438,8 @@ export interface Database {
     }
     Enums: {
       food_type: "VEG" | "NON_VEG"
+      inventory_product_type: "FRESH_FOOD" | "PACKAGED" | "SOFT_DRINK"
+      inventory_transaction_type: "STOCK_IN" | "SALE" | "WASTAGE" | "ADJUSTMENT"
       order_status:
         | "PLACED"
         | "ACCEPTED"
