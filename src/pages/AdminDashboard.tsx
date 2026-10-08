@@ -13,6 +13,8 @@ import {
   IconStar,
   IconSparkles
 } from '../components/Icons';
+import { PaymentWebhookLogsAndLocks } from '../components/PaymentWebhookLogsAndLocks';
+import { PaymentCollectionManagement } from '../components/PaymentCollectionManagement';
 import { CancellationManagement } from '../components/CancellationManagement';
 
 type Canteen = Database['public']['Tables']['canteens']['Row'];
@@ -1202,7 +1204,9 @@ export default function AdminDashboard() {
         )}
       </div>
 
-      <div className="col-span-12">
+      <div className="col-span-12 space-y-8">
+        <PaymentWebhookLogsAndLocks isSuperAdmin={false} />
+        <PaymentCollectionManagement isSuperAdmin={false} />
         <CancellationManagement isSuperAdmin={false} />
       </div>
     </div>

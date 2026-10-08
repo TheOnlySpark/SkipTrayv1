@@ -483,6 +483,292 @@ export interface Database {
           }
         ]
       }
+      payments: {
+        Row: {
+          id: string
+          user_id: string
+          tenant_id: string | null
+          zohopay_order_id: string | null
+          zohopay_payment_id: string | null
+          razorpay_order_id: string | null
+          razorpay_payment_id: string | null
+          razorpay_signature: string | null
+          amount: number
+          status: Database["public"]["Enums"]["payment_status"]
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          tenant_id?: string | null
+          zohopay_order_id?: string | null
+          zohopay_payment_id?: string | null
+          razorpay_order_id?: string | null
+          razorpay_payment_id?: string | null
+          razorpay_signature?: string | null
+          amount: number
+          status?: Database["public"]["Enums"]["payment_status"]
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          tenant_id?: string | null
+          zohopay_order_id?: string | null
+          zohopay_payment_id?: string | null
+          razorpay_order_id?: string | null
+          razorpay_payment_id?: string | null
+          razorpay_signature?: string | null
+          amount?: number
+          status?: Database["public"]["Enums"]["payment_status"]
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payments_tenant_id_fkey"
+            columns: ["tenant_id"]
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payments_user_id_fkey"
+            columns: ["user_id"]
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      payment_locks: {
+        Row: {
+          id: string
+          resource_type: string
+          resource_id: string
+          tenant_id: string | null
+          lock_owner: string
+          lock_token: string
+          lock_status: Database["public"]["Enums"]["lock_status"]
+          acquired_at: string
+          expires_at: string
+          released_at: string | null
+          release_reason: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          resource_type: string
+          resource_id: string
+          tenant_id?: string | null
+          lock_owner: string
+          lock_token?: string
+          lock_status?: Database["public"]["Enums"]["lock_status"]
+          acquired_at?: string
+          expires_at: string
+          released_at?: string | null
+          release_reason?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          resource_type?: string
+          resource_id?: string
+          tenant_id?: string | null
+          lock_owner?: string
+          lock_token?: string
+          lock_status?: Database["public"]["Enums"]["lock_status"]
+          acquired_at?: string
+          expires_at?: string
+          released_at?: string | null
+          release_reason?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_locks_tenant_id_fkey"
+            columns: ["tenant_id"]
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      payment_webhook_events: {
+        Row: {
+          id: string
+          provider_event_id: string
+          provider: string
+          event_type: string
+          payment_id: string | null
+          booking_id: string | null
+          user_id: string | null
+          university_id: string | null
+          amount: number
+          currency: string
+          signature_status: Database["public"]["Enums"]["webhook_signature_status"]
+          processing_status: Database["public"]["Enums"]["webhook_processing_status"]
+          retry_count: number
+          lock_id: string | null
+          lock_status: Database["public"]["Enums"]["lock_status"]
+          lock_owner: string | null
+          lock_acquired_at: string | null
+          lock_expires_at: string | null
+          last_error: string | null
+          last_attempt_at: string | null
+          processed_at: string | null
+          payload: Json
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          provider_event_id: string
+          provider: string
+          event_type: string
+          payment_id?: string | null
+          booking_id?: string | null
+          user_id?: string | null
+          university_id?: string | null
+          amount?: number
+          currency?: string
+          signature_status?: Database["public"]["Enums"]["webhook_signature_status"]
+          processing_status?: Database["public"]["Enums"]["webhook_processing_status"]
+          retry_count?: number
+          lock_id?: string | null
+          lock_status?: Database["public"]["Enums"]["lock_status"]
+          lock_owner?: string | null
+          lock_acquired_at?: string | null
+          lock_expires_at?: string | null
+          last_error?: string | null
+          last_attempt_at?: string | null
+          processed_at?: string | null
+          payload?: Json
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          provider_event_id?: string
+          provider?: string
+          event_type?: string
+          payment_id?: string | null
+          booking_id?: string | null
+          user_id?: string | null
+          university_id?: string | null
+          amount?: number
+          currency?: string
+          signature_status?: Database["public"]["Enums"]["webhook_signature_status"]
+          processing_status?: Database["public"]["Enums"]["webhook_processing_status"]
+          retry_count?: number
+          lock_id?: string | null
+          lock_status?: Database["public"]["Enums"]["lock_status"]
+          lock_owner?: string | null
+          lock_acquired_at?: string | null
+          lock_expires_at?: string | null
+          last_error?: string | null
+          last_attempt_at?: string | null
+          processed_at?: string | null
+          payload?: Json
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_webhook_events_booking_id_fkey"
+            columns: ["booking_id"]
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_webhook_events_lock_id_fkey"
+            columns: ["lock_id"]
+            referencedRelation: "payment_locks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_webhook_events_payment_id_fkey"
+            columns: ["payment_id"]
+            referencedRelation: "payments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_webhook_events_university_id_fkey"
+            columns: ["university_id"]
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_webhook_events_user_id_fkey"
+            columns: ["user_id"]
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      payment_webhook_audit_logs: {
+        Row: {
+          id: string
+          webhook_event_id: string | null
+          payment_id: string | null
+          actor_id: string | null
+          actor_type: string
+          tenant_id: string | null
+          action: string
+          details: Json | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          webhook_event_id?: string | null
+          payment_id?: string | null
+          actor_id?: string | null
+          actor_type: string
+          tenant_id?: string | null
+          action: string
+          details?: Json | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          webhook_event_id?: string | null
+          payment_id?: string | null
+          actor_id?: string | null
+          actor_type?: string
+          tenant_id?: string | null
+          action?: string
+          details?: Json | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_webhook_audit_logs_actor_id_fkey"
+            columns: ["actor_id"]
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_webhook_audit_logs_payment_id_fkey"
+            columns: ["payment_id"]
+            referencedRelation: "payments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_webhook_audit_logs_tenant_id_fkey"
+            columns: ["tenant_id"]
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_webhook_audit_logs_webhook_event_id_fkey"
+            columns: ["webhook_event_id"]
+            referencedRelation: "payment_webhook_events"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -573,8 +859,38 @@ export interface Database {
         }
         Returns: boolean
       }
+      acquire_payment_lock: {
+        Args: {
+          p_resource_type: string
+          p_resource_id: string
+          p_tenant_id: string
+          p_lock_owner: string
+          p_ttl_seconds?: number
+        }
+        Returns: Json
+      }
+      release_payment_lock: {
+        Args: {
+          p_lock_id: string
+          p_lock_token: string
+          p_release_reason?: string
+        }
+        Returns: Json
+      }
+      release_expired_lock_admin: {
+        Args: {
+          p_lock_id: string
+          p_admin_id: string
+          p_reason?: string
+        }
+        Returns: Json
+      }
     }
     Enums: {
+      payment_status: "PENDING" | "SUCCESS" | "FAILED"
+      webhook_processing_status: "RECEIVED" | "PROCESSING" | "PROCESSED" | "FAILED" | "RETRY_PENDING" | "DUPLICATE_EVENT"
+      webhook_signature_status: "VERIFIED" | "INVALID_SIGNATURE" | "SKIPPED"
+      lock_status: "UNLOCKED" | "LOCKED" | "LOCK_EXPIRED"
       cancellation_status: "NOT_REQUESTED" | "REQUESTED" | "UNDER_REVIEW" | "APPROVED" | "REJECTED" | "CANCELLED"
       refund_status: "NOT_REQUESTED" | "REQUESTED" | "UNDER_REVIEW" | "APPROVED" | "REJECTED" | "PROCESSING" | "COMPLETED" | "FAILED" | "CANCELLED"
       food_type: "VEG" | "NON_VEG"
