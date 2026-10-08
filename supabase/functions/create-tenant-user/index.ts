@@ -25,12 +25,15 @@ serve(async (req) => {
     }
 
     const jwt = authHeader.replace('Bearer ', '').trim();
+    if (!jwt || jwt === 'undefined' || jwt === 'null') {
+      return new Response(JSON.stringify({ error: 'Unauthorized: Missing or invalid authentication token. Please sign in again.' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
 
     // Verify the caller's session using the admin client
     const { data: { user: callerUser }, error: callerError } = await adminClient.auth.getUser(jwt);
     if (callerError || !callerUser) {
       console.error('Auth Error:', callerError);
-      return new Response(JSON.stringify({ error: `Unauthorized: ${callerError?.message || 'Invalid token'}` }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify({ error: `Unauthorized: ${callerError?.message || 'Invalid or expired session. Please sign in again.'}` }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     const { data: callerProfile, error: profileError } = await adminClient

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { invokeEdgeFunction } from '../lib/edgeFunction';
 import { useAuth } from '../contexts/AuthContext';
 import { Building, Plus, Users, Search, AlertCircle, CheckCircle, Store, ShoppingBag } from 'lucide-react';
 
@@ -139,32 +140,16 @@ export default function SuperAdminDashboard() {
     setCreating(true);
 
     try {
-      const functionsUrl = import.meta.env.VITE_SUPABASE_URL
-        ? `${import.meta.env.VITE_SUPABASE_URL.replace('/rest/v1', '')}/functions/v1`
-        : 'http://localhost:54321/functions/v1';
-
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      const response = await fetch(`${functionsUrl}/create-tenant-admin`, {
+      await invokeEdgeFunction('create-tenant-admin', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session?.access_token}`
-        },
-        body: JSON.stringify({
+        body: {
           slug: newSlug,
           name: newName,
           admin_name: adminName,
           admin_email: adminEmail,
           admin_password: adminPassword
-        })
+        }
       });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || 'Failed to create tenant');
-      }
 
       setSuccess(`Tenant created successfully! Admin invite sent to ${adminEmail}`);
       setIsCreating(false);

@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/ModalDialogContext';
 import { supabase } from '../lib/supabase';
+import { invokeEdgeFunction } from '../lib/edgeFunction';
 import { useTenant } from '../contexts/TenantContext';
 import { Database } from '../types/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -236,31 +237,15 @@ export default function AdminDashboard() {
     e.preventDefault();
     setCreatingStaff(true);
     try {
-      const functionsUrl = import.meta.env.VITE_SUPABASE_URL
-        ? `${import.meta.env.VITE_SUPABASE_URL.replace('/rest/v1', '')}/functions/v1`
-        : 'http://localhost:54321/functions/v1';
-
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      const response = await fetch(`${functionsUrl}/create-tenant-user`, {
+      await invokeEdgeFunction('create-tenant-user', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session?.access_token}`
-        },
-        body: JSON.stringify({
+        body: {
           name: newStaffName,
           email: newStaffEmail,
           password: newStaffPassword,
           role: 'STAFF'
-        })
+        }
       });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || 'Failed to create staff');
-      }
 
       showAlert({
         title: 'Staff Created',

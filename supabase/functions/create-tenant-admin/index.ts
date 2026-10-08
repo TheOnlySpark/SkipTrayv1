@@ -17,8 +17,9 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const authHeader = req.headers.get('Authorization');
 
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: 'Missing authorization header' }), {
+    const token = authHeader?.replace('Bearer ', '').trim();
+    if (!authHeader || !token || token === 'undefined' || token === 'null') {
+      return new Response(JSON.stringify({ error: 'Unauthorized: Missing or invalid authentication token. Please sign in again.' }), {
         status: 401,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
