@@ -266,3 +266,4 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 GRANT EXECUTE ON FUNCTION public.verify_pickup_otp(uuid, text, boolean) TO authenticated;
 
 NOTIFY pgrst, 'reload schema';
+
