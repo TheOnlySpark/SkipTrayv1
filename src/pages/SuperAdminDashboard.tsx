@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Building, Plus, Users, Search, AlertCircle, CheckCircle, Store, ShoppingBag } from 'lucide-react';
+import { CancellationManagement } from '../components/CancellationManagement';
 
 interface Tenant {
   id: string;
@@ -480,6 +481,10 @@ export default function SuperAdminDashboard() {
           </div>
         </div>
       )}
+
+      <div className="pt-8">
+        <CancellationManagement isSuperAdmin={true} />
+      </div>
     </div>
   );
 }

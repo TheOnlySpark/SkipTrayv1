@@ -13,6 +13,7 @@ import {
   IconStar,
   IconSparkles
 } from '../components/Icons';
+import { CancellationManagement } from '../components/CancellationManagement';
 
 type Canteen = Database['public']['Tables']['canteens']['Row'];
 
@@ -1201,6 +1202,9 @@ export default function AdminDashboard() {
         )}
       </div>
 
+      <div className="col-span-12">
+        <CancellationManagement isSuperAdmin={false} />
+      </div>
     </div>
   );
 }

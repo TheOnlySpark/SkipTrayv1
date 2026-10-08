@@ -17,6 +17,8 @@ import {
   IconMaximize
 } from '../components/Icons';
 import { QRCodeSVG } from '../components/QRCode';
+import { CancellationRequestModal } from '../components/CancellationRequestModal';
+import { CancellationStatusModal } from '../components/CancellationStatusModal';
 
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 type Canteen = Database['public']['Tables']['canteens']['Row'];
@@ -57,6 +59,8 @@ export default function StudentDashboard() {
   const [activeOrder, setActiveOrder] = useState<Order | null>(null);
   const [pastOrders, setPastOrders] = useState<PastOrder[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [cancelRequestOrder, setCancelRequestOrder] = useState<any>(null);
+  const [viewStatusRequest, setViewStatusRequest] = useState<any>(null);
   
   const [cart, setCart] = useState<{item: MenuItem, quantity: number}[]>([]);
   const [pickupTime, setPickupTime] = useState('');
@@ -264,6 +268,21 @@ export default function StudentDashboard() {
     },
     enabled: !!selectedCanteenId,
     staleTime: 1000 * 60 * 5, // 5 minutes
+  });
+
+  
+  const { data: userCancellationRequests = [] } = useQuery({
+    queryKey: ['userCancellationRequests', profile?.id],
+    queryFn: async () => {
+      if (!profile?.id) return [];
+      const { data, error } = await supabase
+        .from('cancellation_requests')
+        .select('*')
+        .eq('user_id', profile.id);
+      if (error) return [];
+      return (data as any[]) || [];
+    },
+    enabled: !!profile?.id,
   });
 
   const { data: pastOrdersData = [], isLoading: pastOrdersLoading } = useQuery({
@@ -575,8 +594,51 @@ export default function StudentDashboard() {
                         <span>📍 {o.canteens?.name || 'Ground Floor Canteen'}</span>
                       </div>
                     </div>
-                    <div className={`px-3 py-1 rounded-full text-xs font-bold border ${o.status === 'COLLECTED' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
-                      {o.status}
+                    <div className="flex flex-col items-end gap-2">
+                      <div className={`px-3 py-1 rounded-full text-xs font-bold border ${o.status === 'COLLECTED' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+                        {o.status}
+                      </div>
+                      {(() => {
+                        const existingReq = userCancellationRequests.find((cr: any) => cr.order_id === o.id);
+                        if (existingReq) {
+                          return (
+                            <div className="flex flex-col items-end gap-1.5 mt-1">
+                              <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  existingReq.cancellation_status === 'APPROVED' ? 'bg-emerald-100 text-emerald-800' :
+                                  existingReq.cancellation_status === 'REJECTED' ? 'bg-rose-100 text-rose-800' :
+                                  'bg-amber-100 text-amber-800'
+                                }`}>
+                                  Cancel: {existingReq.cancellation_status}
+                                </span>
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  existingReq.refund_status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-800' :
+                                  existingReq.refund_status === 'PROCESSING' ? 'bg-blue-100 text-blue-800' :
+                                  existingReq.refund_status === 'APPROVED' ? 'bg-indigo-100 text-indigo-800' :
+                                  existingReq.refund_status === 'REJECTED' ? 'bg-rose-100 text-rose-800' :
+                                  'bg-amber-100 text-amber-800'
+                                }`}>
+                                  Refund: {existingReq.refund_status}
+                                </span>
+                              </div>
+                              <button
+                                onClick={() => setViewStatusRequest({ request: existingReq, order: o })}
+                                className="text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-1 rounded-lg transition-colors"
+                              >
+                                View Request Status
+                              </button>
+                            </div>
+                          );
+                        }
+                        return (
+                          <button
+                            onClick={() => setCancelRequestOrder(o)}
+                            className="text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg transition-colors mt-1"
+                          >
+                            Request Cancellation / Refund
+                          </button>
+                        );
+                      })()}
                     </div>
                   </div>
                   
@@ -697,11 +759,32 @@ export default function StudentDashboard() {
             {['PLACED', 'ACCEPTED'].includes(activeOrder.status) && (new Date().getTime() - new Date(activeOrder.created_at).getTime()) < 5 * 60 * 1000 && (
               <button 
                 onClick={handleCancelOrder}
-                className="bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-xl text-sm font-semibold transition-colors"
+                className="bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-xl text-sm font-semibold transition-colors mr-2"
               >
                 Cancel Order
               </button>
             )}
+            {(() => {
+              const activeReq = userCancellationRequests.find((cr: any) => cr.order_id === activeOrder.id);
+              if (activeReq) {
+                return (
+                  <button
+                    onClick={() => setViewStatusRequest({ request: activeReq, order: activeOrder })}
+                    className="bg-amber-400 hover:bg-amber-500 text-amber-950 font-bold px-3.5 py-2 rounded-xl text-xs transition-colors"
+                  >
+                    Request Pending ({activeReq.cancellation_status})
+                  </button>
+                );
+              }
+              return (
+                <button
+                  onClick={() => setCancelRequestOrder(activeOrder)}
+                  className="bg-white/20 hover:bg-white/30 text-white px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors"
+                >
+                  Request Cancellation / Refund
+                </button>
+              );
+            })()}
           </div>
 
           <div className="flex flex-col items-center justify-center flex-1 pb-12">
@@ -1244,6 +1327,21 @@ export default function StudentDashboard() {
             </p>
           </div>
         </div>
+      )}
+
+
+      {viewStatusRequest && (
+        <CancellationStatusModal 
+          request={viewStatusRequest.request} 
+          order={viewStatusRequest.order} 
+          onClose={() => setViewStatusRequest(null)} 
+        />
+      )}
+      {cancelRequestOrder && (
+        <CancellationRequestModal 
+          order={cancelRequestOrder} 
+          onClose={() => setCancelRequestOrder(null)} 
+        />
       )}
     </div>
   );

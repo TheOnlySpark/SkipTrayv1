@@ -9,6 +9,137 @@ export type Json =
 export interface Database {
   public: {
     Tables: {
+      cancellation_audit_logs: {
+        Row: {
+          id: string
+          request_id: string
+          actor_id: string
+          tenant_id: string
+          action: string
+          details: Json | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          request_id: string
+          actor_id: string
+          tenant_id: string
+          action: string
+          details?: Json | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          request_id?: string
+          actor_id?: string
+          tenant_id?: string
+          action?: string
+          details?: Json | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cancellation_audit_logs_request_id_fkey"
+            columns: ["request_id"]
+            referencedRelation: "cancellation_requests"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      cancellation_requests: {
+        Row: {
+          id: string
+          order_id: string
+          user_id: string
+          tenant_id: string
+          cancellation_reason: string
+          strike_status_snapshot: number
+          requested_refund_amount: number
+          approved_refund_amount: number
+          cancellation_status: Database["public"]["Enums"]["cancellation_status"]
+          refund_status: Database["public"]["Enums"]["refund_status"]
+          reviewed_by: string | null
+          reviewed_at: string | null
+          review_remarks: string | null
+          recommendation: string | null
+          approved_by: string | null
+          approved_at: string | null
+          processed_by: string | null
+          processed_at: string | null
+          refund_transaction_id: string | null
+          failure_reason: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          order_id: string
+          user_id: string
+          tenant_id: string
+          cancellation_reason: string
+          strike_status_snapshot?: number
+          requested_refund_amount?: number
+          approved_refund_amount?: number
+          cancellation_status?: Database["public"]["Enums"]["cancellation_status"]
+          refund_status?: Database["public"]["Enums"]["refund_status"]
+          reviewed_by?: string | null
+          reviewed_at?: string | null
+          review_remarks?: string | null
+          recommendation?: string | null
+          approved_by?: string | null
+          approved_at?: string | null
+          processed_by?: string | null
+          processed_at?: string | null
+          refund_transaction_id?: string | null
+          failure_reason?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          order_id?: string
+          user_id?: string
+          tenant_id?: string
+          cancellation_reason?: string
+          strike_status_snapshot?: number
+          requested_refund_amount?: number
+          approved_refund_amount?: number
+          cancellation_status?: Database["public"]["Enums"]["cancellation_status"]
+          refund_status?: Database["public"]["Enums"]["refund_status"]
+          reviewed_by?: string | null
+          reviewed_at?: string | null
+          review_remarks?: string | null
+          recommendation?: string | null
+          approved_by?: string | null
+          approved_at?: string | null
+          processed_by?: string | null
+          processed_at?: string | null
+          refund_transaction_id?: string | null
+          failure_reason?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cancellation_requests_order_id_fkey"
+            columns: ["order_id"]
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cancellation_requests_user_id_fkey"
+            columns: ["user_id"]
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cancellation_requests_tenant_id_fkey"
+            columns: ["tenant_id"]
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
       canteens: {
         Row: {
           created_at: string
@@ -444,6 +575,8 @@ export interface Database {
       }
     }
     Enums: {
+      cancellation_status: "NOT_REQUESTED" | "REQUESTED" | "UNDER_REVIEW" | "APPROVED" | "REJECTED" | "CANCELLED"
+      refund_status: "NOT_REQUESTED" | "REQUESTED" | "UNDER_REVIEW" | "APPROVED" | "REJECTED" | "PROCESSING" | "COMPLETED" | "FAILED" | "CANCELLED"
       food_type: "VEG" | "NON_VEG"
       order_status:
         | "PLACED"
