@@ -739,6 +739,11 @@ export default function AdminDashboard() {
 
                 <div className="text-xs text-slate-500">
                   Pickup: {formatPickupTime(order.pickup_time)} (Lunch) • {new Date(order.created_at).toLocaleDateString()}
+                  {order.otp_used_at && (
+                    <span className="block text-[11px] text-emerald-600 font-medium mt-0.5">
+                      ✓ OTP Verified: {new Date(order.otp_used_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  )}
                 </div>
 
                 <div className="mt-2 pt-3 border-t border-slate-200">

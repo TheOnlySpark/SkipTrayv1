@@ -55,6 +55,7 @@ export default function StudentDashboard() {
   const { showAlert, showConfirm } = useDialog();
   const queryClient = useQueryClient();
   const [activeOrder, setActiveOrder] = useState<Order | null>(null);
+  const [activeOtp, setActiveOtp] = useState<string>('');
   const [pastOrders, setPastOrders] = useState<PastOrder[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   
@@ -65,6 +66,22 @@ export default function StudentDashboard() {
   const [cartOpen, setCartOpen] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
   const [currentTime, setCurrentTime] = useState(Date.now());
+
+  // Load persisted OTP for active order from localStorage
+  useEffect(() => {
+    if (!profile?.id) {
+      setActiveOtp('');
+      return;
+    }
+    try {
+      const stored = localStorage.getItem(`skiptray_active_otp_${profile.id}`);
+      if (stored) {
+        setActiveOtp(stored);
+      }
+    } catch {
+      // ignore storage access errors
+    }
+  }, [profile?.id]);
 
   // Periodically refresh current time every 30s to dynamically update slot cutoffs
   useEffect(() => {
@@ -210,6 +227,12 @@ export default function StudentDashboard() {
         } else {
           // If collected or rejected, clear active order and refresh history
           setActiveOrder(null);
+          setActiveOtp('');
+          try {
+            localStorage.removeItem(`skiptray_active_otp_${profile.id}`);
+          } catch {
+            // ignore
+          }
           queryClient.invalidateQueries({ queryKey: ['pastOrders'] });
         }
       })
@@ -404,14 +427,35 @@ export default function StudentDashboard() {
     if (error) {
       setError(error.message);
     } else {
+      let createdOrderId: string | null = null;
+      let createdOtp: string | null = null;
+
+      if (typeof data === 'object' && data !== null) {
+        createdOrderId = (data as any).order_id || null;
+        createdOtp = (data as any).otp_code || null;
+      } else if (typeof data === 'string') {
+        createdOrderId = data;
+      }
+
+      if (createdOtp && profile?.id) {
+        setActiveOtp(createdOtp);
+        try {
+          localStorage.setItem(`skiptray_active_otp_${profile.id}`, createdOtp);
+        } catch {
+          // ignore localStorage errors
+        }
+      }
+
       // Fetch the newly created order
-      const { data: newOrder } = await supabase
-        .from('orders')
-        .select('*, canteens ( name, code )')
-        .eq('id', data)
-        .single();
-      if (newOrder) {
-        setActiveOrder(newOrder as Order);
+      if (createdOrderId) {
+        const { data: newOrder } = await supabase
+          .from('orders')
+          .select('*, canteens ( name, code )')
+          .eq('id', createdOrderId)
+          .single();
+        if (newOrder) {
+          setActiveOrder(newOrder as Order);
+        }
       }
       setCart([]);
       setPickupTime('');
@@ -443,6 +487,14 @@ export default function StudentDashboard() {
       });
     } else {
       setActiveOrder(null);
+      setActiveOtp('');
+      if (profile?.id) {
+        try {
+          localStorage.removeItem(`skiptray_active_otp_${profile.id}`);
+        } catch {
+          // ignore
+        }
+      }
       queryClient.invalidateQueries({ queryKey: ['pastOrders'] });
       showAlert({
         title: 'Order Cancelled',
@@ -748,7 +800,7 @@ export default function StudentDashboard() {
                 title="Click to Enlarge QR Code"
               >
                 <QRCodeSVG 
-                  value={`SKIPTRAY:${activeOrder.id}:${activeOrder.otp_code}`} 
+                  value={`SKIPTRAY:${activeOrder.id}:${activeOtp || activeOrder.otp_code || ''}`} 
                   size={180}
                   className="rounded-xl"
                 />
@@ -769,7 +821,9 @@ export default function StudentDashboard() {
               {/* Manual 6-Digit OTP Box (Fallback / Backup) */}
               <div className="bg-white/10 px-4 py-2.5 rounded-2xl border border-white/20 text-center w-full shadow-inner mt-1">
                 <p className="text-indigo-200 text-[10px] font-bold uppercase tracking-widest mb-0.5">Or Give 6-Digit OTP</p>
-                <p className="text-3xl font-mono font-black tracking-[0.25em] text-white">{activeOrder.otp_code}</p>
+                <p className="text-3xl font-mono font-black tracking-[0.25em] text-white">
+                  {activeOtp || activeOrder.otp_code || '••••••'}
+                </p>
               </div>
             </div>
           ) : (
@@ -1229,14 +1283,14 @@ export default function StudentDashboard() {
 
             <div className="p-3 bg-slate-50 border-2 border-slate-100 rounded-2xl shadow-inner">
               <QRCodeSVG 
-                value={`SKIPTRAY:${activeOrder.id}:${activeOrder.otp_code}`} 
+                value={`SKIPTRAY:${activeOrder.id}:${activeOtp || activeOrder.otp_code || ''}`} 
                 size={230}
               />
             </div>
 
             <div className="w-full bg-slate-900 text-white py-3 rounded-2xl">
               <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Pickup OTP</div>
-              <div className="text-3xl font-mono font-extrabold tracking-[0.2em]">{activeOrder.otp_code}</div>
+              <div className="text-3xl font-mono font-extrabold tracking-[0.2em]">{activeOtp || activeOrder.otp_code || '••••••'}</div>
             </div>
 
             <p className="text-xs text-slate-400 font-medium">

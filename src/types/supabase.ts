@@ -189,7 +189,9 @@ export interface Database {
           id: string
           order_number: number
           otp_attempts: number
-          otp_code: string
+          otp_code: string | null
+          otp_hash: string | null
+          otp_used_at: string | null
           pickup_time: string
           is_takeaway: boolean
           ready_at: string | null
@@ -205,7 +207,9 @@ export interface Database {
           id?: string
           order_number?: number
           otp_attempts?: number
-          otp_code: string
+          otp_code?: string | null
+          otp_hash?: string | null
+          otp_used_at?: string | null
           pickup_time: string
           is_takeaway?: boolean
           ready_at?: string | null
@@ -221,7 +225,9 @@ export interface Database {
           id?: string
           order_number?: number
           otp_attempts?: number
-          otp_code?: string
+          otp_code?: string | null
+          otp_hash?: string | null
+          otp_used_at?: string | null
           pickup_time?: string
           is_takeaway?: boolean
           ready_at?: string | null
@@ -371,7 +377,7 @@ export interface Database {
           p_is_takeaway?: boolean
           p_canteen_id?: string | null
         }
-        Returns: string
+        Returns: Json
       }
       update_order_status: {
         Args: {
