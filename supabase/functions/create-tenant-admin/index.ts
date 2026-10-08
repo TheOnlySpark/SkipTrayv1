@@ -55,9 +55,7 @@ Deno.serve(async (req) => {
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
 
     // 1. Create the tenant record via RPC
-    // We MUST use callerClient here so that the SQL function's internal public.get_user_role()
-    // check passes (since it relies on auth.uid(), which adminClient lacks).
-    const { data: tenantId, error: tenantError } = await callerClient
+    const { data: tenantId, error: tenantError } = await adminClient
       .rpc('create_tenant', { p_slug: slug, p_name: name });
 
     if (tenantError) {
@@ -88,10 +86,10 @@ Deno.serve(async (req) => {
       });
     }
 
-    // 3. Set profile role to UNI_ADMIN and name
+    // 3. Set profile role to ADMIN and name
     const { error: profileUpdateError } = await adminClient
       .from('profiles')
-      .update({ role: 'UNI_ADMIN', name: admin_name })
+      .update({ role: 'ADMIN', name: admin_name })
       .eq('id', newUser.user.id);
 
     if (profileUpdateError) {
