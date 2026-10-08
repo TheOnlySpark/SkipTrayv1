@@ -5,26 +5,29 @@ import { useDialog } from '../contexts/ModalDialogContext';
 import { supabase } from '../lib/supabase';
 import { Database } from '../types/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  IconAlertTriangle,
-  IconBan,
-  IconClock,
+import { 
+  IconAlertTriangle, 
+  IconBan, 
+  IconClock, 
   IconHourglass,
-  IconStar,
-  IconX,
+  IconStar, 
+  IconX, 
   IconChevronUp,
   IconQrCode,
   IconMaximize
 } from '../components/Icons';
 import { QRCodeSVG } from '../components/QRCode';
-import { AnimatedTruckButton } from '../components/AnimatedTruckButton';
 
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
-type Order = Database['public']['Tables']['orders']['Row'];
+type Canteen = Database['public']['Tables']['canteens']['Row'];
+type Order = Database['public']['Tables']['orders']['Row'] & {
+  canteens?: { name: string; code: string | null } | null;
+};
 type ItemReview = Database['public']['Tables']['item_reviews']['Row'];
 type PastOrder = Order & {
   order_items: { menu_items: MenuItem | null }[];
   item_reviews: ItemReview[];
+  canteens?: { name: string; code: string | null } | null;
 };
 
 export const LUNCH_SLOTS = [
@@ -54,8 +57,8 @@ export default function StudentDashboard() {
   const [activeOrder, setActiveOrder] = useState<Order | null>(null);
   const [pastOrders, setPastOrders] = useState<PastOrder[]>([]);
   const [showHistory, setShowHistory] = useState(false);
-
-  const [cart, setCart] = useState<{ item: MenuItem, quantity: number }[]>([]);
+  
+  const [cart, setCart] = useState<{item: MenuItem, quantity: number}[]>([]);
   const [pickupTime, setPickupTime] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -97,7 +100,7 @@ export default function StudentDashboard() {
 
     const diffMinutes = slotMinutes - currentISTMinutes;
     const isAvailable = !isBeforeOpeningTime && diffMinutes >= 30;
-
+    
     let reason = '';
     if (!isAvailable) {
       if (isBeforeOpeningTime) {
@@ -119,7 +122,69 @@ export default function StudentDashboard() {
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewText, setReviewText] = useState('');
   const [submittingReview, setSubmittingReview] = useState(false);
-  const isSubmittingRef = React.useRef(false);
+
+  const [selectedCanteenId, setSelectedCanteenId] = useState<string>('');
+
+  // Fetch available active canteens for this tenant
+  const { data: canteens = [], isLoading: canteensLoading, error: canteensError, refetch: refetchCanteens } = useQuery({
+    queryKey: ['canteens', profile?.tenant_id],
+    queryFn: async () => {
+      if (!profile?.tenant_id) return [];
+      const { data, error } = await supabase
+        .from('canteens')
+        .select('*')
+        .eq('tenant_id', profile.tenant_id)
+        .eq('is_active', true)
+        .order('name');
+      if (error) throw error;
+      return data as Canteen[];
+    },
+    enabled: !!profile?.tenant_id,
+  });
+
+  useEffect(() => {
+    if (!profile?.tenant_id) return;
+
+    const canteenSub = supabase
+      .channel(`student_canteens_${profile.tenant_id}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'canteens',
+        filter: `tenant_id=eq.${profile.tenant_id}`
+      }, () => {
+        queryClient.invalidateQueries({ queryKey: ['canteens', profile.tenant_id] });
+      })
+      .subscribe();
+
+    return () => {
+      canteenSub.unsubscribe();
+    };
+  }, [profile?.tenant_id, queryClient]);
+
+  // Keep the selected location valid as locations are added or deactivated.
+  useEffect(() => {
+    if (canteens.length > 0 && !canteens.some(canteen => canteen.id === selectedCanteenId)) {
+      setSelectedCanteenId(canteens[0].id);
+    } else if (canteens.length === 0 && selectedCanteenId) {
+      setSelectedCanteenId('');
+    }
+  }, [canteens, selectedCanteenId]);
+
+  const handleSelectCanteen = async (canteenId: string) => {
+    if (canteenId === selectedCanteenId) return;
+    if (cart.length > 0) {
+      const confirmed = await showConfirm({
+        title: 'Switch Cafeteria?',
+        message: 'You have items in your cart from another cafeteria. Switching will clear your current cart. Proceed?',
+        confirmText: 'Switch & Clear Cart',
+        cancelText: 'Keep Current Cart'
+      });
+      if (!confirmed) return;
+      setCart([]);
+    }
+    setSelectedCanteenId(canteenId);
+  };
 
   useEffect(() => {
     if (!profile?.id) return;
@@ -127,20 +192,21 @@ export default function StudentDashboard() {
     // Listen to changes on our active order and past orders
     const orderSub = supabase
       .channel('public:orders')
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
         table: 'orders',
         filter: `user_id=eq.${profile.id}`
-      }, (payload) => {
-        if (isSubmittingRef.current && payload.eventType === 'INSERT') {
-          // Ignore INSERT events while the truck animation is playing.
-          // handlePlaceOrder will manually set the active order after the animation finishes.
-          return;
-        }
+      }, async (payload) => {
         const updatedOrder = payload.new as Order;
         if (['PLACED', 'ACCEPTED', 'PREPARING', 'READY'].includes(updatedOrder.status)) {
-          setActiveOrder(updatedOrder);
+          const { data } = await supabase
+            .from('orders')
+            .select('*, canteens ( name, code )')
+            .eq('id', updatedOrder.id)
+            .maybeSingle();
+          if (data) setActiveOrder(data as Order);
+          else setActiveOrder(updatedOrder);
         } else {
           // If collected or rejected, clear active order and refresh history
           setActiveOrder(null);
@@ -153,16 +219,16 @@ export default function StudentDashboard() {
     const menuSub = supabase
       .channel('public:menu_items')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items' }, () => {
-        queryClient.invalidateQueries({ queryKey: ['menuItems'] });
+        queryClient.invalidateQueries({ queryKey: ['menuItems', selectedCanteenId] });
       })
       .subscribe();
 
     // Listen to changes on item reviews (e.g. admin reply)
     const reviewSub = supabase
       .channel('public:item_reviews')
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
         table: 'item_reviews',
         filter: `user_id=eq.${profile.id}`
       }, () => {
@@ -175,14 +241,16 @@ export default function StudentDashboard() {
       menuSub.unsubscribe();
       reviewSub.unsubscribe();
     };
-  }, [profile?.id, queryClient]);
+  }, [profile?.id, selectedCanteenId, queryClient]);
 
   const { data: menuItems = [], isLoading: menuLoading } = useQuery({
-    queryKey: ['menuItems'],
+    queryKey: ['menuItems', selectedCanteenId],
     queryFn: async () => {
+      if (!selectedCanteenId) return [];
       const { data } = await supabase
         .from('menu_items')
         .select('*')
+        .eq('canteen_id', selectedCanteenId)
         .order('veg_non_veg', { ascending: false })
         .order('name');
       return (data || []).sort((a, b) => {
@@ -194,6 +262,7 @@ export default function StudentDashboard() {
         return a.name.localeCompare(b.name);
       });
     },
+    enabled: !!selectedCanteenId,
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 
@@ -205,6 +274,7 @@ export default function StudentDashboard() {
         .from('orders')
         .select(`
           *,
+          canteens ( name, code ),
           order_items (
             menu_items (*)
           ),
@@ -227,11 +297,11 @@ export default function StudentDashboard() {
       if (!profile?.id) return;
       const { data } = await supabase
         .from('orders')
-        .select('*')
+        .select('*, canteens ( name, code )')
         .eq('user_id', profile.id)
         .in('status', ['PLACED', 'ACCEPTED', 'PREPARING', 'READY'])
         .maybeSingle();
-      if (data) setActiveOrder(data);
+      if (data) setActiveOrder(data as Order);
     };
     fetchActive();
   }, [profile?.id]);
@@ -277,7 +347,7 @@ export default function StudentDashboard() {
     }
     if (item.is_sold_out) return;
     if (cartTotalItems >= 5) return;
-
+    
     const existing = cart.find(c => c.item.id === item.id);
     if (existing) {
       setCart(cart.map(c => c.item.id === item.id ? { ...c, quantity: c.quantity + 1 } : c));
@@ -318,7 +388,6 @@ export default function StudentDashboard() {
     }
 
     setSubmitting(true);
-    isSubmittingRef.current = true;
     setError('');
 
     const itemsJson = cart.map(c => ({
@@ -326,28 +395,28 @@ export default function StudentDashboard() {
       quantity: c.quantity
     }));
 
-    const [{ data, error }] = await Promise.all([
-      supabase.rpc('place_order_with_otp', {
-        p_pickup_time: pickupTime,
-        p_items: itemsJson,
-        p_is_takeaway: isTakeaway
-      }),
-      new Promise(r => setTimeout(r, 4300)) // Wait for truck animation to finish (sped up end sequence)
-    ]);
+    const { data, error } = await supabase.rpc('place_order_with_otp', {
+      p_pickup_time: pickupTime,
+      p_items: itemsJson,
+      p_canteen_id: selectedCanteenId
+    });
 
     if (error) {
       setError(error.message);
     } else {
       // Fetch the newly created order
-      const { data: newOrder } = await supabase.from('orders').select('*').eq('id', data).single();
+      const { data: newOrder } = await supabase
+        .from('orders')
+        .select('*, canteens ( name, code )')
+        .eq('id', data)
+        .single();
       if (newOrder) {
-        setActiveOrder(newOrder);
+        setActiveOrder(newOrder as Order);
       }
       setCart([]);
       setPickupTime('');
     }
     setSubmitting(false);
-    isSubmittingRef.current = false;
   };
 
   const handleCancelOrder = async () => {
@@ -360,12 +429,12 @@ export default function StudentDashboard() {
       isDangerous: true
     });
     if (!confirmed) return;
-
+    
     // In Phase 7, we use an RPC to enforce the 5 min rule securely
     const { error } = await supabase.rpc('cancel_order', {
       p_order_id: activeOrder.id
     });
-
+    
     if (error) {
       showAlert({
         title: 'Cancellation Failed',
@@ -387,7 +456,7 @@ export default function StudentDashboard() {
     e.preventDefault();
     if (!reviewingItem || !profile?.id) return;
     setSubmittingReview(true);
-
+    
     const { error } = await supabase.from('item_reviews').insert({
       order_id: reviewingItem.orderId,
       menu_item_id: reviewingItem.menuItemId,
@@ -396,7 +465,7 @@ export default function StudentDashboard() {
       rating: reviewRating,
       feedback_text: reviewText
     });
-
+    
     if (error) {
       showAlert({
         title: 'Submission Failed',
@@ -449,7 +518,7 @@ export default function StudentDashboard() {
               )}
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-3 leading-tight">Welcome, {profile?.name || 'User'}</h1>
-
+            
             {strikeCount === 1 && !isSuspended && (
               <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50/80 border border-amber-200/60 p-2.5 rounded-xl mt-3 font-medium">
                 <IconAlertTriangle size={16} className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
@@ -502,19 +571,22 @@ export default function StudentDashboard() {
                       <div className="text-xs text-slate-500 font-mono font-medium mb-1">ID: {o.id.split('-')[0].toUpperCase()}</div>
                       <div className="text-xs text-slate-500 font-medium mb-1">Placed on: {new Date(o.created_at).toLocaleDateString()}</div>
                       <div className="text-sm text-slate-600 mt-1">Pickup: {formatPickupTime(o.pickup_time)} (Lunch)</div>
+                      <div className="text-xs text-indigo-600 font-semibold mt-1 flex items-center gap-1">
+                        <span>📍 {o.canteens?.name || 'Ground Floor Canteen'}</span>
+                      </div>
                     </div>
                     <div className={`px-3 py-1 rounded-full text-xs font-bold border ${o.status === 'COLLECTED' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
                       {o.status}
                     </div>
                   </div>
-
+                  
                   {o.order_items && o.order_items.length > 0 && (
                     <div className="space-y-3">
                       {o.order_items.map((oi, idx) => {
                         const menuItem = oi.menu_items;
                         if (!menuItem) return null;
                         const existingReview = o.item_reviews?.find(r => r.menu_item_id === menuItem.id);
-
+                        
                         return (
                           <div key={idx} className="flex flex-col gap-2 p-3 bg-slate-50 rounded-lg border border-slate-100">
                             <div className="flex justify-between items-center">
@@ -533,17 +605,17 @@ export default function StudentDashboard() {
                                 </button>
                               )}
                             </div>
-
+                            
                             {/* Existing Review Display */}
                             {existingReview && (
                               <div className="mt-1 bg-white p-3 rounded-lg border border-indigo-100 shadow-sm">
                                 <div className="flex items-center gap-1 mb-1">
                                   {Array.from({ length: 5 }).map((_, i) => (
-                                    <IconStar
-                                      key={i}
-                                      size={14}
-                                      className={`w-3.5 h-3.5 ${i < existingReview.rating ? 'text-yellow-400 fill-yellow-400' : 'text-slate-200'}`}
-                                      filled={i < existingReview.rating}
+                                    <IconStar 
+                                      key={i} 
+                                      size={14} 
+                                      className={`w-3.5 h-3.5 ${i < existingReview.rating ? 'text-yellow-400 fill-yellow-400' : 'text-slate-200'}`} 
+                                      filled={i < existingReview.rating} 
                                     />
                                   ))}
                                 </div>
@@ -578,10 +650,10 @@ export default function StudentDashboard() {
                                         onClick={() => setReviewRating(star)}
                                         className="p-0.5 transition-transform hover:scale-110 focus:outline-none"
                                       >
-                                        <IconStar
-                                          size={22}
-                                          className={`w-5.5 h-5.5 ${star <= reviewRating ? 'text-yellow-400 fill-yellow-400' : 'text-slate-200'}`}
-                                          filled={star <= reviewRating}
+                                        <IconStar 
+                                          size={22} 
+                                          className={`w-5.5 h-5.5 ${star <= reviewRating ? 'text-yellow-400 fill-yellow-400' : 'text-slate-200'}`} 
+                                          filled={star <= reviewRating} 
                                         />
                                       </button>
                                     ))}
@@ -623,7 +695,7 @@ export default function StudentDashboard() {
           <div className="w-full flex justify-end h-10 mb-2">
             {/* Cancel button if within 5 mins and not preparing */}
             {['PLACED', 'ACCEPTED'].includes(activeOrder.status) && (new Date().getTime() - new Date(activeOrder.created_at).getTime()) < 5 * 60 * 1000 && (
-              <button
+              <button 
                 onClick={handleCancelOrder}
                 className="bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-xl text-sm font-semibold transition-colors"
               >
@@ -639,85 +711,159 @@ export default function StudentDashboard() {
                 ID: {activeOrder.id.split('-')[0].toUpperCase()}
               </span>
             </div>
-            <p className="text-indigo-200 font-medium tracking-wide mb-4 text-sm">Your Order Status</p>
-
-            <div className={`mt-2 px-6 py-2 rounded-full font-bold text-sm tracking-wider uppercase ${getStatusColor(activeOrder.status).replace('100', '900').replace('600', '100')}`}>
-              {activeOrder.status}
+            <p className="text-indigo-200 font-medium tracking-wide mb-2 text-sm">Your Order Status</p>
+            <div className="mb-2 inline-flex items-center gap-1.5 px-3.5 py-1 bg-white/10 rounded-full text-xs font-semibold text-indigo-100 border border-white/20 shadow-inner">
+              <span>📍 Pickup Canteen:</span>
+              <span className="font-extrabold text-white">{activeOrder.canteens?.name || 'Ground Floor Canteen'}</span>
             </div>
-
-            {/* Security Gatekeeper: Live Anti-Screenshot Pass only illuminates when READY */}
-            {activeOrder.status === 'READY' ? (
-              <div className="mt-6 flex flex-col items-center gap-3 w-full max-w-xs animate-in fade-in zoom-in-95 duration-300">
-                {/* Anti-Screenshot Live Security Watermark */}
-                <div className="flex items-center justify-center gap-2 bg-emerald-500/20 text-emerald-200 px-3.5 py-1.5 rounded-full text-xs font-extrabold border border-emerald-400/40 shadow-inner">
-                  <span className="relative flex h-2.5 w-2.5">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400"></span>
-                  </span>
-                  <span className="tracking-wide font-mono">🔴 LIVE PASS • {liveTickerTime}</span>
-                </div>
-
-                {/* High-Contrast QR Code Card with Pulsing Security Halo */}
-                <button
-                  type="button"
-                  onClick={() => setShowQrModal(true)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
-                      setShowQrModal(true);
-                    }
-                  }}
-                  aria-label="Enlarge order QR code"
-                  className="bg-white p-4 rounded-3xl shadow-[0_0_30px_rgba(52,211,153,0.35)] cursor-pointer hover:scale-105 transition-all relative group border-4 border-emerald-400 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-emerald-200"
-                  title="Click to Enlarge QR Code"
-                >
-                  <QRCodeSVG
-                    value={`SKIPTRAY:${activeOrder.id}:${activeOrder.otp_code}`}
-                    size={180}
-                    className="rounded-xl"
-                  />
-                  <div className="absolute inset-0 bg-indigo-950/70 backdrop-blur-xs rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white gap-1.5 p-2">
-                    <IconMaximize size={24} className="w-6 h-6 text-white" />
-                    <span className="text-[11px] font-extrabold uppercase tracking-wider">Tap to Enlarge</span>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => setShowQrModal(true)}
-                  className="text-xs text-indigo-100 hover:text-white flex items-center gap-1.5 font-medium transition-colors"
-                >
-                  <IconQrCode size={14} className="w-3.5 h-3.5" />
-                  <span>Show QR at counter for instant scan</span>
-                </button>
-
-                {/* Manual 6-Digit OTP Box (Fallback / Backup) */}
-                <div className="bg-white/10 px-4 py-2.5 rounded-2xl border border-white/20 text-center w-full shadow-inner mt-1">
-                  <p className="text-indigo-200 text-[10px] font-bold uppercase tracking-widest mb-0.5">Or Give 6-Digit OTP</p>
-                  <p className="text-3xl font-mono font-black tracking-[0.25em] text-white">{activeOrder.otp_code}</p>
-                </div>
+          
+          <div className={`mt-2 px-6 py-2 rounded-full font-bold text-sm tracking-wider uppercase ${getStatusColor(activeOrder.status).replace('100', '900').replace('600', '100')}`}>
+            {activeOrder.status}
+          </div>
+          
+          {/* Security Gatekeeper: Live Anti-Screenshot Pass only illuminates when READY */}
+          {activeOrder.status === 'READY' ? (
+            <div className="mt-6 flex flex-col items-center gap-3 w-full max-w-xs animate-in fade-in zoom-in-95 duration-300">
+              {/* Anti-Screenshot Live Security Watermark */}
+              <div className="flex items-center justify-center gap-2 bg-emerald-500/20 text-emerald-200 px-3.5 py-1.5 rounded-full text-xs font-extrabold border border-emerald-400/40 shadow-inner">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400"></span>
+                </span>
+                <span className="tracking-wide font-mono">🔴 LIVE PASS • {liveTickerTime}</span>
               </div>
-            ) : (
-              /* Kitchen Preparing State Card (QR Locked Until Ready) */
-              <div className="mt-6 flex flex-col items-center justify-center bg-white/10 border border-white/20 rounded-3xl p-6 text-center max-w-xs w-full backdrop-blur-xs">
-                <div className="w-14 h-14 rounded-full bg-white/15 flex items-center justify-center mb-3 text-amber-300">
-                  <IconHourglass size={28} className="animate-spin" style={{ animationDuration: '4s' }} />
-                </div>
-                <h4 className="font-extrabold text-base text-white">Kitchen is preparing your meal</h4>
-                <p className="text-xs text-indigo-100 mt-1">
-                  Your food is currently being cooked and boxed.
-                </p>
-                <div className="mt-4 px-3 py-2 bg-indigo-950/40 rounded-2xl border border-indigo-300/20 text-[11px] text-indigo-200 flex items-center gap-2">
-                  <span className="text-amber-300 font-bold">🔒 Secure Pass</span>
-                  <span>• Unlocks automatically when READY</span>
-                </div>
-              </div>
-            )}
 
-            <p className="mt-5 text-xs text-indigo-200">Requested Pickup Time: <span className="font-semibold text-white">{formatPickupTime(activeOrder.pickup_time)} (Lunch)</span></p>
+              {/* High-Contrast QR Code Card with Pulsing Security Halo */}
+              <button
+                type="button"
+                onClick={() => setShowQrModal(true)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    setShowQrModal(true);
+                  }
+                }}
+                aria-label="Enlarge order QR code"
+                className="bg-white p-4 rounded-3xl shadow-[0_0_30px_rgba(52,211,153,0.35)] cursor-pointer hover:scale-105 transition-all relative group border-4 border-emerald-400 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-emerald-200"
+                title="Click to Enlarge QR Code"
+              >
+                <QRCodeSVG 
+                  value={`SKIPTRAY:${activeOrder.id}:${activeOrder.otp_code}`} 
+                  size={180}
+                  className="rounded-xl"
+                />
+                <div className="absolute inset-0 bg-indigo-950/70 backdrop-blur-xs rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white gap-1.5 p-2">
+                  <IconMaximize size={24} className="w-6 h-6 text-white" />
+                  <span className="text-[11px] font-extrabold uppercase tracking-wider">Tap to Enlarge</span>
+                </div>
+              </button>
+
+              <button
+                onClick={() => setShowQrModal(true)}
+                className="text-xs text-indigo-100 hover:text-white flex items-center gap-1.5 font-medium transition-colors"
+              >
+                <IconQrCode size={14} className="w-3.5 h-3.5" />
+                <span>Show QR at counter for instant scan</span>
+              </button>
+
+              {/* Manual 6-Digit OTP Box (Fallback / Backup) */}
+              <div className="bg-white/10 px-4 py-2.5 rounded-2xl border border-white/20 text-center w-full shadow-inner mt-1">
+                <p className="text-indigo-200 text-[10px] font-bold uppercase tracking-widest mb-0.5">Or Give 6-Digit OTP</p>
+                <p className="text-3xl font-mono font-black tracking-[0.25em] text-white">{activeOrder.otp_code}</p>
+              </div>
+            </div>
+          ) : (
+            /* Kitchen Preparing State Card (QR Locked Until Ready) */
+            <div className="mt-6 flex flex-col items-center justify-center bg-white/10 border border-white/20 rounded-3xl p-6 text-center max-w-xs w-full backdrop-blur-xs">
+              <div className="w-14 h-14 rounded-full bg-white/15 flex items-center justify-center mb-3 text-amber-300">
+                <IconHourglass size={28} className="animate-spin" style={{ animationDuration: '4s' }} />
+              </div>
+              <h4 className="font-extrabold text-base text-white">Kitchen is preparing your meal</h4>
+              <p className="text-xs text-indigo-100 mt-1">
+                Your food is currently being cooked and boxed.
+              </p>
+              <div className="mt-4 px-3 py-2 bg-indigo-950/40 rounded-2xl border border-indigo-300/20 text-[11px] text-indigo-200 flex items-center gap-2">
+                <span className="text-amber-300 font-bold">🔒 Secure Pass</span>
+                <span>• Unlocks automatically when READY</span>
+              </div>
+            </div>
+          )}
+          
+          <p className="mt-5 text-xs text-indigo-200">Requested Pickup Time: <span className="font-semibold text-white">{formatPickupTime(activeOrder.pickup_time)} (Lunch)</span></p>
           </div>
         </div>
       ) : (
         <>
+          {/* Canteen Selector */}
+          <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 sm:p-6 shadow-sm mb-1">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                  <span className="w-7 h-7 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center text-sm font-bold shadow-xs">📍</span>
+                  <span>Select Cafeteria / Canteen</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">Select which campus dining location you want to order lunch from</p>
+              </div>
+              {canteens.length > 0 && (
+                <span className="self-start sm:self-auto px-3 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full text-xs font-bold">
+                  Active: {canteens.find(c => c.id === selectedCanteenId)?.name || 'Ground Floor Canteen'}
+                </span>
+              )}
+            </div>
+
+            {canteensLoading ? (
+              <div className="text-xs text-slate-400 py-3">Loading campus dining locations...</div>
+            ) : canteensError ? (
+              <div className="flex items-center justify-between gap-3 text-xs text-red-600 py-2">
+                <span>Could not load locations: {canteensError.message}</span>
+                <button
+                  type="button"
+                  onClick={() => refetchCanteens()}
+                  className="shrink-0 px-3 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 font-semibold"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : canteens.length === 0 ? (
+              <div className="text-xs text-slate-500 py-2">No cafeterias available.</div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                {canteens.map(c => {
+                  const isSelected = c.id === selectedCanteenId;
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => handleSelectCanteen(c.id)}
+                      className={`p-4 rounded-2xl border text-left transition-all flex items-center justify-between cursor-pointer ${
+                        isSelected
+                          ? 'bg-indigo-50/70 border-indigo-500 ring-2 ring-indigo-500/20 shadow-sm'
+                          : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/70'
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-extrabold text-sm text-slate-900">{c.name}</span>
+                          {c.code && (
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded font-bold">
+                              {c.code}
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[11px] text-slate-500 mt-1 block">Campus Dining</span>
+                      </div>
+                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                        isSelected ? 'border-indigo-600 bg-indigo-600' : 'border-slate-300'
+                      }`}>
+                        {isSelected && <div className="w-2 h-2 rounded-full bg-white" />}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           {/* Menu — full width now that cart is a floating bar */}
           <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-6 sm:p-8 shadow-sm">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
@@ -759,11 +905,11 @@ export default function StudentDashboard() {
                     <h3 className="font-bold text-slate-800 leading-tight">{item.name}</h3>
                     <div className="text-sm font-extrabold text-indigo-600 mt-1.5">₹{Number(item.price || 0).toFixed(2)}</div>
                   </div>
-
+                  
                   <div className="mt-4 flex items-center justify-between">
                     <span className="text-xs font-medium text-slate-400">{item.veg_non_veg === 'VEG' ? 'Veg' : 'Non-Veg'}</span>
                     {!item.is_sold_out ? (
-                      <button
+                      <button 
                         onClick={() => addToCart(item)}
                         disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cartTotalItems >= 5}
                         className="w-10 h-10 flex items-center justify-center bg-indigo-50 text-indigo-600 rounded-xl font-bold hover:bg-indigo-600 hover:text-white transition-colors disabled:opacity-50 disabled:hover:bg-indigo-50 disabled:hover:text-indigo-600 shadow-sm"
@@ -951,12 +1097,12 @@ export default function StudentDashboard() {
                           }}
                         >
                           <option value="">
-                            {isSunday
-                              ? 'Closed on Sundays'
+                            {isSunday 
+                              ? 'Closed on Sundays' 
                               : isBeforeOpeningTime
                                 ? 'Lunch Booking Opens at 9:30 AM'
-                                : isLunchClosedForToday
-                                  ? 'Lunch Ordering Closed for Today'
+                                : isLunchClosedForToday 
+                                  ? 'Lunch Ordering Closed for Today' 
                                   : 'Select a Lunch Slot (10-min intervals)...'}
                           </option>
                           {LUNCH_SLOTS.map(slot => {
@@ -978,24 +1124,42 @@ export default function StudentDashboard() {
                         </div>
                       )}
 
-                      <AnimatedTruckButton
-                        onClick={async () => {
-                          await handlePlaceOrder({ preventDefault: () => { } } as any);
-                        }}
+                      <button
+                        type="submit"
                         disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out)}
-                        text={
-                          isSuspended
-                            ? 'Account Deactivated (3-Day Penalty)'
+                        style={{
+                          width: '100%',
+                          padding: '0.875rem',
+                          background: isSuspended
+                            ? '#ef4444'
                             : isSunday
-                              ? 'Closed on Sundays'
+                              ? '#64748b'
                               : isBeforeOpeningTime
-                                ? 'Lunch Booking Opens at 9:30 AM'
+                                ? '#4f46e5'
                                 : isLunchClosedForToday
-                                  ? 'Lunch Ordering Closed Today'
-                                  : `Place Order (${cartTotalItems} items • ₹${cartTotalPrice.toFixed(2)})`
-                        }
-                        className="mb-4"
-                      />
+                                  ? '#64748b'
+                                  : (cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out))
+                                    ? 'rgba(99,102,241,0.4)' : '#6366f1',
+                          color: 'white',
+                          borderRadius: '0.875rem',
+                          fontWeight: 700,
+                          fontSize: '0.875rem',
+                          border: 'none',
+                          cursor: isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cart.length === 0 || !pickupTime || submitting ? 'not-allowed' : 'pointer',
+                          transition: 'background 0.2s',
+                          marginBottom: '1rem',
+                        }}
+                      >
+                        {isSuspended
+                          ? 'Account Deactivated (3-Day Penalty)'
+                          : isSunday
+                            ? 'Closed on Sundays'
+                            : isBeforeOpeningTime
+                              ? 'Lunch Booking Opens at 9:30 AM'
+                              : isLunchClosedForToday
+                                ? 'Lunch Ordering Closed Today'
+                                : (submitting ? 'Placing...' : `Place Order (${cartTotalItems} items • ₹${cartTotalPrice.toFixed(2)})`)}
+                      </button>
                     </form>
                   </div>
                 )}
@@ -1047,7 +1211,7 @@ export default function StudentDashboard() {
       {showQrModal && activeOrder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-in fade-in">
           <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-sm w-full text-center flex flex-col items-center gap-4 shadow-2xl relative">
-            <button
+            <button 
               onClick={() => setShowQrModal(false)}
               className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-700 rounded-full hover:bg-slate-100 transition-colors"
             >
@@ -1064,8 +1228,8 @@ export default function StudentDashboard() {
             </div>
 
             <div className="p-3 bg-slate-50 border-2 border-slate-100 rounded-2xl shadow-inner">
-              <QRCodeSVG
-                value={`SKIPTRAY:${activeOrder.id}:${activeOrder.otp_code}`}
+              <QRCodeSVG 
+                value={`SKIPTRAY:${activeOrder.id}:${activeOrder.otp_code}`} 
                 size={230}
               />
             </div>

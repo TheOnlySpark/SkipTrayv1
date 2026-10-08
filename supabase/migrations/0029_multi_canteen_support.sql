@@ -336,4 +336,19 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
+-- Enable instant canteen updates for admin and student clients.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime'
+      AND schemaname = 'public'
+      AND tablename = 'canteens'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.canteens;
+  END IF;
+END;
+$$;
+
 NOTIFY pgrst, 'reload schema';
