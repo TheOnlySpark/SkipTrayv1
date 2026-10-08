@@ -19,11 +19,15 @@ import {
 import { QRCodeSVG } from '../components/QRCode';
 
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
-type Order = Database['public']['Tables']['orders']['Row'];
+type Canteen = Database['public']['Tables']['canteens']['Row'];
+type Order = Database['public']['Tables']['orders']['Row'] & {
+  canteens?: { name: string; code: string | null } | null;
+};
 type ItemReview = Database['public']['Tables']['item_reviews']['Row'];
 type PastOrder = Order & {
   order_items: { menu_items: MenuItem | null }[];
   item_reviews: ItemReview[];
+  canteens?: { name: string; code: string | null } | null;
 };
 
 export const LUNCH_SLOTS = [
@@ -119,6 +123,69 @@ export default function StudentDashboard() {
   const [reviewText, setReviewText] = useState('');
   const [submittingReview, setSubmittingReview] = useState(false);
 
+  const [selectedCanteenId, setSelectedCanteenId] = useState<string>('');
+
+  // Fetch available active canteens for this tenant
+  const { data: canteens = [], isLoading: canteensLoading, error: canteensError, refetch: refetchCanteens } = useQuery({
+    queryKey: ['canteens', profile?.tenant_id],
+    queryFn: async () => {
+      if (!profile?.tenant_id) return [];
+      const { data, error } = await supabase
+        .from('canteens')
+        .select('*')
+        .eq('tenant_id', profile.tenant_id)
+        .eq('is_active', true)
+        .order('name');
+      if (error) throw error;
+      return data as Canteen[];
+    },
+    enabled: !!profile?.tenant_id,
+  });
+
+  useEffect(() => {
+    if (!profile?.tenant_id) return;
+
+    const canteenSub = supabase
+      .channel(`student_canteens_${profile.tenant_id}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'canteens',
+        filter: `tenant_id=eq.${profile.tenant_id}`
+      }, () => {
+        queryClient.invalidateQueries({ queryKey: ['canteens', profile.tenant_id] });
+      })
+      .subscribe();
+
+    return () => {
+      canteenSub.unsubscribe();
+    };
+  }, [profile?.tenant_id, queryClient]);
+
+  // Keep the selected location valid as locations are added or deactivated.
+  useEffect(() => {
+    if (canteens.length > 0 && !canteens.some(canteen => canteen.id === selectedCanteenId)) {
+      setSelectedCanteenId(canteens[0].id);
+    } else if (canteens.length === 0 && selectedCanteenId) {
+      setSelectedCanteenId('');
+    }
+  }, [canteens, selectedCanteenId]);
+
+  const handleSelectCanteen = async (canteenId: string) => {
+    if (canteenId === selectedCanteenId) return;
+    if (cart.length > 0) {
+      const confirmed = await showConfirm({
+        title: 'Switch Cafeteria?',
+        message: 'You have items in your cart from another cafeteria. Switching will clear your current cart. Proceed?',
+        confirmText: 'Switch & Clear Cart',
+        cancelText: 'Keep Current Cart'
+      });
+      if (!confirmed) return;
+      setCart([]);
+    }
+    setSelectedCanteenId(canteenId);
+  };
+
   useEffect(() => {
     if (!profile?.id) return;
 
@@ -130,10 +197,16 @@ export default function StudentDashboard() {
         schema: 'public', 
         table: 'orders',
         filter: `user_id=eq.${profile.id}`
-      }, (payload) => {
+      }, async (payload) => {
         const updatedOrder = payload.new as Order;
         if (['PLACED', 'ACCEPTED', 'PREPARING', 'READY'].includes(updatedOrder.status)) {
-          setActiveOrder(updatedOrder);
+          const { data } = await supabase
+            .from('orders')
+            .select('*, canteens ( name, code )')
+            .eq('id', updatedOrder.id)
+            .maybeSingle();
+          if (data) setActiveOrder(data as Order);
+          else setActiveOrder(updatedOrder);
         } else {
           // If collected or rejected, clear active order and refresh history
           setActiveOrder(null);
@@ -146,7 +219,7 @@ export default function StudentDashboard() {
     const menuSub = supabase
       .channel('public:menu_items')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items' }, () => {
-        queryClient.invalidateQueries({ queryKey: ['menuItems'] });
+        queryClient.invalidateQueries({ queryKey: ['menuItems', selectedCanteenId] });
       })
       .subscribe();
 
@@ -168,14 +241,16 @@ export default function StudentDashboard() {
       menuSub.unsubscribe();
       reviewSub.unsubscribe();
     };
-  }, [profile?.id, queryClient]);
+  }, [profile?.id, selectedCanteenId, queryClient]);
 
   const { data: menuItems = [], isLoading: menuLoading } = useQuery({
-    queryKey: ['menuItems'],
+    queryKey: ['menuItems', selectedCanteenId],
     queryFn: async () => {
+      if (!selectedCanteenId) return [];
       const { data } = await supabase
         .from('menu_items')
         .select('*')
+        .eq('canteen_id', selectedCanteenId)
         .order('veg_non_veg', { ascending: false })
         .order('name');
       return (data || []).sort((a, b) => {
@@ -187,6 +262,7 @@ export default function StudentDashboard() {
         return a.name.localeCompare(b.name);
       });
     },
+    enabled: !!selectedCanteenId,
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 
@@ -198,6 +274,7 @@ export default function StudentDashboard() {
         .from('orders')
         .select(`
           *,
+          canteens ( name, code ),
           order_items (
             menu_items (*)
           ),
@@ -220,11 +297,11 @@ export default function StudentDashboard() {
       if (!profile?.id) return;
       const { data } = await supabase
         .from('orders')
-        .select('*')
+        .select('*, canteens ( name, code )')
         .eq('user_id', profile.id)
         .in('status', ['PLACED', 'ACCEPTED', 'PREPARING', 'READY'])
         .maybeSingle();
-      if (data) setActiveOrder(data);
+      if (data) setActiveOrder(data as Order);
     };
     fetchActive();
   }, [profile?.id]);
@@ -320,16 +397,21 @@ export default function StudentDashboard() {
 
     const { data, error } = await supabase.rpc('place_order_with_otp', {
       p_pickup_time: pickupTime,
-      p_items: itemsJson
+      p_items: itemsJson,
+      p_canteen_id: selectedCanteenId
     });
 
     if (error) {
       setError(error.message);
     } else {
       // Fetch the newly created order
-      const { data: newOrder } = await supabase.from('orders').select('*').eq('id', data).single();
+      const { data: newOrder } = await supabase
+        .from('orders')
+        .select('*, canteens ( name, code )')
+        .eq('id', data)
+        .single();
       if (newOrder) {
-        setActiveOrder(newOrder);
+        setActiveOrder(newOrder as Order);
       }
       setCart([]);
       setPickupTime('');
@@ -489,6 +571,9 @@ export default function StudentDashboard() {
                       <div className="text-xs text-slate-500 font-mono font-medium mb-1">ID: {o.id.split('-')[0].toUpperCase()}</div>
                       <div className="text-xs text-slate-500 font-medium mb-1">Placed on: {new Date(o.created_at).toLocaleDateString()}</div>
                       <div className="text-sm text-slate-600 mt-1">Pickup: {formatPickupTime(o.pickup_time)} (Lunch)</div>
+                      <div className="text-xs text-indigo-600 font-semibold mt-1 flex items-center gap-1">
+                        <span>📍 {o.canteens?.name || 'Ground Floor Canteen'}</span>
+                      </div>
                     </div>
                     <div className={`px-3 py-1 rounded-full text-xs font-bold border ${o.status === 'COLLECTED' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
                       {o.status}
@@ -626,7 +711,11 @@ export default function StudentDashboard() {
                 ID: {activeOrder.id.split('-')[0].toUpperCase()}
               </span>
             </div>
-            <p className="text-indigo-200 font-medium tracking-wide mb-4 text-sm">Your Order Status</p>
+            <p className="text-indigo-200 font-medium tracking-wide mb-2 text-sm">Your Order Status</p>
+            <div className="mb-2 inline-flex items-center gap-1.5 px-3.5 py-1 bg-white/10 rounded-full text-xs font-semibold text-indigo-100 border border-white/20 shadow-inner">
+              <span>📍 Pickup Canteen:</span>
+              <span className="font-extrabold text-white">{activeOrder.canteens?.name || 'Ground Floor Canteen'}</span>
+            </div>
           
           <div className={`mt-2 px-6 py-2 rounded-full font-bold text-sm tracking-wider uppercase ${getStatusColor(activeOrder.status).replace('100', '900').replace('600', '100')}`}>
             {activeOrder.status}
@@ -705,6 +794,76 @@ export default function StudentDashboard() {
         </div>
       ) : (
         <>
+          {/* Canteen Selector */}
+          <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 sm:p-6 shadow-sm mb-1">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                  <span className="w-7 h-7 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center text-sm font-bold shadow-xs">📍</span>
+                  <span>Select Cafeteria / Canteen</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">Select which campus dining location you want to order lunch from</p>
+              </div>
+              {canteens.length > 0 && (
+                <span className="self-start sm:self-auto px-3 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full text-xs font-bold">
+                  Active: {canteens.find(c => c.id === selectedCanteenId)?.name || 'Ground Floor Canteen'}
+                </span>
+              )}
+            </div>
+
+            {canteensLoading ? (
+              <div className="text-xs text-slate-400 py-3">Loading campus dining locations...</div>
+            ) : canteensError ? (
+              <div className="flex items-center justify-between gap-3 text-xs text-red-600 py-2">
+                <span>Could not load locations: {canteensError.message}</span>
+                <button
+                  type="button"
+                  onClick={() => refetchCanteens()}
+                  className="shrink-0 px-3 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 font-semibold"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : canteens.length === 0 ? (
+              <div className="text-xs text-slate-500 py-2">No cafeterias available.</div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                {canteens.map(c => {
+                  const isSelected = c.id === selectedCanteenId;
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => handleSelectCanteen(c.id)}
+                      className={`p-4 rounded-2xl border text-left transition-all flex items-center justify-between cursor-pointer ${
+                        isSelected
+                          ? 'bg-indigo-50/70 border-indigo-500 ring-2 ring-indigo-500/20 shadow-sm'
+                          : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/70'
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-extrabold text-sm text-slate-900">{c.name}</span>
+                          {c.code && (
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded font-bold">
+                              {c.code}
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[11px] text-slate-500 mt-1 block">Campus Dining</span>
+                      </div>
+                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                        isSelected ? 'border-indigo-600 bg-indigo-600' : 'border-slate-300'
+                      }`}>
+                        {isSelected && <div className="w-2 h-2 rounded-full bg-white" />}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           {/* Menu — full width now that cart is a floating bar */}
           <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-6 sm:p-8 shadow-sm">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">

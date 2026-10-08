@@ -14,6 +14,8 @@ import {
   IconSparkles
 } from '../components/Icons';
 
+type Canteen = Database['public']['Tables']['canteens']['Row'];
+
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 type FoodType = Database['public']['Enums']['food_type'];
 type Review = Database['public']['Tables']['item_reviews']['Row'] & {
@@ -301,6 +303,53 @@ export default function AdminDashboard() {
   const [newItemName, setNewItemName] = useState('');
   const [newItemPrice, setNewItemPrice] = useState('');
   const [newItemType, setNewItemType] = useState<FoodType>('VEG');
+  const [newCanteenName, setNewCanteenName] = useState('');
+  const [newCanteenCode, setNewCanteenCode] = useState('');
+  const [creatingCanteen, setCreatingCanteen] = useState(false);
+  const [selectedMenuCanteenId, setSelectedMenuCanteenId] = useState('');
+
+  const currentTenantId = profile?.tenant_id ?? tenantId ?? null;
+  const { data: canteens = [], isLoading: canteensLoading, error: canteensError } = useQuery({
+    queryKey: ['adminCanteens', currentTenantId],
+    enabled: !!currentTenantId,
+    queryFn: async () => {
+      if (!currentTenantId) return [];
+      const { data, error } = await supabase
+        .from('canteens')
+        .select('*')
+        .eq('tenant_id', currentTenantId)
+        .order('name');
+      if (error) throw error;
+      return data as Canteen[];
+    }
+  });
+  const activeCanteens = canteens.filter(canteen => canteen.is_active);
+
+  useEffect(() => {
+    if (!activeCanteens.some(canteen => canteen.id === selectedMenuCanteenId)) {
+      setSelectedMenuCanteenId(activeCanteens[0]?.id ?? '');
+    }
+  }, [activeCanteens, selectedMenuCanteenId]);
+
+  useEffect(() => {
+    if (!currentTenantId) return;
+
+    const canteenSub = supabase
+      .channel(`admin_canteens_${currentTenantId}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'canteens',
+        filter: `tenant_id=eq.${currentTenantId}`
+      }, () => {
+        queryClient.invalidateQueries({ queryKey: ['adminCanteens', currentTenantId] });
+      })
+      .subscribe();
+
+    return () => {
+      canteenSub.unsubscribe();
+    };
+  }, [currentTenantId, queryClient]);
 
   useEffect(() => {
     fetchMenu();
@@ -383,11 +432,31 @@ export default function AdminDashboard() {
     if (!newItemName.trim()) return;
 
     const parsedPrice = parseFloat(newItemPrice) || 0;
+    const tenantKey = currentTenantId;
+    if (!tenantKey) {
+      showAlert({
+        title: 'Missing tenant',
+        message: 'Your tenant context is unavailable. Please refresh and try again.',
+        type: 'error'
+      });
+      return;
+    }
+
+    if (!activeCanteens.some(canteen => canteen.id === selectedMenuCanteenId)) {
+      showAlert({
+        title: 'Canteen missing',
+        message: 'Select an active canteen before adding a menu item.',
+        type: 'error'
+      });
+      return;
+    }
+
     const { data, error } = await supabase.from('menu_items').insert({
       name: newItemName,
       veg_non_veg: newItemType,
       price: parsedPrice,
-      tenant_id: tenantId
+      tenant_id: tenantKey,
+      canteen_id: selectedMenuCanteenId
     }).select().single();
 
     if (error) {
@@ -406,6 +475,91 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleAddCanteen = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = newCanteenName.trim();
+    if (!name) return;
+
+    if (!currentTenantId) {
+      showAlert({
+        title: 'Missing tenant',
+        message: 'Your tenant context is unavailable. Please refresh and try again.',
+        type: 'error'
+      });
+      return;
+    }
+
+    setCreatingCanteen(true);
+    const { error } = await supabase.from('canteens').insert({
+      name,
+      code: newCanteenCode.trim().toUpperCase() || null,
+      tenant_id: currentTenantId
+    });
+    setCreatingCanteen(false);
+
+    if (error) {
+      showAlert({
+        title: 'Could not add location',
+        message: error.message,
+        type: 'error'
+      });
+      return;
+    }
+
+    setNewCanteenName('');
+    setNewCanteenCode('');
+    await queryClient.invalidateQueries({ queryKey: ['adminCanteens', currentTenantId] });
+    showAlert({
+      title: 'Location added',
+      message: `${name} is now available as a canteen location.`,
+      type: 'success'
+    });
+  };
+
+  const handleToggleCanteen = async (canteen: Canteen) => {
+    if (canteen.is_active && activeCanteens.length === 1) {
+      showAlert({
+        title: 'Keep one location active',
+        message: 'At least one active canteen is needed for students to place orders.',
+        type: 'error'
+      });
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('canteens')
+      .update({ is_active: !canteen.is_active })
+      .eq('id', canteen.id)
+      .select('id, is_active')
+      .maybeSingle();
+
+    if (error) {
+      showAlert({
+        title: 'Could not update location',
+        message: error.message,
+        type: 'error'
+      });
+      return;
+    }
+
+    if (!data) {
+      showAlert({
+        title: 'Location was not updated',
+        message: 'No location was changed. Check that this location belongs to your organization and that your account has admin access.',
+        type: 'error'
+      });
+      await queryClient.invalidateQueries({ queryKey: ['adminCanteens', currentTenantId] });
+      return;
+    }
+
+    queryClient.setQueryData<Canteen[]>(['adminCanteens', currentTenantId], current =>
+      current?.map(location => location.id === data.id
+        ? { ...location, is_active: data.is_active }
+        : location)
+    );
+    await queryClient.invalidateQueries({ queryKey: ['adminCanteens', currentTenantId] });
+  };
+
   const handleToggleSoldOut = async (id: string, currentStatus: boolean) => {
     const { error } = await supabase.rpc('toggle_sold_out', {
       item_id: id,
@@ -422,6 +576,8 @@ export default function AdminDashboard() {
       });
     }
   };
+
+  const visibleMenuItems = menuItems.filter(item => item.canteen_id === selectedMenuCanteenId);
 
   return (
     <div className="w-full max-w-4xl grid grid-cols-12 gap-4">
@@ -452,6 +608,86 @@ export default function AdminDashboard() {
             <span className="text-sm font-semibold text-red-600 uppercase tracking-wide mt-1">Rejected/Cancelled</span>
           </div>
         </div>
+      </div>
+
+      {/* Canteen Locations */}
+      <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-6">
+          <div>
+            <h2 className="text-xl font-bold text-slate-800">Canteen Locations</h2>
+            <p className="text-sm text-slate-500 mt-1">
+              Add locations students can order from and switch locations on or off.
+            </p>
+          </div>
+          <span className="text-xs font-semibold px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full w-fit">
+            {activeCanteens.length} active
+          </span>
+        </div>
+
+        <form onSubmit={handleAddCanteen} className="grid grid-cols-1 sm:grid-cols-[1fr_12rem_auto] gap-3 mb-6">
+          <input
+            type="text"
+            required
+            placeholder="Location name (e.g. Engineering Cafeteria)"
+            value={newCanteenName}
+            onChange={(e) => setNewCanteenName(e.target.value)}
+            maxLength={100}
+            className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm text-slate-800"
+          />
+          <input
+            type="text"
+            placeholder="Short code (optional)"
+            value={newCanteenCode}
+            onChange={(e) => setNewCanteenCode(e.target.value)}
+            maxLength={20}
+            className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm text-slate-800"
+          />
+          <button
+            type="submit"
+            disabled={creatingCanteen || !currentTenantId}
+            className="px-5 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition"
+          >
+            {creatingCanteen ? 'Adding...' : 'Add Location'}
+          </button>
+        </form>
+
+        {canteensLoading ? (
+          <div className="text-slate-500 text-sm py-4">Loading locations...</div>
+        ) : canteensError ? (
+          <div className="text-sm text-red-600 py-4">
+            {canteensError.message.includes("Could not find the table 'public.canteens'")
+              ? 'The multi-location database migration has not been applied to this Supabase project yet. Apply supabase/migrations/0029_multi_canteen_support.sql in the Supabase SQL Editor, then reload this page.'
+              : `Could not load locations: ${canteensError.message}`}
+          </div>
+        ) : canteens.length === 0 ? (
+          <div className="text-sm text-slate-500 bg-slate-50 rounded-xl p-4">
+            No locations found. Add a location above to start setting up multi-location ordering.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {canteens.map(canteen => (
+              <div key={canteen.id} className="flex items-center justify-between gap-4 p-4 border border-slate-200 rounded-xl">
+                <div className="min-w-0">
+                  <div className="font-semibold text-slate-800 truncate">{canteen.name}</div>
+                  <div className="text-xs text-slate-500 mt-0.5">
+                    {canteen.code || 'No code'} · {canteen.is_active ? 'Available to students' : 'Hidden from students'}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleToggleCanteen(canteen)}
+                  className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                    canteen.is_active
+                      ? 'bg-red-50 text-red-700 hover:bg-red-100'
+                      : 'bg-green-50 text-green-700 hover:bg-green-100'
+                  }`}
+                >
+                  {canteen.is_active ? 'Deactivate' : 'Activate'}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Order List */}
@@ -525,6 +761,21 @@ export default function AdminDashboard() {
         <h2 className="text-xl font-bold text-slate-800 mb-6">Manage Menu</h2>
         {/* Add Item Form */}
         <form onSubmit={handleAddItem} className="flex flex-col gap-3 mb-8 bg-slate-50 p-4 rounded-xl border border-slate-100">
+          <select
+            required
+            value={selectedMenuCanteenId}
+            onChange={(e) => setSelectedMenuCanteenId(e.target.value)}
+            disabled={activeCanteens.length === 0}
+            className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm text-slate-800 disabled:bg-slate-100"
+          >
+            {activeCanteens.length === 0 ? (
+              <option value="">Add an active location first</option>
+            ) : (
+              activeCanteens.map(canteen => (
+                <option key={canteen.id} value={canteen.id}>{canteen.name}</option>
+              ))
+            )}
+          </select>
           <input 
             type="text" 
             placeholder="Item Name" 
@@ -553,6 +804,7 @@ export default function AdminDashboard() {
             </select>
             <button 
               type="submit" 
+              disabled={!selectedMenuCanteenId || activeCanteens.length === 0}
               className="px-5 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 active:scale-95 transition-all shrink-0"
             >
               Add Item
@@ -565,7 +817,7 @@ export default function AdminDashboard() {
           <div className="text-slate-500 text-sm flex-1 min-h-[300px] flex items-center justify-center">Loading menu...</div>
         ) : (
           <div className="space-y-3 flex-1 overflow-y-auto min-h-[300px]">
-            {menuItems.map(item => (
+            {visibleMenuItems.map(item => (
               <div key={item.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-white border border-slate-200 rounded-xl hover:border-slate-300 transition-colors shadow-sm gap-3">
                 <div className="flex items-center gap-3">
                   <div className={`w-3 h-3 rounded-full shrink-0 ${item.veg_non_veg === 'VEG' ? 'bg-green-500' : 'bg-red-500'}`}></div>
@@ -587,8 +839,10 @@ export default function AdminDashboard() {
                 </div>
               </div>
             ))}
-            {menuItems.length === 0 && (
-              <div className="text-slate-500 text-sm text-center py-4">No menu items yet.</div>
+            {visibleMenuItems.length === 0 && (
+              <div className="text-slate-500 text-sm text-center py-4">
+                {activeCanteens.length === 0 ? 'Add an active location to manage its menu.' : 'No menu items for this location yet.'}
+              </div>
             )}
           </div>
         )}
