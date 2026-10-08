@@ -14,6 +14,10 @@ export default function Dashboard() {
     return <Navigate to="/admin" replace />;
   } else if (profile?.role === 'SUPER_ADMIN') {
     return <Navigate to="/super-admin" replace />;
+  } else if (profile?.role === 'UNI_ADMIN') {
+    return <Navigate to="/uni-admin" replace />;
+  } else if (profile?.role === 'CANTEEN_ADMIN') {
+    return <Navigate to="/canteen-admin" replace />;
   }
 
   return (
