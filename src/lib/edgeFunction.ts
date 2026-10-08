@@ -6,8 +6,8 @@ export interface EdgeFunctionOptions {
 }
 
 /**
- * Calls a Supabase Edge Function with guaranteed fresh session JWT.
- * Automatically attempts session refresh if expired or missing.
+ * Calls a Supabase Edge Function with the current authenticated user session.
+ * Uses supabase.functions.invoke which automatically manages apikey and Authorization headers.
  */
 export async function invokeEdgeFunction<T = any>(
   functionName: string,
@@ -27,38 +27,34 @@ export async function invokeEdgeFunction<T = any>(
     session = refreshData.session;
   }
 
-  const token = session.access_token;
-  if (!token) {
+  if (!session?.access_token) {
     throw new Error('Your login session has expired. Please log in again.');
   }
 
-  const baseUrl = import.meta.env.VITE_SUPABASE_URL
-    ? `${import.meta.env.VITE_SUPABASE_URL.replace('/rest/v1', '')}/functions/v1`
-    : 'http://localhost:54321/functions/v1';
-
-  const response = await fetch(`${baseUrl}/${functionName}`, {
+  // Use the official supabase.functions.invoke client method
+  const { data, error } = await supabase.functions.invoke(functionName, {
     method,
+    body: body as any,
     headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
-    },
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      Authorization: `Bearer ${session.access_token}`
+    }
   });
 
-  let result: any = null;
-  try {
-    result = await response.json();
-  } catch {
-    // If not JSON
-    if (!response.ok) {
-      throw new Error(`Server returned error (${response.status}: ${response.statusText})`);
+  if (error) {
+    let errorMsg = error.message;
+    // Extract server error payload if available
+    if ((error as any).context && typeof (error as any).context.json === 'function') {
+      try {
+        const errJson = await (error as any).context.json();
+        if (errJson?.error) errorMsg = errJson.error;
+        else if (errJson?.message) errorMsg = errJson.message;
+      } catch {
+        // ignore json parse error
+      }
     }
-    return {} as T;
+    throw new Error(errorMsg || 'Failed to execute request');
   }
 
-  if (!response.ok) {
-    throw new Error(result?.error || result?.message || `Request failed (${response.status})`);
-  }
-
-  return result as T;
+  return data as T;
 }
+
