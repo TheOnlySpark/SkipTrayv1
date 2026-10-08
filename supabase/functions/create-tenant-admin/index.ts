@@ -86,10 +86,10 @@ Deno.serve(async (req) => {
       });
     }
 
-    // 3. Set profile role to ADMIN and name
+    // 3. Set profile role to UNI_ADMIN and name
     const { error: profileUpdateError } = await adminClient
       .from('profiles')
-      .update({ role: 'ADMIN', name: admin_name })
+      .update({ role: 'UNI_ADMIN', name: admin_name })
       .eq('id', newUser.user.id);
 
     if (profileUpdateError) {

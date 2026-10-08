@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 
@@ -43,19 +44,19 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Profile not found' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    if (!['ADMIN', 'SUPER_ADMIN'].includes(callerProfile.role)) {
-      return new Response(JSON.stringify({ error: 'Forbidden: Requires ADMIN role' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    if (!['ADMIN', 'UNI_ADMIN', 'SUPER_ADMIN'].includes(callerProfile.role)) {
+      return new Response(JSON.stringify({ error: 'Forbidden: Requires Admin role' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    const { name, email, password, role } = await req.json();
+    const { name, email, password, role, canteen_id } = await req.json();
 
     if (!name || !email || !password || !role) {
       return new Response(JSON.stringify({ error: 'Missing required fields' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
     
     const targetRole = role.toUpperCase();
-    if (targetRole !== 'STAFF' && targetRole !== 'STUDENT') {
-       return new Response(JSON.stringify({ error: 'Invalid role. Must be STAFF or STUDENT' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    if (!['STAFF', 'STUDENT', 'CANTEEN_ADMIN'].includes(targetRole)) {
+       return new Response(JSON.stringify({ error: 'Invalid role. Must be STAFF, STUDENT, or CANTEEN_ADMIN' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
@@ -73,9 +74,12 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: createError.message }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
+    const updateData: any = { role: targetRole, name: name };
+    if (canteen_id) updateData.canteen_id = canteen_id;
+
     const { error: profileUpdateError } = await adminClient
       .from('profiles')
-      .update({ role: targetRole, name: name })
+      .update(updateData)
       .eq('id', newUser.user.id);
 
     if (profileUpdateError) {

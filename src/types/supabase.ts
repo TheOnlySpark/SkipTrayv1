@@ -458,7 +458,7 @@ export interface Database {
         | "PREPARING"
         | "READY"
         | "COLLECTED"
-      user_role: "STUDENT" | "TEACHER" | "STAFF" | "ADMIN" | "SUPER_ADMIN"
+      user_role: "STUDENT" | "TEACHER" | "STAFF" | "ADMIN" | "SUPER_ADMIN" | "UNI_ADMIN" | "CANTEEN_ADMIN"
     }
     CompositeTypes: {
       [_ in never]: never
