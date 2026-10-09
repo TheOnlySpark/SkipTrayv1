@@ -261,7 +261,7 @@ export default function StaffDashboard() {
       if (import.meta.env.DEV) console.error("verify_pickup_otp failed:", error);
       showAlert({
         title: 'Verification Error',
-        message: `Verification failed: ${error.message}`,
+        message: `Verification failed: ${error.message || JSON.stringify(error)}`,
         type: 'error'
       });
       return false;
