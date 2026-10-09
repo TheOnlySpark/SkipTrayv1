@@ -22,7 +22,7 @@ create table public.order_ledger (
 alter table public.order_ledger enable row level security;
 
 create policy "Staff/Admin can view all order ledgers" on public.order_ledger for select using (
-  public.get_user_role() in ('SUPER_ADMIN', 'ADMIN', 'STAFF')
+  public.get_user_role() in ('SUPER_ADMIN', 'UNI_ADMIN', 'CANTEEN_ADMIN', 'STAFF')
 );
 
 create policy "Users can view own order ledgers" on public.order_ledger for select using (auth.uid() = student_id);

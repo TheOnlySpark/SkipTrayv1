@@ -1,5 +1,4 @@
-import React from "react";
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from "react";
 import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/ModalDialogContext';
 import { supabase } from '../lib/supabase';
@@ -22,11 +21,15 @@ type Review = Database['public']['Tables']['item_reviews']['Row'] & {
   orders: { id: string; order_number: number } | null;
 };
 
-export default function AdminDashboard() {
-  const { profile, signOut } = useAuth();
+export default function CanteenAdminDashboard() {
+  const { profile } = useAuth();
   const { tenantId } = useTenant();
   const { showAlert, showConfirm } = useDialog();
   const queryClient = useQueryClient();
+
+  const currentCanteenId = profile?.canteen_id;
+  const currentTenantId = profile?.tenant_id ?? tenantId ?? null;
+
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({ placed: 0, collected: 0, rejected: 0 });
@@ -37,7 +40,8 @@ export default function AdminDashboard() {
   const [orderFilter, setOrderFilter] = useState<'TODAY' | 'WEEK' | 'MONTH'>('TODAY');
 
   const { data: allOrders = [], isLoading: ordersLoading } = useQuery({
-    queryKey: ['adminOrders', orderFilter],
+    queryKey: ['canteenOrders', orderFilter, currentCanteenId],
+    enabled: !!currentCanteenId,
     queryFn: async () => {
       let startDate = new Date();
       if (orderFilter === 'TODAY') {
@@ -58,6 +62,7 @@ export default function AdminDashboard() {
             menu_items (name)
           )
         `)
+        .eq('canteen_id', currentCanteenId)
         .gte('created_at', startDate.toISOString())
         .order('created_at', { ascending: false });
 
@@ -66,7 +71,8 @@ export default function AdminDashboard() {
   });
 
   const { data: analytics = { mostSold: [] }, isLoading: analyticsLoading } = useQuery({
-    queryKey: ['adminAnalytics'],
+    queryKey: ['canteenAnalytics', currentCanteenId],
+    enabled: !!currentCanteenId,
     queryFn: async () => {
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - 7);
@@ -80,6 +86,7 @@ export default function AdminDashboard() {
             menu_items (name)
           )
         `)
+        .eq('canteen_id', currentCanteenId)
         .gte('created_at', startDate.toISOString())
         .neq('status', 'REJECTED');
 
@@ -106,16 +113,18 @@ export default function AdminDashboard() {
   });
 
   const { data: reviews = [], isLoading: reviewsLoading } = useQuery({
-    queryKey: ['adminReviews'],
+    queryKey: ['canteenReviews', currentCanteenId],
+    enabled: !!currentCanteenId,
     queryFn: async () => {
       const { data } = await supabase
         .from('item_reviews')
         .select(`
           *,
-          menu_items (name),
+          menu_items!inner (name, canteen_id),
           profiles (name, id_number),
           orders (id, order_number)
         `)
+        .eq('menu_items.canteen_id', currentCanteenId)
         .order('created_at', { ascending: false });
       return (data as unknown as Review[]) || [];
     }
@@ -131,26 +140,18 @@ export default function AdminDashboard() {
       .eq('id', reviewId);
 
     if (error) {
-      showAlert({
-        title: 'Reply Failed',
-        message: 'Failed to submit reply. Please try again.',
-        type: 'error'
-      });
+      showAlert({ title: 'Reply Failed', message: 'Failed to submit reply. Please try again.', type: 'error' });
     } else {
       setReplyingTo(null);
       setReplyText('');
-      queryClient.invalidateQueries({ queryKey: ['adminReviews'] });
-      showAlert({
-        title: 'Reply Published',
-        message: 'Your reply has been published to the student review.',
-        type: 'success'
-      });
+      queryClient.invalidateQueries({ queryKey: ['canteenReviews'] });
+      showAlert({ title: 'Reply Published', message: 'Your reply has been published to the student review.', type: 'success' });
     }
     setSubmittingReply(false);
   };
 
   const { data: penalizedStudents = [], isLoading: penaltiesLoading } = useQuery({
-    queryKey: ['penalizedStudents'],
+    queryKey: ['canteenPenalizedStudents'],
     queryFn: async () => {
       const { data } = await supabase
         .from('profiles')
@@ -161,57 +162,6 @@ export default function AdminDashboard() {
     }
   });
 
-  const [staffSearchText, setStaffSearchText] = useState('');
-  const { data: tenantUsers = [], isLoading: usersLoading } = useQuery({
-    queryKey: ['tenantUsers', staffSearchText],
-    queryFn: async () => {
-      let q = supabase
-        .from('profiles')
-        .select('*')
-        .in('role', ['STAFF', 'STUDENT'])
-        .order('role', { ascending: true })
-        .order('name');
-        
-      if (staffSearchText) {
-        q = q.ilike('name', `%${staffSearchText}%`);
-      }
-      
-      const { data } = await q.limit(20);
-      return (data as any[]) || [];
-    }
-  });
-
-  const handleToggleStaffRole = async (userId: string, currentRole: string) => {
-    const newRole = currentRole === 'STAFF' ? 'STUDENT' : 'STAFF';
-    
-    const confirmed = await showConfirm({
-      title: 'Change Role',
-      message: `Are you sure you want to change this user's role to ${newRole}?`,
-      confirmText: 'Yes, Change Role',
-      cancelText: 'Cancel',
-      type: 'info'
-    });
-    
-    if (!confirmed) return;
-
-    const { error } = await supabase
-      .from('profiles')
-      .update({ role: newRole })
-      .eq('id', userId);
-
-    if (error) {
-      showAlert({
-        title: 'Error',
-        message: `Failed to update role: ${error.message}`,
-        type: 'error'
-      });
-      return;
-    }
-    
-    queryClient.invalidateQueries({ queryKey: ['tenantUsers'] });
-  };
-
-  const [isCreatingStaff, setIsCreatingStaff] = useState(false);
   const [newStaffName, setNewStaffName] = useState('');
   const [newStaffEmail, setNewStaffEmail] = useState('');
   const [newStaffPassword, setNewStaffPassword] = useState('');
@@ -219,6 +169,7 @@ export default function AdminDashboard() {
 
   const handleCreateStaff = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!currentCanteenId) return;
     setCreatingStaff(true);
     try {
       const functionsUrl = import.meta.env.VITE_SUPABASE_URL
@@ -237,7 +188,8 @@ export default function AdminDashboard() {
           name: newStaffName,
           email: newStaffEmail,
           password: newStaffPassword,
-          role: 'STAFF'
+          role: 'STAFF',
+          canteen_id: currentCanteenId
         })
       });
 
@@ -247,23 +199,13 @@ export default function AdminDashboard() {
         throw new Error(result.error || 'Failed to create staff');
       }
 
-      showAlert({
-        title: 'Staff Created',
-        message: `Successfully created staff account for ${newStaffEmail}`,
-        type: 'success'
-      });
+      showAlert({ title: 'Staff Created', message: `Successfully created staff account for ${newStaffEmail}`, type: 'success' });
       
       setNewStaffName('');
       setNewStaffEmail('');
       setNewStaffPassword('');
-      setIsCreatingStaff(false);
-      queryClient.invalidateQueries({ queryKey: ['tenantUsers'] });
     } catch (err: any) {
-      showAlert({
-        title: 'Error',
-        message: err.message,
-        type: 'error'
-      });
+      showAlert({ title: 'Error', message: err.message, type: 'error' });
     } finally {
       setCreatingStaff(false);
     }
@@ -279,23 +221,13 @@ export default function AdminDashboard() {
     });
     if (!confirmed) return;
 
-    const { error } = await supabase.rpc('admin_reset_student_strikes', {
-      p_student_id: studentId
-    });
+    const { error } = await supabase.rpc('admin_reset_student_strikes', { p_student_id: studentId });
     if (error) {
-      showAlert({
-        title: 'Reset Failed',
-        message: `Failed to reset strikes: ${error.message}`,
-        type: 'error'
-      });
+      showAlert({ title: 'Reset Failed', message: `Failed to reset strikes: ${error.message}`, type: 'error' });
       return;
     }
-    showAlert({
-      title: 'Strikes Cleared',
-      message: `Strikes and suspension have been cleared for ${studentName || 'student'}.`,
-      type: 'success'
-    });
-    queryClient.invalidateQueries({ queryKey: ['penalizedStudents'] });
+    showAlert({ title: 'Strikes Cleared', message: `Strikes and suspension have been cleared.`, type: 'success' });
+    queryClient.invalidateQueries({ queryKey: ['canteenPenalizedStudents'] });
   };
 
   const [newItemName, setNewItemName] = useState('');
@@ -303,29 +235,31 @@ export default function AdminDashboard() {
   const [newItemType, setNewItemType] = useState<FoodType>('VEG');
 
   useEffect(() => {
+    if (!currentCanteenId) return;
+
     fetchMenu();
     fetchStats();
 
     const orderSub = supabase
-      .channel('admin:orders')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
+      .channel('canteen:orders')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `canteen_id=eq.${currentCanteenId}` }, () => {
         fetchStats();
-        queryClient.invalidateQueries({ queryKey: ['adminOrders'] });
-        queryClient.invalidateQueries({ queryKey: ['adminAnalytics'] });
+        queryClient.invalidateQueries({ queryKey: ['canteenOrders'] });
+        queryClient.invalidateQueries({ queryKey: ['canteenAnalytics'] });
       })
       .subscribe();
 
     const menuSub = supabase
-      .channel('admin:menu_items')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items' }, () => {
+      .channel('canteen:menu_items')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items', filter: `canteen_id=eq.${currentCanteenId}` }, () => {
         fetchMenu();
       })
       .subscribe();
 
     const reviewSub = supabase
-      .channel('admin:item_reviews')
+      .channel('canteen:item_reviews')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'item_reviews' }, () => {
-        queryClient.invalidateQueries({ queryKey: ['adminReviews'] });
+        queryClient.invalidateQueries({ queryKey: ['canteenReviews'] });
       })
       .subscribe();
 
@@ -334,9 +268,10 @@ export default function AdminDashboard() {
       menuSub.unsubscribe();
       reviewSub.unsubscribe();
     };
-  }, [queryClient]);
+  }, [currentCanteenId, queryClient]);
 
   const fetchStats = async () => {
+    if (!currentCanteenId) return;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const startOfDay = today.toISOString();
@@ -344,12 +279,13 @@ export default function AdminDashboard() {
     const { data, error } = await supabase
       .from('orders')
       .select('status')
+      .eq('canteen_id', currentCanteenId)
       .gte('created_at', startOfDay);
 
     if (data) {
       const s = { placed: 0, collected: 0, rejected: 0 };
       data.forEach(o => {
-        s.placed++; // any order created today was "placed"
+        s.placed++;
         if (o.status === 'COLLECTED') s.collected++;
         if (o.status === 'REJECTED') s.rejected++;
       });
@@ -358,17 +294,17 @@ export default function AdminDashboard() {
   };
 
   const fetchMenu = async () => {
+    if (!currentCanteenId) return;
     setLoading(true);
     const { data, error } = await supabase
       .from('menu_items')
       .select('*')
+      .eq('canteen_id', currentCanteenId)
       .order('veg_non_veg', { ascending: false })
       .order('name');
     if (data) {
       const sorted = [...data].sort((a, b) => {
-        if (a.veg_non_veg !== b.veg_non_veg) {
-          return a.veg_non_veg === 'VEG' ? -1 : 1;
-        }
+        if (a.veg_non_veg !== b.veg_non_veg) return a.veg_non_veg === 'VEG' ? -1 : 1;
         if (a.name.toLowerCase() === 'veg meals') return -1;
         if (b.name.toLowerCase() === 'veg meals') return 1;
         return a.name.localeCompare(b.name);
@@ -380,22 +316,19 @@ export default function AdminDashboard() {
 
   const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newItemName.trim()) return;
+    if (!newItemName.trim() || !currentCanteenId || !currentTenantId) return;
 
     const parsedPrice = parseFloat(newItemPrice) || 0;
     const { data, error } = await supabase.from('menu_items').insert({
       name: newItemName,
       veg_non_veg: newItemType,
       price: parsedPrice,
-      tenant_id: tenantId
+      tenant_id: currentTenantId,
+      canteen_id: currentCanteenId
     }).select().single();
 
     if (error) {
-      showAlert({
-        title: 'Error',
-        message: `Failed to add item: ${error.message}`,
-        type: 'error'
-      });
+      showAlert({ title: 'Error', message: `Failed to add item: ${error.message}`, type: 'error' });
       return;
     }
 
@@ -407,29 +340,25 @@ export default function AdminDashboard() {
   };
 
   const handleToggleSoldOut = async (id: string, currentStatus: boolean) => {
-    const { error } = await supabase.rpc('toggle_sold_out', {
-      item_id: id,
-      new_status: !currentStatus
-    });
-
+    const { error } = await supabase.rpc('toggle_sold_out', { item_id: id, new_status: !currentStatus });
     if (!error) {
       setMenuItems(menuItems.map(item => item.id === id ? { ...item, is_sold_out: !currentStatus } : item));
     } else {
-      showAlert({
-        title: 'Action Failed',
-        message: `Failed to update sold out status: ${error.message}`,
-        type: 'error'
-      });
+      showAlert({ title: 'Action Failed', message: `Failed to update sold out status: ${error.message}`, type: 'error' });
     }
   };
+
+  if (!currentCanteenId) {
+    return <div className="text-center p-8">You are not assigned to any canteen. Please contact your University Admin.</div>;
+  }
 
   return (
     <div className="w-full max-w-4xl grid grid-cols-12 gap-4">
       {/* Header */}
-      <div className="col-span-12 bg-indigo-600 border border-indigo-500 rounded-[2rem] p-5 md:p-8 flex flex-col justify-between shadow-sm relative overflow-hidden text-white mb-4">
+      <div className="col-span-12 bg-emerald-600 border border-emerald-500 rounded-[2rem] p-5 md:p-8 flex flex-col justify-between shadow-sm relative overflow-hidden text-white mb-4">
         <div className="z-10 flex justify-between items-start">
           <div>
-            <span className="px-3 py-1 bg-indigo-500 text-indigo-100 text-xs font-bold uppercase tracking-wider rounded-full border border-indigo-400">Admin Console</span>
+            <span className="px-3 py-1 bg-emerald-500 text-emerald-100 text-xs font-bold uppercase tracking-wider rounded-full border border-emerald-400">Canteen Admin</span>
             <h1 className="text-3xl font-extrabold text-white mt-4 leading-tight">Welcome, {profile?.name || 'Admin'}</h1>
           </div>
         </div>
@@ -464,7 +393,7 @@ export default function AdminDashboard() {
                 key={filter}
                 onClick={() => setOrderFilter(filter)}
                 className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-colors ${orderFilter === filter
-                    ? 'bg-indigo-600 text-white'
+                    ? 'bg-emerald-600 text-white'
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                   }`}
               >
@@ -483,7 +412,7 @@ export default function AdminDashboard() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[400px] overflow-y-auto pr-2">
             {allOrders.map(order => (
-              <div key={order.id} className="p-5 rounded-2xl border border-slate-200 bg-slate-50 flex flex-col gap-3 hover:border-indigo-200 transition-colors">
+              <div key={order.id} className="p-5 rounded-2xl border border-slate-200 bg-slate-50 flex flex-col gap-3 hover:border-emerald-200 transition-colors">
                 <div className="flex justify-between items-start">
                   <div>
                     <h3 className="font-bold text-slate-800">Order #{order.order_number}</h3>
@@ -502,7 +431,7 @@ export default function AdminDashboard() {
                 </div>
 
                 <div className="text-xs text-slate-500">
-                  Pickup: {formatPickupTime(order.pickup_time)} (Lunch) • {new Date(order.created_at).toLocaleDateString()}
+                  Pickup: {formatPickupTime(order.pickup_time)} (Lunch) ΓÇó {new Date(order.created_at).toLocaleDateString()}
                 </div>
 
                 <div className="mt-2 pt-3 border-t border-slate-200">
@@ -523,7 +452,6 @@ export default function AdminDashboard() {
       {/* Menu Management */}
       <div className="col-span-12 md:col-span-6 bg-white border border-slate-200 rounded-[2rem] p-5 sm:p-8 shadow-sm flex flex-col">
         <h2 className="text-xl font-bold text-slate-800 mb-6">Manage Menu</h2>
-        {/* Add Item Form */}
         <form onSubmit={handleAddItem} className="flex flex-col gap-3 mb-8 bg-slate-50 p-4 rounded-xl border border-slate-100">
           <input 
             type="text" 
@@ -531,7 +459,7 @@ export default function AdminDashboard() {
             value={newItemName}
             onChange={(e) => setNewItemName(e.target.value)}
             maxLength={100}
-            className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm text-slate-800"
+            className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm text-slate-800"
           />
           <div className="flex gap-2 items-center">
             <input 
@@ -541,26 +469,25 @@ export default function AdminDashboard() {
               onChange={(e) => setNewItemPrice(e.target.value)}
               min="0"
               step="any"
-              className="w-28 px-3.5 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm text-slate-800"
+              className="w-28 px-3.5 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm text-slate-800"
             />
             <select 
               value={newItemType} 
               onChange={(e) => setNewItemType(e.target.value as FoodType)}
-              className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm text-slate-800"
+              className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm text-slate-800"
             >
               <option value="VEG">Veg</option>
               <option value="NON_VEG">Non-Veg</option>
             </select>
             <button 
               type="submit" 
-              className="px-5 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 active:scale-95 transition-all shrink-0"
+              className="px-5 py-2 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 active:scale-95 transition-all shrink-0"
             >
               Add Item
             </button>
           </div>
         </form>
 
-        {/* Menu List */}
         {loading && menuItems.length === 0 ? (
           <div className="text-slate-500 text-sm flex-1 min-h-[300px] flex items-center justify-center">Loading menu...</div>
         ) : (
@@ -588,7 +515,9 @@ export default function AdminDashboard() {
               </div>
             ))}
             {menuItems.length === 0 && (
-              <div className="text-slate-500 text-sm text-center py-4">No menu items yet.</div>
+              <div className="text-slate-500 text-sm text-center py-4">
+                No menu items for this location yet.
+              </div>
             )}
           </div>
         )}
@@ -642,8 +571,8 @@ export default function AdminDashboard() {
                 {/* Admin Reply Section */}
                 <div className="mt-2 pt-3 border-t border-slate-200">
                   {review.admin_reply ? (
-                    <div className="bg-indigo-50 p-3 rounded-xl border border-indigo-100">
-                      <div className="text-xs font-bold text-indigo-600 uppercase tracking-wider mb-1">Your Reply</div>
+                    <div className="bg-emerald-50 p-3 rounded-xl border border-emerald-100">
+                      <div className="text-xs font-bold text-emerald-600 uppercase tracking-wider mb-1">Your Reply</div>
                       <p className="text-sm text-slate-800">{review.admin_reply}</p>
                     </div>
                   ) : replyingTo === review.id ? (
@@ -653,7 +582,7 @@ export default function AdminDashboard() {
                         onChange={(e) => setReplyText(e.target.value)}
                         placeholder="Write a reply..."
                         maxLength={500}
-                        className="w-full text-sm bg-white border border-indigo-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        className="w-full text-sm bg-white border border-emerald-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                         rows={2}
                       />
                       <div className="flex justify-end gap-2">
@@ -666,7 +595,7 @@ export default function AdminDashboard() {
                         <button
                           onClick={() => handleReplyToReview(review.id)}
                           disabled={submittingReply || !replyText.trim()}
-                          className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                          className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700 disabled:opacity-50 transition-colors"
                         >
                           {submittingReply ? 'Sending...' : 'Send Reply'}
                         </button>
@@ -675,7 +604,7 @@ export default function AdminDashboard() {
                   ) : (
                     <button
                       onClick={() => setReplyingTo(review.id)}
-                      className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
+                      className="text-xs font-semibold text-emerald-600 hover:text-emerald-800 flex items-center gap-1"
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 21l1.9-5.7a8.5 8.5 0 1 1 3.8 3.8z"></path></svg>
                       Reply to feedback
@@ -716,13 +645,13 @@ export default function AdminDashboard() {
                             </span>
                             {item.name}
                           </span>
-                          <span className="text-indigo-600">{item.count} sold</span>
+                          <span className="text-emerald-600">{item.count} sold</span>
                         </div>
                         <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden border border-slate-200/50">
                           <div
-                            className={`h-2.5 rounded-full transition-all duration-1000 ease-out ${idx === 0 ? 'bg-indigo-600' :
-                                idx === 1 ? 'bg-indigo-500' :
-                                  idx === 2 ? 'bg-indigo-400' : 'bg-indigo-300'
+                            className={`h-2.5 rounded-full transition-all duration-1000 ease-out ${idx === 0 ? 'bg-emerald-600' :
+                                idx === 1 ? 'bg-emerald-500' :
+                                  idx === 2 ? 'bg-emerald-400' : 'bg-emerald-300'
                               }`}
                             style={{ width: `${percentage}%` }}
                           ></div>
@@ -734,12 +663,12 @@ export default function AdminDashboard() {
               )}
             </div>
 
-            <div className="bg-indigo-600 rounded-2xl p-6 shadow-sm flex flex-col items-center justify-center text-white text-center">
+            <div className="bg-emerald-600 rounded-2xl p-6 shadow-sm flex flex-col items-center justify-center text-white text-center">
               <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center mb-4">
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20v-6M6 20V10M18 20V4"></path></svg>
               </div>
               <h3 className="font-bold text-xl mb-1">Great Job!</h3>
-              <p className="text-indigo-200 text-sm">Keep up the good work managing orders.</p>
+              <p className="text-emerald-200 text-sm">Keep up the good work managing orders.</p>
             </div>
           </div>
         )}
@@ -747,121 +676,46 @@ export default function AdminDashboard() {
 
       {/* Manage Staff Section */}
       <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 shadow-sm flex flex-col">
-        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-6">
-          <h2 className="text-xl font-bold text-slate-800">Manage Staff</h2>
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+        <h2 className="text-xl font-bold text-slate-800 mb-6">Manage Staff</h2>
+        <form onSubmit={handleCreateStaff} className="mb-6 bg-slate-50 p-6 rounded-2xl border border-slate-200">
+          <h3 className="font-bold text-slate-800 mb-4">Create New Staff User</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
             <input
               type="text"
-              placeholder="Search users..."
-              value={staffSearchText}
-              onChange={(e) => setStaffSearchText(e.target.value)}
-              className="px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none w-full sm:w-64"
+              required
+              placeholder="Full Name"
+              value={newStaffName}
+              onChange={(e) => setNewStaffName(e.target.value)}
+              className="px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
             />
+            <input
+              type="email"
+              required
+              placeholder="Email Address"
+              value={newStaffEmail}
+              onChange={(e) => setNewStaffEmail(e.target.value)}
+              className="px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+            />
+            <input
+              type="password"
+              required
+              minLength={6}
+              placeholder="Password (Min. 6 chars)"
+              value={newStaffPassword}
+              onChange={(e) => setNewStaffPassword(e.target.value)}
+              className="px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+            />
+          </div>
+          <div className="flex justify-end gap-2">
             <button
-              onClick={() => setIsCreatingStaff(!isCreatingStaff)}
-              className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 transition shrink-0"
+              type="submit"
+              disabled={creatingStaff}
+              className="px-4 py-2 bg-emerald-600 text-white text-sm font-semibold rounded-xl hover:bg-emerald-700 disabled:opacity-50 transition"
             >
-              + Add Staff
+              {creatingStaff ? 'Creating...' : 'Create Staff'}
             </button>
           </div>
-        </div>
-        
-        {isCreatingStaff && (
-          <form onSubmit={handleCreateStaff} className="mb-6 bg-slate-50 p-6 rounded-2xl border border-slate-200">
-            <h3 className="font-bold text-slate-800 mb-4">Create New Staff User</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-              <input
-                type="text"
-                required
-                placeholder="Full Name"
-                value={newStaffName}
-                onChange={(e) => setNewStaffName(e.target.value)}
-                className="px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-              />
-              <input
-                type="email"
-                required
-                placeholder="Email Address"
-                value={newStaffEmail}
-                onChange={(e) => setNewStaffEmail(e.target.value)}
-                className="px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-              />
-              <input
-                type="password"
-                required
-                minLength={6}
-                placeholder="Password (Min. 6 chars)"
-                value={newStaffPassword}
-                onChange={(e) => setNewStaffPassword(e.target.value)}
-                className="px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-              />
-            </div>
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setIsCreatingStaff(false)}
-                className="px-4 py-2 text-sm font-semibold text-slate-500 hover:text-slate-700 transition"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={creatingStaff}
-                className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition"
-              >
-                {creatingStaff ? 'Creating...' : 'Create Staff'}
-              </button>
-            </div>
-          </form>
-        )}
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-200">
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Name</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">ID Number</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Role</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {usersLoading ? (
-                <tr>
-                  <td colSpan={4} className="px-6 py-8 text-center text-slate-500">Loading users...</td>
-                </tr>
-              ) : tenantUsers.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="px-6 py-8 text-center text-slate-500">No users found.</td>
-                </tr>
-              ) : (
-                tenantUsers.map((u) => (
-                  <tr key={u.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-6 py-4 text-sm font-bold text-slate-800">{u.name || 'Unnamed'}</td>
-                    <td className="px-6 py-4 text-sm font-mono text-slate-600">{u.id_number || 'N/A'}</td>
-                    <td className="px-6 py-4">
-                      <span className={`px-2 py-1 text-xs font-bold rounded-full ${
-                        u.role === 'STAFF' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'
-                      }`}>
-                        {u.role}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <button
-                        onClick={() => handleToggleStaffRole(u.id, u.role)}
-                        className={`text-sm font-bold ${
-                          u.role === 'STAFF' ? 'text-red-600 hover:text-red-800' : 'text-indigo-600 hover:text-indigo-800'
-                        }`}
-                      >
-                        {u.role === 'STAFF' ? 'Demote to Student' : 'Promote to Staff'}
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+        </form>
       </div>
 
       {/* Student Penalties & Account Suspensions */}
@@ -885,7 +739,7 @@ export default function AdminDashboard() {
           <div className="text-slate-500 text-sm py-4">Loading student penalty records...</div>
         ) : penalizedStudents.length === 0 ? (
           <div className="bg-slate-50 border border-slate-100 rounded-2xl p-6 text-center text-slate-500 text-sm flex items-center justify-center gap-2">
-            <IconSparkles size={18} className="w-4.5 h-4.5 text-indigo-500 shrink-0" />
+            <IconSparkles size={18} className="w-4.5 h-4.5 text-emerald-500 shrink-0" />
             <span>All clean! No students currently have active strikes or suspensions.</span>
           </div>
         ) : (
@@ -946,6 +800,7 @@ export default function AdminDashboard() {
           </div>
         )}
       </div>
+
 
     </div>
   );
