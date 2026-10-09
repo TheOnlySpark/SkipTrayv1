@@ -322,6 +322,16 @@ export default function StaffDashboard() {
       return;
     }
 
+    // Readiness Check (Still Preparing / Placed)
+    if (matchingOrder.status !== 'READY') {
+      setQuickOtpToast({
+        message: `⚠️ NOT READY: Order #${matchingOrder.order_number} is currently in status "${matchingOrder.status}". Please mark it as 'READY' first.`,
+        isError: true
+      });
+      setQuickOtpLoading(false);
+      return;
+    }
+
     const success = await handleVerifyOtp(matchingOrder.id, cleanOtp);
     if (success) {
       setQuickOtpToast({
