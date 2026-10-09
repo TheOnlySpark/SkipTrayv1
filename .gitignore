@@ -22,3 +22,4 @@ coverage/
 skills-lock.json
 metadata.json
 DESIGN_PHILOSOPHY.md
+knowledge_base/architecture_decisions.md

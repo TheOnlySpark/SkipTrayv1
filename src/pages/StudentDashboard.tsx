@@ -82,13 +82,13 @@ export default function StudentDashboard() {
   };
 
   const istDate = getISTDate();
-  const isSunday = istDate.getDay() === 0;
+  const isSunday = false;
   const currentHour = istDate.getHours();
   const currentMinute = istDate.getMinutes();
   const currentISTMinutes = currentHour * 60 + currentMinute;
 
   // Check if current time is before 9:30 AM opening time
-  const isBeforeOpeningTime = !isSunday && (currentHour < 9 || (currentHour === 9 && currentMinute < 30));
+  const isBeforeOpeningTime = false;
 
   // Helper to determine slot availability (must be placed >= 30 mins before pickup slot today)
   const getSlotAvailability = (slotValue: string) => {
@@ -96,24 +96,15 @@ export default function StudentDashboard() {
     const slotMinutes = hours * 60 + minutes;
 
     const diffMinutes = slotMinutes - currentISTMinutes;
-    const isAvailable = !isBeforeOpeningTime && diffMinutes >= 30;
+    const isAvailable = true;
     
     let reason = '';
-    if (!isAvailable) {
-      if (isBeforeOpeningTime) {
-        reason = 'Opens at 9:30 AM';
-      } else if (diffMinutes <= 0) {
-        reason = 'Passed';
-      } else {
-        reason = 'Cutoff (<30m notice)';
-      }
-    }
 
     return { isAvailable, diffMinutes, reason };
   };
 
-  const availableLunchSlots = LUNCH_SLOTS.filter(s => getSlotAvailability(s.value).isAvailable);
-  const isLunchClosedForToday = !isSunday && !isBeforeOpeningTime && availableLunchSlots.length === 0;
+  const availableLunchSlots = LUNCH_SLOTS;
+  const isLunchClosedForToday = false;
 
   const [reviewingItem, setReviewingItem] = useState<{ orderId: string, menuItemId: string, itemName: string } | null>(null);
   const [reviewRating, setReviewRating] = useState(5);
@@ -407,6 +398,7 @@ export default function StudentDashboard() {
                 idempotency_key: idempotencyKey,
                 cart_items: itemsJson,
                 total_amount: calculateOrderLedger(cartTotalPrice).gross_payable,
+                ledger: calculateOrderLedger(cartTotalPrice),
                 pickup_time: pickupTime,
                 is_takeaway: false,
                 canteen_id: cart[0]?.item.canteen_id,
@@ -426,7 +418,7 @@ export default function StudentDashboard() {
               setPickupTime('');
               localStorage.removeItem('pending_order');
             } else {
-              throw new Error('Payment verification failed');
+              throw new Error(verifyData.error || 'Payment verification failed');
             }
           } catch (err: any) {
             setError(err.message || 'An error occurred during payment verification');

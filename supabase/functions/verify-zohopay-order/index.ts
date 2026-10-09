@@ -30,7 +30,7 @@ serve(async (req) => {
       throw new Error("Unauthorized");
     }
 
-    const { payment_id, idempotency_key, cart_items, total_amount, is_takeaway, pickup_time, canteen_id, tenant_id } = await req.json();
+    const { payment_id, idempotency_key, cart_items, total_amount, is_takeaway, pickup_time, canteen_id, tenant_id, ledger } = await req.json();
 
     if (!payment_id || !idempotency_key) {
       throw new Error("Missing payment verification details");
@@ -52,7 +52,7 @@ serve(async (req) => {
             throw new Error("Payment verification failed or amount mismatch");
           }
         } else {
-           // We just bypass and assume it's mock
+          // We just bypass and assume it's mock
         }
       } catch (e) {
         // Fallback to bypass for testing
@@ -74,7 +74,7 @@ serve(async (req) => {
       .single();
 
     if (paymentError) {
-      if (paymentError.code === '23505') { // Postgres unique constraint violation on provider_payment_id
+      if (paymentError.code === '23505') { // Postgres unique constraint violation
         return new Response(JSON.stringify({ success: true, message: 'Payment already processed' }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
           status: 200,
@@ -103,13 +103,35 @@ serve(async (req) => {
     if (orderError) {
       // In case of error here, the payment was recorded but order failed. 
       // Idempotency key UNIQUE violation means the order is already there.
-      if (orderError.code === '23505') { 
+      if (orderError.code === '23505') {
         return new Response(JSON.stringify({ success: true, message: 'Order already processed' }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
           status: 200,
         });
       }
       throw orderError;
+    }
+
+    // Insert order ledger
+    if (ledger) {
+      const { error: ledgerError } = await supabase
+        .from('order_ledger')
+        .insert({
+          order_id: newOrder.id,
+          student_id: user.id,
+          canteen_id,
+          food_subtotal: ledger.food_subtotal,
+          commission_fee: ledger.commission_fee,
+          target_net: ledger.target_net,
+          gross_payable: ledger.gross_payable,
+          gateway_fee: ledger.gateway_fee,
+          gw_deduction: ledger.gw_deduction,
+          net_settled: ledger.net_settled,
+          canteen_payable: ledger.canteen_payable,
+          platform_net: ledger.platform_net
+        });
+
+      if (ledgerError) throw ledgerError;
     }
 
     // Insert order items
@@ -130,9 +152,9 @@ serve(async (req) => {
       status: 200,
     });
   } catch (error: any) {
-    return new Response(JSON.stringify({ error: error.message }), {
+    return new Response(JSON.stringify({ success: false, error: error.message }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
-      status: 400,
+      status: 200,
     });
   }
 });
