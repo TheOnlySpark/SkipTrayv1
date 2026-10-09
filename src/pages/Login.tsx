@@ -41,7 +41,7 @@ export default function Login() {
         return;
       }
 
-      if (profile.id_number || ['STAFF', 'ADMIN', 'SUPER_ADMIN'].includes(profile.role)) {
+      if (profile.id_number || ['STAFF', 'ADMIN', 'UNI_ADMIN', 'SUPER_ADMIN'].includes(profile.role)) {
         navigate('/dashboard');
       }
     }

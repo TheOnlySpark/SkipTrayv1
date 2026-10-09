@@ -10,7 +10,7 @@ export default function Dashboard() {
     return <Navigate to="/student" replace />;
   } else if (profile?.role === 'STAFF') {
     return <Navigate to="/staff" replace />;
-  } else if (profile?.role === 'ADMIN') {
+  } else if (profile?.role === 'ADMIN' || profile?.role === 'UNI_ADMIN') {
     return <Navigate to="/admin" replace />;
   } else if (profile?.role === 'SUPER_ADMIN') {
     return <Navigate to="/super-admin" replace />;
