@@ -314,27 +314,88 @@ export default function StudentDashboard() {
     setError('');
 
     const itemsJson = cart.map(c => ({
-      menu_item_id: c.item.id,
+      id: c.item.id,
       quantity: c.quantity
     }));
 
-    const { data, error } = await supabase.rpc('place_order_with_otp', {
-      p_pickup_time: pickupTime,
-      p_items: itemsJson
-    });
+    // 1. Generate Idempotency Key
+    const idempotencyKey = crypto.randomUUID();
 
-    if (error) {
-      setError(error.message);
-    } else {
-      // Fetch the newly created order
-      const { data: newOrder } = await supabase.from('orders').select('*').eq('id', data).single();
-      if (newOrder) {
-        setActiveOrder(newOrder);
+    // 2. Save cart state in case of redirect
+    localStorage.setItem('pending_order', JSON.stringify({ cart, pickupTime, idempotencyKey }));
+
+    try {
+      // 3. Create ZohoPay Session
+      const { data: createData, error: createError } = await supabase.functions.invoke('create-zohopay-order', {
+        body: { 
+          items: itemsJson,
+          total_amount: cartTotalPrice,
+          idempotency_key: idempotencyKey,
+          is_takeaway: false
+        }
+      });
+
+      if (createError) throw createError;
+
+      // 4. Initialize ZohoPay Widget Popup
+      if (!(window as any).ZohoPay) {
+        throw new Error("ZohoPay SDK is not loaded. Please ensure the script is added to your index.html.");
       }
-      setCart([]);
-      setPickupTime('');
+
+      const zohoOptions = {
+        sessionId: createData.session_id,
+        onSuccess: async function (response: any) {
+          try {
+            // 5. Verify and Create Order
+            const { data: verifyData, error: verifyError } = await supabase.functions.invoke('verify-zohopay-order', {
+              body: {
+                payment_id: response.payment_id || response.transaction_id || `ZOHO_${Date.now()}`,
+                idempotency_key: idempotencyKey,
+                cart_items: itemsJson,
+                total_amount: cartTotalPrice,
+                pickup_time: pickupTime,
+                is_takeaway: false,
+                canteen_id: cart[0]?.item.canteen_id,
+                tenant_id: cart[0]?.item.tenant_id
+              }
+            });
+
+            if (verifyError) throw verifyError;
+
+            if (verifyData.success) {
+              // Fetch the newly created order
+              const { data: newOrder } = await supabase.from('orders').select('*').eq('id', verifyData.order_id).single();
+              if (newOrder) {
+                setActiveOrder(newOrder);
+              }
+              setCart([]);
+              setPickupTime('');
+              localStorage.removeItem('pending_order');
+            } else {
+              throw new Error('Payment verification failed');
+            }
+          } catch (err: any) {
+            setError(err.message || 'An error occurred during payment verification');
+          } finally {
+            setSubmitting(false);
+          }
+        },
+        onCancel: function () {
+          setSubmitting(false);
+          setError('Payment was cancelled.');
+        },
+        onError: function (err: any) {
+          setSubmitting(false);
+          setError(err.message || 'Payment failed.');
+        }
+      };
+
+      (window as any).ZohoPay.checkout(zohoOptions);
+
+    } catch (err: any) {
+      setError(err.message || 'An error occurred during checkout');
+      setSubmitting(false);
     }
-    setSubmitting(false);
   };
 
   const handleCancelOrder = async () => {

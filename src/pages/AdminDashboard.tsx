@@ -381,13 +381,23 @@ export default function AdminDashboard() {
   const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newItemName.trim()) return;
+    
+    if (!profile?.canteen_id) {
+      showAlert({
+        title: 'Error',
+        message: 'No canteen assigned to your admin profile.',
+        type: 'error'
+      });
+      return;
+    }
 
     const parsedPrice = parseFloat(newItemPrice) || 0;
     const { data, error } = await supabase.from('menu_items').insert({
       name: newItemName,
       veg_non_veg: newItemType,
       price: parsedPrice,
-      tenant_id: tenantId
+      tenant_id: tenantId,
+      canteen_id: profile.canteen_id
     }).select().single();
 
     if (error) {
