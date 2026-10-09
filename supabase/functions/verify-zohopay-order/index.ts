@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 
@@ -58,7 +59,7 @@ serve(async (req) => {
       }
     }
 
-    // Insert payment record first
+    // Insert payment record first (using service_role)
     const { data: paymentRecord, error: paymentError } = await supabase
       .from('payments')
       .insert({

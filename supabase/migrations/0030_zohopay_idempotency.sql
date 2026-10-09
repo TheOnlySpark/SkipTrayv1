@@ -11,11 +11,20 @@ BEGIN
     END IF;
 END $$;
 
+
 -- 2. Drop the old non-payment RPC functions
 DROP FUNCTION IF EXISTS public.place_order_with_otp(TEXT, JSON);
 DROP FUNCTION IF EXISTS public.place_order_with_otp(TEXT, JSON, BOOLEAN);
 DROP FUNCTION IF EXISTS public.place_order_with_otp(TEXT, JSON, BOOLEAN, UUID);
 
 -- 3. Update the payments table schema to generic/ZohoPay naming instead of Cashfree
-ALTER TABLE public.payments RENAME COLUMN cf_order_id TO provider_order_id;
-ALTER TABLE public.payments RENAME COLUMN cf_payment_id TO provider_payment_id;
+DO $$
+BEGIN
+  IF EXISTS(SELECT * FROM information_schema.columns WHERE table_schema='public' AND table_name='payments' AND column_name='cf_order_id') THEN
+      ALTER TABLE public.payments RENAME COLUMN cf_order_id TO provider_order_id;
+  END IF;
+
+  IF EXISTS(SELECT * FROM information_schema.columns WHERE table_schema='public' AND table_name='payments' AND column_name='cf_payment_id') THEN
+      ALTER TABLE public.payments RENAME COLUMN cf_payment_id TO provider_payment_id;
+  END IF;
+END $$;

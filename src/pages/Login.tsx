@@ -147,6 +147,15 @@ export default function Login() {
       }
     }
 
+    // If email confirmation is required, session might be null
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      setSuccess('Account created! Please check your email to verify your account before logging in.');
+      setStep('LOGIN');
+      setLoading(false);
+      return;
+    }
+
     // Hard navigate to trigger a full session reload
     window.location.href = '/dashboard';
   };
