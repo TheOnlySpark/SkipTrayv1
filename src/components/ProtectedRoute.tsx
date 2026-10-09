@@ -17,7 +17,7 @@ export function ProtectedRoute({ children, allowedRoles }: { children: React.Rea
     return <Navigate to="/login" replace />;
   }
 
-  if (profile && !profile.id_number && !['STAFF', 'ADMIN', 'UNI_ADMIN', 'SUPER_ADMIN'].includes(profile.role)) {
+  if (profile && !profile.id_number && !['STAFF', 'ADMIN', 'SUPER_ADMIN', 'UNI_ADMIN', 'CANTEEN_ADMIN'].includes(profile.role)) {
     // If they haven't completed their profile and are meant to be a student/teacher
     return <Navigate to="/login" replace />; 
   }

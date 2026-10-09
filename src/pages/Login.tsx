@@ -35,14 +35,19 @@ export default function Login() {
   const navigate = useNavigate();
 
   useEffect(() => {
+    console.log("Login state:", { user, profile, tenantId });
     if (user && profile) {
       // Prevent navigation if cross-tenant login
       if (profile.role !== 'SUPER_ADMIN' && profile.tenant_id !== tenantId) {
+        console.log("Cross tenant login prevented navigation");
         return;
       }
 
-      if (profile.id_number || ['STAFF', 'ADMIN', 'UNI_ADMIN', 'SUPER_ADMIN'].includes(profile.role)) {
+      if (profile.id_number || ['STAFF', 'ADMIN', 'SUPER_ADMIN', 'UNI_ADMIN', 'CANTEEN_ADMIN'].includes(profile.role)) {
+        console.log("Navigating to /dashboard");
         navigate('/dashboard');
+      } else {
+        console.log("Not navigating because role/id_number condition not met.");
       }
     }
   }, [user, profile, navigate, tenantId]);
@@ -59,6 +64,13 @@ export default function Login() {
       p_tenant_id: tenantId
     });
 
+    if (accessError) {
+      console.error("Access error:", accessError);
+      setError('Error verifying account access. Please try again.');
+      setLoading(false);
+      return;
+    }
+
     if (hasAccess === false) {
       setError('This account is not registered with this institution.');
       setLoading(false);
@@ -69,10 +81,13 @@ export default function Login() {
     const { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
 
     if (signInError) {
-      if (signInError.message.toLowerCase().includes('invalid login credentials')) {
+      const errMsg = signInError.message || JSON.stringify(signInError);
+      if (errMsg === '{}' || errMsg.trim() === '') {
+        setError('Invalid login credentials or account does not exist.');
+      } else if (errMsg.toLowerCase().includes('invalid login credentials')) {
         setError('Invalid email or password. Please try again.');
       } else {
-        setError(signInError.message);
+        setError(errMsg);
       }
       setLoading(false);
       return;

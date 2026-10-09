@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/ModalDialogContext';
 import { supabase } from '../lib/supabase';
@@ -83,19 +84,48 @@ export default function StaffDashboard() {
     return { isOverdue: false, minutesOverdue: 0 };
   };
 
+  const { data: assignedCanteen } = useQuery({
+    queryKey: ['staffCanteen', profile?.canteen_id],
+    queryFn: async () => {
+      if (!profile?.canteen_id) return null;
+      const { data } = await supabase
+        .from('canteens')
+        .select('*')
+        .eq('id', profile.canteen_id)
+        .maybeSingle();
+      return data;
+    },
+    enabled: !!profile?.canteen_id,
+  });
+
   useEffect(() => {
+    if (!profile?.canteen_id) {
+      setLoading(false);
+      return;
+    }
+
     fetchOrders();
     fetchMenu();
 
-    // Realtime subscriptions
-    const orderSub = supabase.channel('staff_orders')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
+    // Realtime subscriptions strictly locked to this staff member's assigned canteen
+    const orderSub = supabase.channel(`staff_orders_${profile.canteen_id}`)
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'orders',
+        filter: `canteen_id=eq.${profile.canteen_id}`
+      }, () => {
         fetchOrders();
       })
       .subscribe();
 
-    const menuSub = supabase.channel('staff_menu')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items' }, () => {
+    const menuSub = supabase.channel(`staff_menu_${profile.canteen_id}`)
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'menu_items',
+        filter: `canteen_id=eq.${profile.canteen_id}`
+      }, () => {
         fetchMenu();
       })
       .subscribe();
@@ -104,12 +134,17 @@ export default function StaffDashboard() {
       orderSub.unsubscribe();
       menuSub.unsubscribe();
     };
-  }, []);
+  }, [profile?.canteen_id]);
 
   const fetchMenu = async () => {
+    if (!profile?.canteen_id) {
+      setMenuItems([]);
+      return;
+    }
     const { data } = await supabase
       .from('menu_items')
       .select('*')
+      .eq('canteen_id', profile.canteen_id)
       .order('veg_non_veg', { ascending: false })
       .order('name');
     if (data) {
@@ -126,6 +161,11 @@ export default function StaffDashboard() {
   };
 
   const fetchOrders = async () => {
+    if (!profile?.canteen_id) {
+      setOrders([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     const { data } = await supabase
       .from('orders')
@@ -137,6 +177,7 @@ export default function StaffDashboard() {
           menu_items ( * )
         )
       `)
+      .eq('canteen_id', profile.canteen_id)
       .in('status', ['PLACED', 'ACCEPTED', 'PREPARING', 'READY'])
       .order('pickup_time', { ascending: true })
       .order('order_number', { ascending: true });
@@ -509,6 +550,9 @@ export default function StaffDashboard() {
               <span className="text-xs font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">
                 {formatPickupTime(order.pickup_time)}
               </span>
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase ${order.is_takeaway ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-emerald-100 text-emerald-700 border border-emerald-200'}`}>
+                {order.is_takeaway ? 'TAKEAWAY' : 'DINE-IN'}
+              </span>
             </div>
             <h4 className="font-bold text-sm text-slate-800 truncate mt-1">{order.profiles?.name || 'Student'}</h4>
             <div className="text-[11px] text-slate-400 font-mono">ID: {order.profiles?.id_number || order.id.split('-')[0].toUpperCase()}</div>
@@ -639,17 +683,37 @@ export default function StaffDashboard() {
     );
   };
 
+  // Guard: unassigned staff
+  if (!profile?.canteen_id) {
+    return (
+      <div className="w-full max-w-2xl mx-auto mt-16 text-center">
+        <div className="bg-amber-50 border border-amber-200 rounded-[2rem] p-10 flex flex-col items-center gap-4">
+          <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center">
+            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-600"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          </div>
+          <h2 className="text-xl font-extrabold text-amber-900">No Cafeteria Assigned</h2>
+          <p className="text-amber-700 text-sm max-w-sm">
+            Your account hasn't been assigned to a cafeteria terminal yet. Please contact your administrator to get assigned to a canteen before you can manage orders.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full max-w-7xl mx-auto space-y-4 pb-20">
       {/* Top Operations Header */}
       <div className="bg-slate-900 rounded-[2rem] p-5 sm:p-7 text-white shadow-xl relative overflow-hidden">
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 pb-4 border-b border-slate-800">
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="px-3 py-1 bg-indigo-500/20 text-indigo-300 text-xs font-bold uppercase tracking-wider rounded-full border border-indigo-500/30">
                 Staff Operations Portal
               </span>
-              <span className="text-xs text-slate-400">Lunch Window: 12:30 PM – 1:40 PM</span>
+              <span className="px-3 py-1 bg-emerald-500/20 text-emerald-300 text-xs font-bold uppercase tracking-wider rounded-full border border-emerald-500/30">
+                🏪 Kitchen Terminal: {assignedCanteen?.name ?? 'Ground Floor Canteen'}
+              </span>
+              <span className="text-xs text-slate-400">Lunch Window: 11:30 AM – 2:30 PM</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-white mt-2 leading-tight">
               Order Command Center
@@ -873,11 +937,11 @@ export default function StaffDashboard() {
               {batchPrepSummary.map(([itemName, data]) => (
                 <div 
                   key={itemName} 
-                  className="flex items-center gap-2 bg-white/10 backdrop-blur-sm border border-white/15 px-3 py-1.5 rounded-xl shadow-sm hover:bg-white/15 transition-colors"
+                  className="flex items-center gap-2.5 bg-white/10 backdrop-blur-sm border border-white/15 px-4 py-2.5 rounded-2xl shadow-sm hover:bg-white/15 transition-colors"
                 >
-                  <span className={`w-2 h-2 rounded-full shrink-0 ${data.veg ? 'bg-emerald-400' : 'bg-rose-400'}`}></span>
-                  <span className="text-xs font-extrabold text-white">{itemName}</span>
-                  <span className="bg-indigo-500 text-white font-mono text-xs font-black px-2 py-0.5 rounded-md shadow-sm">
+                  <span className={`w-3 h-3 rounded-full shrink-0 ${data.veg ? 'bg-emerald-400' : 'bg-rose-400'}`}></span>
+                  <span className="text-sm font-extrabold text-white">{itemName}</span>
+                  <span className="bg-indigo-500 text-white font-mono text-sm font-black px-2.5 py-1 rounded-md shadow-sm">
                     {data.count}x
                   </span>
                 </div>

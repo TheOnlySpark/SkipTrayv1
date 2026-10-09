@@ -65,6 +65,7 @@ export function playErrorBuzzer() {
 export function QRScannerModal({ isOpen, onClose, onScanSuccess }: QRScannerModalProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
@@ -204,11 +205,33 @@ export function QRScannerModal({ isOpen, onClose, onScanSuccess }: QRScannerModa
     setFacingMode(prev => (prev === 'environment' ? 'user' : 'environment'));
   };
 
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    closeButtonRef.current?.focus();
+
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in">
-      <div className="bg-slate-900 border border-slate-700 rounded-3xl overflow-hidden shadow-2xl w-full max-w-md flex flex-col relative text-white">
+      <div
+        className="bg-slate-900 border border-slate-700 rounded-3xl overflow-hidden shadow-2xl w-full max-w-md flex flex-col relative text-white"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="qr-scanner-title"
+        aria-describedby="qr-scanner-description"
+      >
         
         {/* Header */}
         <div className="flex justify-between items-center px-6 py-4 border-b border-slate-800 bg-slate-900/90">
@@ -217,15 +240,17 @@ export function QRScannerModal({ isOpen, onClose, onScanSuccess }: QRScannerModa
               <IconCamera size={18} className="w-4.5 h-4.5" />
             </div>
             <div>
-              <h3 className="font-extrabold text-base text-white">Instant QR Scanner</h3>
-              <p className="text-[11px] text-slate-400">Scan student's pickup QR code</p>
+              <h3 id="qr-scanner-title" className="font-extrabold text-base text-white">Instant QR Scanner</h3>
+              <p id="qr-scanner-description" className="text-[11px] text-slate-400">Scan student's pickup QR code</p>
             </div>
           </div>
 
           <div className="flex items-center gap-1.5">
             {hasMultipleCameras && (
               <button
+                type="button"
                 onClick={toggleCamera}
+                aria-label="Switch camera"
                 className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
                 title="Switch Camera"
               >
@@ -233,7 +258,10 @@ export function QRScannerModal({ isOpen, onClose, onScanSuccess }: QRScannerModa
               </button>
             )}
             <button
+              ref={closeButtonRef}
+              type="button"
               onClick={onClose}
+              aria-label="Close scanner"
               className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
             >
               <IconX size={18} className="w-4.5 h-4.5" />

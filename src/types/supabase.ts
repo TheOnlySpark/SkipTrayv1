@@ -9,6 +9,40 @@ export type Json =
 export interface Database {
   public: {
     Tables: {
+      canteens: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean
+          name: string
+          code: string | null
+          tenant_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name: string
+          code?: string | null
+          tenant_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          code?: string | null
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "canteens_tenant_id_fkey"
+            columns: ["tenant_id"]
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
       menu_items: {
         Row: {
           created_at: string
@@ -19,6 +53,7 @@ export interface Database {
           updated_at: string
           veg_non_veg: Database["public"]["Enums"]["food_type"]
           tenant_id: string
+          canteen_id: string
         }
         Insert: {
           created_at?: string
@@ -29,6 +64,7 @@ export interface Database {
           updated_at?: string
           veg_non_veg: Database["public"]["Enums"]["food_type"]
           tenant_id: string
+          canteen_id: string
         }
         Update: {
           created_at?: string
@@ -39,12 +75,19 @@ export interface Database {
           updated_at?: string
           veg_non_veg?: Database["public"]["Enums"]["food_type"]
           tenant_id?: string
+          canteen_id?: string
         }
         Relationships: [
           {
             foreignKeyName: "menu_items_tenant_id_fkey"
             columns: ["tenant_id"]
             referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "menu_items_canteen_id_fkey"
+            columns: ["canteen_id"]
+            referencedRelation: "canteens"
             referencedColumns: ["id"]
           }
         ]
@@ -148,10 +191,12 @@ export interface Database {
           otp_attempts: number
           otp_code: string
           pickup_time: string
+          is_takeaway: boolean
           ready_at: string | null
           status: Database["public"]["Enums"]["order_status"]
           user_id: string
           tenant_id: string
+          canteen_id: string
         }
         Insert: {
           accepted_at?: string | null
@@ -162,10 +207,12 @@ export interface Database {
           otp_attempts?: number
           otp_code: string
           pickup_time: string
+          is_takeaway?: boolean
           ready_at?: string | null
           status?: Database["public"]["Enums"]["order_status"]
           user_id: string
           tenant_id: string
+          canteen_id: string
         }
         Update: {
           accepted_at?: string | null
@@ -176,16 +223,24 @@ export interface Database {
           otp_attempts?: number
           otp_code?: string
           pickup_time?: string
+          is_takeaway?: boolean
           ready_at?: string | null
           status?: Database["public"]["Enums"]["order_status"]
           user_id?: string
           tenant_id?: string
+          canteen_id?: string
         }
         Relationships: [
           {
             foreignKeyName: "orders_user_id_fkey"
             columns: ["user_id"]
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "orders_canteen_id_fkey"
+            columns: ["canteen_id"]
+            referencedRelation: "canteens"
             referencedColumns: ["id"]
           }
         ]
@@ -200,6 +255,7 @@ export interface Database {
           strike_count: number
           suspended_until: string | null
           tenant_id: string
+          canteen_id: string | null
         }
         Insert: {
           created_at?: string
@@ -210,6 +266,7 @@ export interface Database {
           strike_count?: number
           suspended_until?: string | null
           tenant_id: string
+          canteen_id?: string | null
         }
         Update: {
           created_at?: string
@@ -220,12 +277,19 @@ export interface Database {
           strike_count?: number
           suspended_until?: string | null
           tenant_id?: string
+          canteen_id?: string | null
         }
         Relationships: [
           {
             foreignKeyName: "profiles_id_fkey"
             columns: ["id"]
             referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "profiles_canteen_id_fkey"
+            columns: ["canteen_id"]
+            referencedRelation: "canteens"
             referencedColumns: ["id"]
           }
         ]
@@ -304,6 +368,8 @@ export interface Database {
         Args: {
           p_pickup_time: string
           p_items: Json
+          p_is_takeaway?: boolean
+          p_canteen_id?: string | null
         }
         Returns: string
       }
@@ -386,7 +452,7 @@ export interface Database {
         | "PREPARING"
         | "READY"
         | "COLLECTED"
-      user_role: "STUDENT" | "TEACHER" | "STAFF" | "ADMIN" | "SUPER_ADMIN"
+      user_role: "STUDENT" | "TEACHER" | "STAFF" | "ADMIN" | "SUPER_ADMIN" | "UNI_ADMIN" | "CANTEEN_ADMIN"
     }
     CompositeTypes: {
       [_ in never]: never

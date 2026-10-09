@@ -14,7 +14,8 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import StudentDashboard from './pages/StudentDashboard';
 import StaffDashboard from './pages/StaffDashboard';
-import AdminDashboard from './pages/AdminDashboard';
+import UniAdminDashboard from './pages/UniAdminDashboard';
+import CanteenAdminDashboard from './pages/CanteenAdminDashboard';
 import SuperAdminDashboard from './pages/SuperAdminDashboard';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfService from './pages/TermsOfService';
@@ -46,7 +47,11 @@ function NavigationHeader() {
 
         {/* Mobile Toggle */}
         <button
-          className="md:hidden p-2 text-slate-600"
+          type="button"
+          aria-label={isOpen ? 'Close menu' : 'Open menu'}
+          aria-expanded={isOpen}
+          aria-controls="mobile-navigation"
+          className="md:hidden p-2 text-slate-600 rounded-lg focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
           onClick={() => setIsOpen(!isOpen)}
         >
           {isOpen ? <X size={24} /> : <Menu size={24} />}
@@ -55,7 +60,7 @@ function NavigationHeader() {
 
       {/* Mobile Nav Dropdown */}
       {isOpen && (
-        <div className="md:hidden absolute top-full left-4 right-4 mt-2 p-4 bg-white rounded-2xl shadow-xl border border-slate-100 flex flex-col gap-2 z-50">
+        <div id="mobile-navigation" className="md:hidden absolute top-full left-4 right-4 mt-2 p-4 bg-white rounded-2xl shadow-xl border border-slate-100 flex flex-col gap-2 z-50">
           <Link to="/" onClick={() => setIsOpen(false)} className="px-4 py-3 text-slate-700 font-medium hover:bg-slate-50 rounded-xl">Home</Link>
           {!user && !isLoginPage && (
             <Link to="/login" onClick={() => setIsOpen(false)} className="px-4 py-3 bg-indigo-50 text-indigo-700 font-semibold rounded-xl text-center mt-2">Login</Link>
@@ -171,13 +176,18 @@ export default function App() {
                     </ProtectedRoute>
                   } />
                   <Route path="/staff" element={
-                    <ProtectedRoute allowedRoles={['STAFF', 'ADMIN']}>
+                    <ProtectedRoute allowedRoles={['STAFF', 'CANTEEN_ADMIN', 'UNI_ADMIN', 'SUPER_ADMIN']}>
                       <StaffDashboard />
                     </ProtectedRoute>
                   } />
-                  <Route path="/admin" element={
-                    <ProtectedRoute allowedRoles={['ADMIN', 'UNI_ADMIN', 'SUPER_ADMIN']}>
-                      <AdminDashboard />
+                  <Route path="/canteen-admin" element={
+                    <ProtectedRoute allowedRoles={['CANTEEN_ADMIN', 'UNI_ADMIN', 'SUPER_ADMIN']}>
+                      <CanteenAdminDashboard />
+                    </ProtectedRoute>
+                  } />
+                  <Route path="/uni-admin" element={
+                    <ProtectedRoute allowedRoles={['UNI_ADMIN', 'SUPER_ADMIN', 'ADMIN']}>
+                      <UniAdminDashboard />
                     </ProtectedRoute>
                   } />
                   <Route path="/super-admin" element={
