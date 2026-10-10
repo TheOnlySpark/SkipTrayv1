@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/ModalDialogContext';
 import { supabase } from '../lib/supabase';
@@ -12,6 +12,19 @@ import {
   IconStar,
   IconSparkles
 } from '../components/Icons';
+import {
+  Search,
+  LayoutList,
+  LayoutGrid,
+  ChevronLeft,
+  ChevronRight,
+  ChevronDown,
+  ChevronUp,
+  X,
+  Clock,
+  Package,
+  User
+} from 'lucide-react';
 
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 type FoodType = Database['public']['Enums']['food_type'];
@@ -39,6 +52,28 @@ export default function CanteenAdminDashboard() {
   const [submittingReply, setSubmittingReply] = useState(false);
   const [orderFilter, setOrderFilter] = useState<'TODAY' | 'WEEK' | 'MONTH'>('TODAY');
 
+  // Order List Filters, Pagination & View
+  const [orderSearch, setOrderSearch] = useState('');
+  const [orderStatusFilter, setOrderStatusFilter] = useState<'ALL' | 'PLACED' | 'ACCEPTED' | 'PREPARING' | 'READY' | 'COLLECTED' | 'REJECTED'>('ALL');
+  const [orderViewMode, setOrderViewMode] = useState<'TABLE' | 'CARDS'>('TABLE');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [expandedOrderIds, setExpandedOrderIds] = useState<Set<string>>(new Set());
+
+  // Reset pagination on filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [orderSearch, orderStatusFilter, orderFilter]);
+
+  const toggleExpandOrder = (orderId: string) => {
+    setExpandedOrderIds(prev => {
+      const next = new Set(prev);
+      if (next.has(orderId)) next.delete(orderId);
+      else next.add(orderId);
+      return next;
+    });
+  };
+
   const { data: allOrders = [], isLoading: ordersLoading } = useQuery({
     queryKey: ['canteenOrders', orderFilter, currentCanteenId],
     enabled: !!currentCanteenId,
@@ -59,7 +94,7 @@ export default function CanteenAdminDashboard() {
           profiles (name, id_number),
           order_items (
             id, quantity,
-            menu_items (name)
+            menu_items (name, price)
           )
         `)
         .eq('canteen_id', currentCanteenId)
@@ -69,6 +104,44 @@ export default function CanteenAdminDashboard() {
       return (data as any[]) || [];
     }
   });
+
+  // Status counts across all orders in current time range
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = { ALL: allOrders.length };
+    allOrders.forEach(o => {
+      counts[o.status] = (counts[o.status] || 0) + 1;
+    });
+    return counts;
+  }, [allOrders]);
+
+  // Filtered orders
+  const filteredAdminOrders = useMemo(() => {
+    return allOrders.filter(order => {
+      if (orderStatusFilter !== 'ALL' && order.status !== orderStatusFilter) {
+        return false;
+      }
+      if (orderSearch.trim()) {
+        const q = orderSearch.toLowerCase().trim();
+        const matchNum = String(order.order_number || '').includes(q);
+        const matchName = (order.profiles?.name || '').toLowerCase().includes(q);
+        const matchId = (order.profiles?.id_number || '').toLowerCase().includes(q);
+        const matchShortId = (order.id || '').toLowerCase().includes(q);
+        const matchItems = order.order_items?.some((i: any) =>
+          (i.menu_items?.name || '').toLowerCase().includes(q)
+        );
+        if (!matchNum && !matchName && !matchId && !matchShortId && !matchItems) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [allOrders, orderStatusFilter, orderSearch]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredAdminOrders.length / pageSize));
+  const paginatedOrders = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredAdminOrders.slice(start, start + pageSize);
+  }, [filteredAdminOrders, currentPage, pageSize]);
 
   const { data: analytics = { mostSold: [] }, isLoading: analyticsLoading } = useQuery({
     queryKey: ['canteenAnalytics', currentCanteenId],
@@ -408,17 +481,28 @@ export default function CanteenAdminDashboard() {
 
       {/* Order List */}
       <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 shadow-sm">
+        {/* Header with Title, Count & Date Range */}
         <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-6">
-          <h2 className="text-xl font-bold text-slate-800">Order List</h2>
-          <div className="flex gap-2">
+          <div>
+            <div className="flex items-center gap-2.5">
+              <h2 className="text-xl font-bold text-slate-800">Order List</h2>
+              <span className="text-xs font-black bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-0.5 rounded-full">
+                {filteredAdminOrders.length} {filteredAdminOrders.length === 1 ? 'order' : 'orders'}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">Filter, search, and inspect orders across time ranges</p>
+          </div>
+          
+          <div className="flex items-center gap-2">
             {(['TODAY', 'WEEK', 'MONTH'] as const).map(filter => (
               <button
                 key={filter}
                 onClick={() => setOrderFilter(filter)}
-                className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-colors ${orderFilter === filter
-                    ? 'bg-emerald-600 text-white'
+                className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-colors ${
+                  orderFilter === filter
+                    ? 'bg-emerald-600 text-white shadow-sm'
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                  }`}
+                }`}
               >
                 {filter === 'TODAY' ? "Today" : filter === 'WEEK' ? "Past Week" : "Past Month"}
               </button>
@@ -426,55 +510,367 @@ export default function CanteenAdminDashboard() {
           </div>
         </div>
 
+        {/* Toolbar: Search, View Switcher & Status Tabs */}
+        <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between mb-4">
+          {/* Search Input */}
+          <div className="relative flex-1 max-w-md">
+            <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search by Order #, Student Name, Student ID, or Item..."
+              value={orderSearch}
+              onChange={e => setOrderSearch(e.target.value)}
+              className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-800 placeholder:text-slate-400"
+            />
+            {orderSearch && (
+              <button
+                onClick={() => setOrderSearch('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                title="Clear search"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+
+          {/* View Mode Switcher */}
+          <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 self-end md:self-auto shrink-0">
+            <button
+              onClick={() => setOrderViewMode('TABLE')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                orderViewMode === 'TABLE'
+                  ? 'bg-white text-emerald-700 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              <LayoutList size={14} />
+              <span>Table</span>
+            </button>
+            <button
+              onClick={() => setOrderViewMode('CARDS')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                orderViewMode === 'CARDS'
+                  ? 'bg-white text-emerald-700 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              <LayoutGrid size={14} />
+              <span>Cards</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Status Filter Tabs */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-3 mb-4 scrollbar-thin">
+          {[
+            { key: 'ALL', label: 'All', count: statusCounts.ALL || 0 },
+            { key: 'PLACED', label: 'Placed', count: statusCounts.PLACED || 0 },
+            { key: 'ACCEPTED', label: 'Accepted', count: statusCounts.ACCEPTED || 0 },
+            { key: 'PREPARING', label: 'Preparing', count: statusCounts.PREPARING || 0 },
+            { key: 'READY', label: 'Ready', count: statusCounts.READY || 0 },
+            { key: 'COLLECTED', label: 'Collected', count: statusCounts.COLLECTED || 0 },
+            { key: 'REJECTED', label: 'Rejected', count: statusCounts.REJECTED || 0 },
+          ].map(tab => {
+            const isSelected = orderStatusFilter === tab.key;
+            return (
+              <button
+                key={tab.key}
+                onClick={() => setOrderStatusFilter(tab.key as any)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 transition-all border flex items-center gap-1.5 ${
+                  isSelected
+                    ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+                    : tab.count > 0
+                      ? 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                      : 'bg-slate-50 text-slate-400 border-slate-200 opacity-60'
+                }`}
+              >
+                <span>{tab.label}</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+                  isSelected
+                    ? 'bg-slate-700 text-white'
+                    : 'bg-slate-200 text-slate-700'
+                }`}>
+                  {tab.count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Orders Content Area */}
         {ordersLoading ? (
-          <div className="text-slate-500 text-sm">Loading orders...</div>
-        ) : allOrders.length === 0 ? (
-          <div className="text-slate-500 text-sm py-8 text-center bg-slate-50 rounded-2xl border border-slate-100">
-            No orders found for this period.
+          <div className="text-slate-500 text-sm py-16 text-center">Loading orders...</div>
+        ) : filteredAdminOrders.length === 0 ? (
+          <div className="text-slate-500 text-sm py-12 text-center bg-slate-50 rounded-2xl border border-slate-100 space-y-2">
+            <Package size={36} className="w-9 h-9 text-slate-300 mx-auto" />
+            <div className="font-bold text-slate-700">No orders match the current criteria</div>
+            <div className="text-xs text-slate-400">
+              {orderSearch ? `No matches found for "${orderSearch}"` : 'Try selecting a different time range or status filter.'}
+            </div>
+            {(orderSearch || orderStatusFilter !== 'ALL') && (
+              <button
+                onClick={() => { setOrderSearch(''); setOrderStatusFilter('ALL'); }}
+                className="mt-2 text-xs font-bold text-emerald-600 hover:text-emerald-800 underline"
+              >
+                Reset Filters
+              </button>
+            )}
+          </div>
+        ) : orderViewMode === 'TABLE' ? (
+          /* High-Density Compact Table View */
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-extrabold uppercase tracking-wider text-slate-500">
+                  <th className="py-3 px-3.5">Order #</th>
+                  <th className="py-3 px-3.5">Student</th>
+                  <th className="py-3 px-3.5">Items Summary</th>
+                  <th className="py-3 px-3.5">Pickup Slot</th>
+                  <th className="py-3 px-3.5">Status</th>
+                  <th className="py-3 px-3.5">Placed At</th>
+                  <th className="py-3 px-3.5 text-right">Details</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-xs">
+                {paginatedOrders.map(order => {
+                  const isExpanded = expandedOrderIds.has(order.id);
+                  const totalItems = order.order_items?.reduce((s: number, i: any) => s + (i.quantity || 0), 0) || 0;
+                  const totalAmount = order.order_items?.reduce((s: number, i: any) => s + ((Number(i.menu_items?.price) || 0) * (i.quantity || 1)), 0) || 0;
+
+                  return (
+                    <React.Fragment key={order.id}>
+                      <tr 
+                        onClick={() => toggleExpandOrder(order.id)}
+                        className={`hover:bg-slate-50/80 transition-colors cursor-pointer ${
+                          isExpanded ? 'bg-slate-50/50' : ''
+                        }`}
+                      >
+                        <td className="py-3 px-3.5 whitespace-nowrap">
+                          <span className="font-extrabold text-slate-900">#{order.order_number}</span>
+                          <span className="text-[10px] text-slate-400 font-mono block">
+                            {order.id.split('-')[0].toUpperCase()}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3.5 whitespace-nowrap">
+                          <div className="font-semibold text-slate-800">{order.profiles?.name || 'Student'}</div>
+                          <div className="text-[11px] text-slate-400 font-mono">
+                            {order.profiles?.id_number || 'No ID'}
+                          </div>
+                        </td>
+                        <td className="py-3 px-3.5">
+                          <div className="flex items-center gap-1.5 flex-wrap max-w-xs">
+                            <span className="font-bold bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded text-[10px] shrink-0">
+                              {totalItems} {totalItems === 1 ? 'item' : 'items'}
+                            </span>
+                            <span className="text-slate-600 truncate max-w-[200px]" title={order.order_items?.map((i: any) => `${i.quantity}x ${i.menu_items?.name}`).join(', ')}>
+                              {order.order_items?.map((i: any) => `${i.quantity}x ${i.menu_items?.name}`).join(', ')}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="py-3 px-3.5 whitespace-nowrap">
+                          <span className="font-semibold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full text-[11px]">
+                            {formatPickupTime(order.pickup_time)}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3.5 whitespace-nowrap">
+                          <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wider border ${
+                            order.status === 'COLLECTED' ? 'bg-green-50 text-green-700 border-green-200' :
+                            order.status === 'READY' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                            order.status === 'PREPARING' ? 'bg-orange-50 text-orange-700 border-orange-200' :
+                            order.status === 'ACCEPTED' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                            order.status === 'REJECTED' ? 'bg-red-50 text-red-700 border-red-200' :
+                            'bg-slate-100 text-slate-700 border-slate-200'
+                          }`}>
+                            {order.status}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3.5 whitespace-nowrap text-slate-500 text-[11px]">
+                          {new Date(order.created_at).toLocaleDateString()} {new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </td>
+                        <td className="py-3 px-3.5 text-right whitespace-nowrap">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); toggleExpandOrder(order.id); }}
+                            className="text-slate-400 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100 transition-colors"
+                            title="Toggle order details"
+                          >
+                            {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                          </button>
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <tr className="bg-slate-50/70 border-b border-slate-200">
+                          <td colSpan={7} className="p-4">
+                            <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+                              <div className="flex justify-between items-center text-xs border-b border-slate-100 pb-2">
+                                <span className="font-bold text-slate-800">Order Items Breakdown</span>
+                                {totalAmount > 0 && (
+                                  <span className="font-extrabold text-emerald-700">Total: ₹{totalAmount.toFixed(2)}</span>
+                                )}
+                              </div>
+                              <ul className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                                {order.order_items?.map((item: any) => (
+                                  <li key={item.id} className="flex justify-between items-center bg-slate-50 p-2.5 rounded-lg border border-slate-100 text-xs">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-black bg-slate-200 text-slate-800 px-1.5 py-0.5 rounded text-[10px]">
+                                        {item.quantity}x
+                                      </span>
+                                      <span className="font-semibold text-slate-700">{item.menu_items?.name}</span>
+                                    </div>
+                                    {item.menu_items?.price && (
+                                      <span className="text-slate-500 font-mono text-[11px]">
+                                        ₹{(Number(item.menu_items.price) * item.quantity).toFixed(2)}
+                                      </span>
+                                    )}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[400px] overflow-y-auto pr-2">
-            {allOrders.map(order => (
-              <div key={order.id} className="p-5 rounded-2xl border border-slate-200 bg-slate-50 flex flex-col gap-3 hover:border-emerald-200 transition-colors">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h3 className="font-bold text-slate-800">Order #{order.order_number}</h3>
-                    <div className="text-xs text-slate-500 font-mono mt-0.5">ID: {order.id.split('-')[0].toUpperCase()}</div>
-                  </div>
-                  <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${order.status === 'COLLECTED' ? 'bg-green-100 text-green-700' :
-                      order.status === 'REJECTED' ? 'bg-red-100 text-red-700' :
-                        'bg-amber-100 text-amber-700'
+          /* Responsive Card Grid View */
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {paginatedOrders.map(order => (
+              <div key={order.id} className="p-5 rounded-2xl border border-slate-200 bg-slate-50 flex flex-col justify-between gap-3 hover:border-emerald-300 transition-colors shadow-sm bg-white">
+                <div>
+                  <div className="flex justify-between items-start mb-2">
+                    <div>
+                      <h3 className="font-bold text-slate-900 text-base">Order #{order.order_number}</h3>
+                      <div className="text-[11px] text-slate-400 font-mono">ID: {order.id.split('-')[0].toUpperCase()}</div>
+                    </div>
+                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border ${
+                      order.status === 'COLLECTED' ? 'bg-green-50 text-green-700 border-green-200' :
+                      order.status === 'READY' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                      order.status === 'PREPARING' ? 'bg-orange-50 text-orange-700 border-orange-200' :
+                      order.status === 'ACCEPTED' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                      order.status === 'REJECTED' ? 'bg-red-50 text-red-700 border-red-200' :
+                      'bg-slate-100 text-slate-700 border-slate-200'
                     }`}>
-                    {order.status}
-                  </span>
+                      {order.status}
+                    </span>
+                  </div>
+
+                  <div className="text-xs text-slate-700 mb-1">
+                    <span className="font-semibold">{order.profiles?.name || 'Student'}</span>
+                    <span className="text-slate-400 font-mono ml-1.5">({order.profiles?.id_number || 'No ID'})</span>
+                  </div>
+
+                  <div className="text-xs text-indigo-600 font-bold bg-indigo-50 border border-indigo-100 rounded-lg px-2 py-1 inline-block mb-3">
+                    Pickup: {formatPickupTime(order.pickup_time)}
+                  </div>
+
+                  <div className="pt-2.5 border-t border-slate-100">
+                    <ul className="space-y-1">
+                      {order.order_items?.map((item: any) => (
+                        <li key={item.id} className="text-xs text-slate-700 flex justify-between">
+                          <span><span className="font-bold text-slate-900">{item.quantity}x</span> {item.menu_items?.name}</span>
+                          {item.menu_items?.price && (
+                            <span className="text-slate-400 font-mono text-[11px]">
+                              ₹{(Number(item.menu_items.price) * item.quantity).toFixed(0)}
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 </div>
 
-                <div className="text-sm text-slate-600">
-                  <span className="font-semibold">{order.profiles?.name || 'Unknown'}</span> ({order.profiles?.id_number || 'No ID'})
-                </div>
-
-                <div className="text-xs text-slate-500">
-                  Pickup: {formatPickupTime(order.pickup_time)} (Lunch) ΓÇó {new Date(order.created_at).toLocaleDateString()}
-                </div>
-
-                <div className="mt-2 pt-3 border-t border-slate-200">
-                  <ul className="space-y-1">
-                    {order.order_items?.map((item: any) => (
-                      <li key={item.id} className="text-xs text-slate-700">
-                        <span className="font-semibold">{item.quantity}x</span> {item.menu_items?.name}
-                      </li>
-                    ))}
-                  </ul>
+                <div className="text-[11px] text-slate-400 border-t border-slate-100 pt-2 flex justify-between">
+                  <span>{new Date(order.created_at).toLocaleDateString()}</span>
+                  <span>{new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Pagination Bar */}
+        {filteredAdminOrders.length > 0 && (
+          <div className="mt-6 pt-4 border-t border-slate-200 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs text-slate-600">
+            <div className="flex items-center gap-2">
+              <span>
+                Showing <strong>{(currentPage - 1) * pageSize + 1}</strong> to{' '}
+                <strong>{Math.min(currentPage * pageSize, filteredAdminOrders.length)}</strong> of{' '}
+                <strong>{filteredAdminOrders.length}</strong> orders
+              </span>
+              <span className="text-slate-300">|</span>
+              <label className="flex items-center gap-1.5">
+                <span>Per page:</span>
+                <select
+                  value={pageSize}
+                  onChange={e => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
+                  className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                >
+                  <option value={10}>10</option>
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                title="Previous page"
+              >
+                <ChevronLeft size={16} />
+              </button>
+
+              <div className="flex items-center gap-1">
+                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                  .filter(p => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 1)
+                  .map((p, idx, arr) => {
+                    const prev = arr[idx - 1];
+                    return (
+                      <React.Fragment key={p}>
+                        {prev && p - prev > 1 && (
+                          <span className="px-1 text-slate-400">...</span>
+                        )}
+                        <button
+                          onClick={() => setCurrentPage(p)}
+                          className={`w-7 h-7 rounded-lg text-xs font-bold transition-all ${
+                            currentPage === p
+                              ? 'bg-emerald-600 text-white shadow-sm'
+                              : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          {p}
+                        </button>
+                      </React.Fragment>
+                    );
+                  })}
+              </div>
+
+              <button
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                title="Next page"
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
           </div>
         )}
       </div>
 
       {/* Menu Management */}
       <div className="col-span-12 md:col-span-6 bg-white border border-slate-200 rounded-[2rem] p-5 sm:p-8 shadow-sm flex flex-col">
-        <h2 className="text-xl font-bold text-slate-800 mb-6">Manage Menu</h2>
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-xl font-bold text-slate-800">Manage Menu</h2>
+          <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">
+            {menuItems.length} {menuItems.length === 1 ? 'item' : 'items'}
+          </span>
+        </div>
         <form onSubmit={handleAddItem} className="flex flex-col gap-3 mb-8 bg-slate-50 p-4 rounded-xl border border-slate-100">
           <input 
             type="text" 
@@ -512,9 +908,9 @@ export default function CanteenAdminDashboard() {
         </form>
 
         {loading && menuItems.length === 0 ? (
-          <div className="text-slate-500 text-sm flex-1 min-h-[300px] flex items-center justify-center">Loading menu...</div>
+          <div className="text-slate-500 text-sm flex-1 min-h-[200px] flex items-center justify-center">Loading menu...</div>
         ) : (
-          <div className="space-y-3 flex-1 overflow-y-auto min-h-[300px]">
+          <div className="space-y-3 overflow-y-auto max-h-[460px] pr-1.5 scrollbar-thin">
             {menuItems.map(item => (
               <div key={item.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-white border border-slate-200 rounded-xl hover:border-slate-300 transition-colors shadow-sm gap-3">
                 <div className="flex items-center gap-3">
@@ -562,7 +958,7 @@ export default function CanteenAdminDashboard() {
         ) : reviews.length === 0 ? (
           <div className="text-slate-500 text-sm py-4">No reviews yet.</div>
         ) : (
-          <div className="flex flex-col gap-4 flex-1 overflow-y-auto min-h-[300px]">
+          <div className="flex flex-col gap-4 overflow-y-auto max-h-[460px] pr-1.5 scrollbar-thin">
             {reviews.map(review => (
               <div key={review.id} className="p-5 rounded-2xl border border-slate-200 bg-slate-50 flex flex-col gap-3 hover:shadow-md transition-shadow">
                 <div className="flex justify-between items-start">
