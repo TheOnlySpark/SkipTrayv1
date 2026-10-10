@@ -348,6 +348,29 @@ export default function CanteenAdminDashboard() {
     }
   };
 
+  const handleDeleteMenuItem = async (id: string, name: string) => {
+    const confirmed = await showConfirm({
+      title: 'Delete Menu Item',
+      message: `Permanently remove "${name}" from the menu? This cannot be undone.`,
+      confirmText: 'Delete Item',
+      cancelText: 'Keep Item',
+      isDangerous: true,
+    });
+    if (!confirmed) return;
+
+    const { error } = await supabase
+      .from('menu_items')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      showAlert({ title: 'Delete Failed', message: `Could not delete "${name}": ${error.message}`, type: 'error' });
+    } else {
+      setMenuItems(prev => prev.filter(item => item.id !== id));
+      showAlert({ title: 'Item Deleted', message: `"${name}" was removed from the menu.`, type: 'success' });
+    }
+  };
+
   if (!currentCanteenId) {
     return <div className="text-center p-8">You are not assigned to any canteen. Please contact your University Admin.</div>;
   }
@@ -510,6 +533,13 @@ export default function CanteenAdminDashboard() {
                     className="text-[10px] sm:text-xs font-semibold text-slate-500 bg-slate-100 px-2 sm:px-3 py-1.5 rounded-lg hover:bg-slate-200 transition-colors"
                   >
                     {item.is_sold_out ? 'Mark Available' : 'Mark Sold Out'}
+                  </button>
+                  <button
+                    onClick={() => handleDeleteMenuItem(item.id, item.name)}
+                    className="text-[10px] sm:text-xs font-semibold text-rose-500 bg-rose-50 px-2 sm:px-3 py-1.5 rounded-lg hover:bg-rose-100 border border-rose-100 transition-colors"
+                    title="Permanently delete this item"
+                  >
+                    Delete
                   </button>
                 </div>
               </div>

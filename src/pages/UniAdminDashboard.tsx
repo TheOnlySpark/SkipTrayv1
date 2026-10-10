@@ -88,6 +88,17 @@ export default function UniAdminDashboard() {
   };
 
   const handleToggleCanteen = async (canteen: Canteen) => {
+    if (canteen.is_active) {
+      const confirmed = await showConfirm({
+        title: 'Deactivate Canteen',
+        message: `Deactivate "${canteen.name}"? Students will not be able to place new orders for this canteen until it is reactivated.`,
+        confirmText: 'Deactivate',
+        cancelText: 'Keep Active',
+        isDangerous: true,
+      });
+      if (!confirmed) return;
+    }
+
     const { data, error } = await supabase
       .from('canteens')
       .update({ is_active: !canteen.is_active })
