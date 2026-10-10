@@ -36,3 +36,4 @@ SkipTray utilizes the following technology stack to maintain system reliability 
 - **Frontend:** React and Vite (provides a responsive, component-based user interface).
 - **Styling:** TailwindCSS (utility-first CSS framework for consistent UI styling).
 - **Backend & Database:** Supabase (provides PostgreSQL for structured data storage, Row Level Security, and real-time WebSocket subscriptions).
+hiiii
