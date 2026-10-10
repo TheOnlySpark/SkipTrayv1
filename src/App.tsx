@@ -153,7 +153,7 @@ export default function App() {
         <AuthProvider>
           <NotificationProvider>
             <ModalDialogProvider>
-              <Router>
+              <Router basename={import.meta.env.BASE_URL}>
                 <NotificationToast />
                 <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center font-sans text-slate-900 p-4 pt-20 md:p-6 md:pt-24">
                 <TopStickyHeader />
