@@ -84,6 +84,23 @@ export default function StaffDashboard() {
     return { isOverdue: false, minutesOverdue: 0 };
   };
 
+  // Returns true when the QR code is expired (pickup slot + 30 min grace has passed).
+  // Mirrors the server-side check in verify_pickup_otp migration 0036.
+  const isQrExpired = (order: OrderWithDetails): boolean => {
+    if (order.status !== 'READY') return false;
+    try {
+      const createdDate = new Date(order.created_at);
+      const [hours, minutes] = order.pickup_time.split(':').map(Number);
+      if (isNaN(hours) || isNaN(minutes)) return false;
+      const pickupDate = new Date(createdDate);
+      pickupDate.setHours(hours, minutes, 0, 0);
+      const expiryMs = pickupDate.getTime() + 30 * 60 * 1000; // +30 min grace
+      return currentTime > expiryMs;
+    } catch {
+      return false;
+    }
+  };
+
   const { data: assignedCanteen } = useQuery({
     queryKey: ['staffCanteen', profile?.canteen_id],
     queryFn: async () => {
@@ -533,6 +550,7 @@ export default function StaffDashboard() {
 
   const renderOrderCard = (order: OrderWithDetails) => {
     const overdueInfo = getOrderOverdueInfo(order);
+    const qrExpired = isQrExpired(order);
 
     return (
       <div 
@@ -550,6 +568,14 @@ export default function StaffDashboard() {
               <span className="truncate"><strong>No-Show:</strong> {overdueInfo.minutesOverdue}m overdue</span>
             </div>
             <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-bold shrink-0">&gt;10m</span>
+          </div>
+        )}
+
+        {/* QR Expired Banner — scan will require Manual Override (DB: migration 0036) */}
+        {qrExpired && (
+          <div className="bg-rose-50 border border-rose-200 text-rose-800 px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 mb-3">
+            <IconAlertTriangle size={14} className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+            <span className="truncate"><strong>QR Expired</strong> — pickup slot +30 min passed. Scan will require Override.</span>
           </div>
         )}
 
