@@ -233,6 +233,7 @@ export default function CanteenAdminDashboard() {
   const [newItemName, setNewItemName] = useState('');
   const [newItemPrice, setNewItemPrice] = useState('');
   const [newItemType, setNewItemType] = useState<FoodType>('VEG');
+  const [priceError, setPriceError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!currentCanteenId) return;
@@ -316,11 +317,37 @@ export default function CanteenAdminDashboard() {
 
   const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newItemName.trim() || !currentCanteenId || !currentTenantId) return;
+    if (!newItemName.trim()) {
+      showAlert({ title: 'Validation Error', message: 'Item name is required.', type: 'warning' });
+      return;
+    }
+    if (!currentCanteenId || !currentTenantId) {
+      showAlert({ title: 'Error', message: 'Canteen or Tenant information missing.', type: 'error' });
+      return;
+    }
 
-    const parsedPrice = parseFloat(newItemPrice) || 0;
+    const trimmedPrice = newItemPrice.trim();
+    const parsedPrice = Number(trimmedPrice);
+
+    if (
+      trimmedPrice === '' ||
+      isNaN(parsedPrice) ||
+      !Number.isFinite(parsedPrice) ||
+      parsedPrice <= 0
+    ) {
+      setPriceError('Price must be greater than ₹0.');
+      showAlert({
+        title: 'Validation Error',
+        message: 'Price must be greater than ₹0.',
+        type: 'warning'
+      });
+      return;
+    }
+
+    setPriceError(null);
+
     const { data, error } = await supabase.from('menu_items').insert({
-      name: newItemName,
+      name: newItemName.trim(),
       veg_non_veg: newItemType,
       price: parsedPrice,
       tenant_id: currentTenantId,
@@ -336,6 +363,7 @@ export default function CanteenAdminDashboard() {
       setMenuItems([data, ...menuItems]);
       setNewItemName('');
       setNewItemPrice('');
+      setPriceError(null);
     }
   };
 
@@ -461,30 +489,38 @@ export default function CanteenAdminDashboard() {
             maxLength={100}
             className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm text-slate-800"
           />
-          <div className="flex gap-2 items-center">
-            <input 
-              type="number" 
-              placeholder="Price (₹)" 
-              value={newItemPrice}
-              onChange={(e) => setNewItemPrice(e.target.value)}
-              min="0"
-              step="any"
-              className="w-28 px-3.5 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm text-slate-800"
-            />
-            <select 
-              value={newItemType} 
-              onChange={(e) => setNewItemType(e.target.value as FoodType)}
-              className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm text-slate-800"
-            >
-              <option value="VEG">Veg</option>
-              <option value="NON_VEG">Non-Veg</option>
-            </select>
-            <button 
-              type="submit" 
-              className="px-5 py-2 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 active:scale-95 transition-all shrink-0"
-            >
-              Add Item
-            </button>
+          <div className="flex flex-col gap-1">
+            <div className="flex gap-2 items-center">
+              <input 
+                type="number" 
+                placeholder="Price (₹)" 
+                value={newItemPrice}
+                onChange={(e) => {
+                  setNewItemPrice(e.target.value);
+                  if (priceError) setPriceError(null);
+                }}
+                min="0.01"
+                step="any"
+                className={`w-28 px-3.5 py-2 bg-white border ${priceError ? 'border-rose-400 ring-1 ring-rose-400' : 'border-slate-200'} rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm text-slate-800`}
+              />
+              <select 
+                value={newItemType} 
+                onChange={(e) => setNewItemType(e.target.value as FoodType)}
+                className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm text-slate-800"
+              >
+                <option value="VEG">Veg</option>
+                <option value="NON_VEG">Non-Veg</option>
+              </select>
+              <button 
+                type="submit" 
+                className="px-5 py-2 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 active:scale-95 transition-all shrink-0"
+              >
+                Add Item
+              </button>
+            </div>
+            {priceError && (
+              <p className="text-xs text-rose-600 font-semibold mt-0.5">{priceError}</p>
+            )}
           </div>
         </form>
 

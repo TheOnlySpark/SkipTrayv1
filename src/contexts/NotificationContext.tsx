@@ -25,6 +25,7 @@ interface NotificationContextType {
   setIsDrawerOpen: (open: boolean | ((prev: boolean) => boolean)) => void;
   markAsRead: (id: string) => void;
   markAllAsRead: () => void;
+  deleteNotification: (id: string) => void;
   clearAll: () => void;
   dismissToast: () => void;
   browserPermission: NotificationPermission | 'unsupported';
@@ -292,6 +293,15 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     });
   }, [saveNotifications]);
 
+  // Delete a single notification
+  const deleteNotification = useCallback((id: string) => {
+    setNotifications((prev) => {
+      const updated = prev.filter((n) => n.id !== id);
+      saveNotifications(updated);
+      return updated;
+    });
+  }, [saveNotifications]);
+
   // Clear all notifications
   const clearAll = useCallback(() => {
     setNotifications([]);
@@ -321,6 +331,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         setIsDrawerOpen,
         markAsRead,
         markAllAsRead,
+        deleteNotification,
         clearAll,
         dismissToast,
         browserPermission,
