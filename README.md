@@ -22,3 +22,9 @@ SkipTray is a modern, fast, and tactile canteen ordering and management dashboar
 *   **Frontend**: React (v19), Vite, TailwindCSS (v4), Framer Motion, Lucide React
 *   **Backend & Database**: Supabase (PostgreSQL) with Row Level Security (RLS)
 *   **State Management**: React Query (TanStack), React Context API
+
+## Deployment
+
+Pushes to the `dev` branch build and deploy the site to GitHub Pages via `.github/workflows/deploy-dev.yml`.
+
+For the first deployment, enable GitHub Pages in the repository settings and select **GitHub Actions** as the build and deployment source. Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` under **Settings → Secrets and variables → Actions** so the deployed app can connect to Supabase.
