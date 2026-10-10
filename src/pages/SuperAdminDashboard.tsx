@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { useDialog } from '../contexts/ModalDialogContext';
 import { Building, Plus, Users, Search, AlertCircle, CheckCircle, Store, ShoppingBag } from 'lucide-react';
 
 interface Tenant {
@@ -16,6 +17,7 @@ interface Tenant {
 
 export default function SuperAdminDashboard() {
   const { user } = useAuth();
+  const { showConfirm, showAlert } = useDialog();
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -187,9 +189,14 @@ export default function SuperAdminDashboard() {
   };
 
   const handleDeleteTenant = async (tenantId: string, tenantName: string) => {
-    if (!window.confirm(`Are you sure you want to PERMANENTLY delete "${tenantName}" and ALL of its associated users, orders, and menu items? This action cannot be undone.`)) {
-      return;
-    }
+    const confirmed = await showConfirm({
+      title: 'Delete Tenant Permanently',
+      message: `Permanently delete "${tenantName}" and ALL of its associated users, orders, canteens, and menu items?\n\nThis action cannot be undone.`,
+      confirmText: 'Delete Tenant',
+      cancelText: 'Cancel',
+      isDangerous: true,
+    });
+    if (!confirmed) return;
 
     try {
       setError('');
@@ -201,11 +208,11 @@ export default function SuperAdminDashboard() {
       
       setSuccess(`Tenant "${tenantName}" deleted successfully`);
       fetchTenants();
-      setTimeout(() => setSuccess(''), 4000);
+      showAlert({ title: 'Tenant Deleted', message: `"${tenantName}" has been permanently deleted.`, type: 'success' });
     } catch (err: any) {
       console.error('Delete tenant error:', err);
       setError(err.message);
-      setTimeout(() => setError(''), 5000);
+      showAlert({ title: 'Delete Failed', message: err.message, type: 'error' });
     }
   };
 

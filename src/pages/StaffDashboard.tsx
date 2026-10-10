@@ -19,6 +19,7 @@ import {
   IconCamera
 } from '../components/Icons';
 import { QRScannerModal, playSuccessBeep, playErrorBuzzer } from '../components/QRScannerModal';
+import { LayoutList } from 'lucide-react';
 
 type Order = Database['public']['Tables']['orders']['Row'];
 type OrderItem = Database['public']['Tables']['order_items']['Row'];
@@ -41,7 +42,8 @@ export default function StaffDashboard() {
   // Filtering & View State
   const [selectedSlot, setSelectedSlot] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [viewMode, setViewMode] = useState<'KANBAN' | 'GRID'>('KANBAN');
+  const [viewMode, setViewMode] = useState<'KANBAN' | 'GRID' | 'LIST'>('KANBAN');
+  const [compactKanban, setCompactKanban] = useState<boolean>(false);
   const [showBatchSummary, setShowBatchSummary] = useState<boolean>(true);
 
   // Quick OTP & QR Scanner Verification State
@@ -82,6 +84,23 @@ export default function StaffDashboard() {
       // ignore parsing error
     }
     return { isOverdue: false, minutesOverdue: 0 };
+  };
+
+  // Returns true when the QR code is expired (pickup slot + 30 min grace has passed).
+  // Mirrors the server-side check in verify_pickup_otp migration 0036.
+  const isQrExpired = (order: OrderWithDetails): boolean => {
+    if (order.status !== 'READY') return false;
+    try {
+      const createdDate = new Date(order.created_at);
+      const [hours, minutes] = order.pickup_time.split(':').map(Number);
+      if (isNaN(hours) || isNaN(minutes)) return false;
+      const pickupDate = new Date(createdDate);
+      pickupDate.setHours(hours, minutes, 0, 0);
+      const expiryMs = pickupDate.getTime() + 30 * 60 * 1000; // +30 min grace
+      return currentTime > expiryMs;
+    } catch {
+      return false;
+    }
   };
 
   const { data: assignedCanteen } = useQuery({
@@ -533,6 +552,7 @@ export default function StaffDashboard() {
 
   const renderOrderCard = (order: OrderWithDetails) => {
     const overdueInfo = getOrderOverdueInfo(order);
+    const qrExpired = isQrExpired(order);
 
     return (
       <div 
@@ -550,6 +570,14 @@ export default function StaffDashboard() {
               <span className="truncate"><strong>No-Show:</strong> {overdueInfo.minutesOverdue}m overdue</span>
             </div>
             <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-bold shrink-0">&gt;10m</span>
+          </div>
+        )}
+
+        {/* QR Expired Banner — scan will require Manual Override (DB: migration 0036) */}
+        {qrExpired && (
+          <div className="bg-rose-50 border border-rose-200 text-rose-800 px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 mb-3">
+            <IconAlertTriangle size={14} className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+            <span className="truncate"><strong>QR Expired</strong> — pickup slot +30 min passed. Scan will require Override.</span>
           </div>
         )}
 
@@ -579,29 +607,40 @@ export default function StaffDashboard() {
         </div>
 
         {/* Item Breakdown */}
-        <div className="flex-grow my-1">
-          <ul className="space-y-1">
-            {order.order_items.map(item => (
-              <li key={item.id} className="text-xs flex justify-between items-center text-slate-700">
-                <span className="truncate">
-                  <span className="font-bold text-slate-900 bg-slate-100 px-1.5 py-0.5 rounded mr-1.5">{item.quantity}x</span>
-                  {item.menu_items?.name}
-                </span>
-                {item.menu_items?.price !== undefined && item.menu_items?.price !== null && (
-                  <span className="text-[11px] text-slate-400 font-medium ml-2 shrink-0">
-                    ₹{(Number(item.menu_items.price) * item.quantity).toFixed(0)}
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-          <div className="mt-2 pt-1.5 border-t border-dashed border-slate-100 flex justify-between items-center text-[11px] font-bold text-slate-500">
-            <span>Total Value</span>
-            <span className="text-indigo-600 font-extrabold text-xs">
-              ₹{order.order_items.reduce((sum, item) => sum + (Number(item.menu_items?.price || 0) * item.quantity), 0).toFixed(2)}
+        {compactKanban ? (
+          <div className="my-1.5 flex justify-between items-center bg-slate-50 p-2 rounded-xl border border-slate-100 text-xs">
+            <span className="text-slate-700 font-semibold truncate max-w-[180px]">
+              {order.order_items.map(i => `${i.quantity}x ${i.menu_items?.name || 'Item'}`).join(', ')}
+            </span>
+            <span className="text-indigo-600 font-extrabold text-xs ml-2 shrink-0">
+              ₹{order.order_items.reduce((sum, item) => sum + (Number(item.menu_items?.price || 0) * item.quantity), 0).toFixed(0)}
             </span>
           </div>
-        </div>
+        ) : (
+          <div className="flex-grow my-1">
+            <ul className="space-y-1">
+              {order.order_items.map(item => (
+                <li key={item.id} className="text-xs flex justify-between items-center text-slate-700">
+                  <span className="truncate">
+                    <span className="font-bold text-slate-900 bg-slate-100 px-1.5 py-0.5 rounded mr-1.5">{item.quantity}x</span>
+                    {item.menu_items?.name}
+                  </span>
+                  {item.menu_items?.price !== undefined && item.menu_items?.price !== null && (
+                    <span className="text-[11px] text-slate-400 font-medium ml-2 shrink-0">
+                      ₹{(Number(item.menu_items.price) * item.quantity).toFixed(0)}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <div className="mt-2 pt-1.5 border-t border-dashed border-slate-100 flex justify-between items-center text-[11px] font-bold text-slate-500">
+              <span>Total Value</span>
+              <span className="text-indigo-600 font-extrabold text-xs">
+                ₹{order.order_items.reduce((sum, item) => sum + (Number(item.menu_items?.price || 0) * item.quantity), 0).toFixed(2)}
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Action Buttons */}
         <div className="mt-3 pt-2.5 border-t border-slate-100 flex flex-col gap-1.5">
@@ -875,7 +914,32 @@ export default function StaffDashboard() {
                 <IconGrid size={13} className="w-3.5 h-3.5" />
                 <span>Grid</span>
               </button>
+              <button
+                onClick={() => setViewMode('LIST')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  viewMode === 'LIST' 
+                    ? 'bg-white text-indigo-600 shadow-sm' 
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <LayoutList size={13} className="w-3.5 h-3.5" />
+                <span>Compact List</span>
+              </button>
             </div>
+
+            {viewMode === 'KANBAN' && (
+              <button
+                onClick={() => setCompactKanban(!compactKanban)}
+                className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all border ${
+                  compactKanban 
+                    ? 'bg-indigo-50 text-indigo-700 border-indigo-200' 
+                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                }`}
+                title="Toggle card compactness"
+              >
+                {compactKanban ? 'Dense' : 'Normal'}
+              </button>
+            )}
           </div>
         </div>
 
@@ -1068,6 +1132,191 @@ export default function StaffDashboard() {
                 readyOrders.map(renderOrderCard)
               )}
             </div>
+          </div>
+        </div>
+      ) : viewMode === 'LIST' ? (
+        /* High-Density Live Orders Table */
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-extrabold uppercase tracking-wider text-slate-500">
+                  <th className="py-3 px-3.5">Order #</th>
+                  <th className="py-3 px-3.5">Slot / Timing</th>
+                  <th className="py-3 px-3.5">Student</th>
+                  <th className="py-3 px-3.5">Items</th>
+                  <th className="py-3 px-3.5">Status</th>
+                  <th className="py-3 px-3.5">Total</th>
+                  <th className="py-3 px-3.5 text-right">Quick Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-xs">
+                {filteredOrders.map(order => {
+                  const overdueInfo = getOrderOverdueInfo(order);
+                  const qrExpired = isQrExpired(order);
+                  const totalItems = order.order_items.reduce((sum, i) => sum + i.quantity, 0);
+                  const totalAmount = order.order_items.reduce((sum, item) => sum + (Number(item.menu_items?.price || 0) * item.quantity), 0);
+
+                  return (
+                    <tr 
+                      key={order.id} 
+                      className={`hover:bg-slate-50/80 transition-colors ${
+                        overdueInfo.isOverdue ? 'bg-amber-50/30' : ''
+                      }`}
+                    >
+                      <td className="py-3 px-3.5 whitespace-nowrap">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-extrabold text-sm text-slate-900">#{order.order_number}</span>
+                          <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded uppercase ${
+                            order.is_takeaway ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
+                          }`}>
+                            {order.is_takeaway ? 'TAKEAWAY' : 'DINE'}
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-slate-400 font-mono block">
+                          ID: {order.profiles?.id_number || order.id.split('-')[0].toUpperCase()}
+                        </span>
+                      </td>
+
+                      <td className="py-3 px-3.5 whitespace-nowrap">
+                        <span className="font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full text-xs">
+                          {formatPickupTime(order.pickup_time)}
+                        </span>
+                        {overdueInfo.isOverdue && (
+                          <div className="text-[10px] font-bold text-amber-600 mt-1 flex items-center gap-1">
+                            <IconAlertTriangle size={11} className="w-3 h-3 text-amber-600 shrink-0" />
+                            <span>{overdueInfo.minutesOverdue}m overdue</span>
+                          </div>
+                        )}
+                        {qrExpired && !overdueInfo.isOverdue && (
+                          <div className="text-[10px] font-bold text-rose-600 mt-1">
+                            QR Expired
+                          </div>
+                        )}
+                      </td>
+
+                      <td className="py-3 px-3.5 whitespace-nowrap">
+                        <div className="font-semibold text-slate-800">{order.profiles?.name || 'Student'}</div>
+                        <div className="text-[11px] text-slate-400 font-mono">{order.profiles?.id_number || 'No ID'}</div>
+                      </td>
+
+                      <td className="py-3 px-3.5 max-w-xs">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-bold bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded text-[10px] shrink-0">
+                            {totalItems}x
+                          </span>
+                          <span className="text-slate-600 truncate max-w-[200px]" title={order.order_items.map(i => `${i.quantity}x ${i.menu_items?.name}`).join(', ')}>
+                            {order.order_items.map(i => `${i.quantity}x ${i.menu_items?.name}`).join(', ')}
+                          </span>
+                        </div>
+                      </td>
+
+                      <td className="py-3 px-3.5 whitespace-nowrap">
+                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wide border ${
+                          order.status === 'PLACED' ? 'bg-slate-100 text-slate-700 border-slate-300' :
+                          order.status === 'ACCEPTED' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                          order.status === 'PREPARING' ? 'bg-orange-50 text-orange-700 border-orange-200' :
+                          'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        }`}>
+                          {order.status}
+                        </span>
+                      </td>
+
+                      <td className="py-3 px-3.5 whitespace-nowrap font-extrabold text-slate-800">
+                        ₹{totalAmount.toFixed(0)}
+                      </td>
+
+                      <td className="py-3 px-3.5 text-right whitespace-nowrap">
+                        {order.status === 'PLACED' && (
+                          <div className="flex justify-end gap-1.5">
+                            <button
+                              onClick={() => updateOrderStatus(order.id, 'ACCEPTED')}
+                              className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors"
+                            >
+                              Accept
+                            </button>
+                            <button
+                              onClick={() => updateOrderStatus(order.id, 'REJECTED')}
+                              className="px-2 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-lg text-xs font-bold transition-colors"
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        )}
+
+                        {order.status === 'ACCEPTED' && (
+                          <button
+                            onClick={() => updateOrderStatus(order.id, 'PREPARING')}
+                            className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 ml-auto"
+                          >
+                            <IconCooking size={13} className="w-3.5 h-3.5" />
+                            <span>Start Prep</span>
+                          </button>
+                        )}
+
+                        {order.status === 'PREPARING' && (
+                          <button
+                            onClick={() => updateOrderStatus(order.id, 'READY')}
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 ml-auto"
+                          >
+                            <IconCheckCircle size={13} className="w-3.5 h-3.5" />
+                            <span>Mark Ready</span>
+                          </button>
+                        )}
+
+                        {order.status === 'READY' && (
+                          <div className="flex items-center justify-end gap-1.5">
+                            {selectedOrderForOtp === order.id ? (
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="text"
+                                  placeholder="OTP"
+                                  value={otpInput}
+                                  onChange={(e) => setOtpInput(e.target.value)}
+                                  autoComplete="off"
+                                  maxLength={6}
+                                  className="w-16 px-1.5 py-1 border border-slate-300 rounded-lg text-center font-mono text-xs focus:ring-1 focus:ring-indigo-500 text-slate-900"
+                                />
+                                <button
+                                  onClick={() => handleVerifyOtp(order.id)}
+                                  className="px-2 py-1 bg-slate-900 text-white rounded-lg text-xs font-bold hover:bg-slate-800"
+                                >
+                                  OK
+                                </button>
+                                <button
+                                  onClick={() => { setSelectedOrderForOtp(null); setOtpInput(''); }}
+                                  className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+                                >
+                                  <IconX size={12} />
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => setSelectedOrderForOtp(order.id)}
+                                className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1"
+                              >
+                                <IconKey size={13} className="w-3 h-3 text-indigo-300" />
+                                <span>Verify</span>
+                              </button>
+                            )}
+
+                            {overdueInfo.isOverdue && (
+                              <button
+                                onClick={() => handleMarkNoShow(order)}
+                                className="px-2 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-bold transition-colors"
+                                title="Issue strike to student"
+                              >
+                                Strike
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
       ) : (
