@@ -14,7 +14,9 @@ import {
   IconX, 
   IconChevronUp,
   IconQrCode,
-  IconMaximize
+  IconMaximize,
+  IconSearch,
+  IconPackage
 } from '../components/Icons';
 import { QRCodeSVG } from '../components/QRCode';
 import { calculateOrderLedger } from '../lib/ledger';
@@ -45,6 +47,8 @@ import {
 
 export { formatPickupTime, LUNCH_SLOTS };
 
+import { getItemCategory, FoodCategory } from '../lib/menuCategories';
+export { getItemCategory, type FoodCategory };
 
 export default function StudentDashboard() {
   const { profile, signOut } = useAuth();
@@ -54,6 +58,11 @@ export default function StudentDashboard() {
   const [pastOrders, setPastOrders] = useState<PastOrder[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   
+  // Food Search & Filter States
+  const [foodSearchQuery, setFoodSearchQuery] = useState('');
+  const [foodTypeFilter, setFoodTypeFilter] = useState<'ALL' | 'VEG' | 'NON_VEG'>('ALL');
+  const [categoryFilter, setCategoryFilter] = useState<'ALL' | 'PACKED_FOOD' | 'MEALS' | 'DRINKS'>('ALL');
+
   const [cart, setCart] = useState<{item: MenuItem, quantity: number}[]>([]);
   const [pickupTime, setPickupTime] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -243,6 +252,38 @@ export default function StudentDashboard() {
     },
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
+
+  // Filtered menu items combining Search, Veg/Non-Veg, and Category filters with strict AND logic
+  const filteredMenuItems = useMemo(() => {
+    const trimmedQuery = foodSearchQuery.trim().toLowerCase();
+    return menuItems.filter(item => {
+      // 1. Food Search (by name, case-insensitive partial match)
+      if (trimmedQuery) {
+        const itemName = (item.name || '').toLowerCase();
+        if (!itemName.includes(trimmedQuery)) {
+          return false;
+        }
+      }
+
+      // 2. Veg / Non-Veg Type Filter
+      if (foodTypeFilter === 'VEG' && item.veg_non_veg !== 'VEG') {
+        return false;
+      }
+      if (foodTypeFilter === 'NON_VEG' && item.veg_non_veg !== 'NON_VEG') {
+        return false;
+      }
+
+      // 3. Category Filter
+      if (categoryFilter !== 'ALL') {
+        const itemCat = getItemCategory(item);
+        if (categoryFilter === 'PACKED_FOOD' && itemCat !== 'Packed Food') return false;
+        if (categoryFilter === 'MEALS' && itemCat !== 'Meals') return false;
+        if (categoryFilter === 'DRINKS' && itemCat !== 'Drinks') return false;
+      }
+
+      return true;
+    });
+  }, [menuItems, foodSearchQuery, foodTypeFilter, categoryFilter]);
 
   const { data: pastOrdersData = [], isLoading: pastOrdersLoading } = useQuery({
     queryKey: ['pastOrders', profile?.id],
@@ -907,35 +948,201 @@ export default function StudentDashboard() {
               )}
             </div>
 
-            <div className="grid grid-cols-3 gap-2 sm:gap-4">
-              {menuItems.map(item => (
-                <div key={item.id} className={`flex flex-col justify-between p-5 rounded-2xl border transition-all ${item.is_sold_out ? 'bg-slate-50 border-slate-100 opacity-60' : 'bg-white border-slate-200 hover:border-indigo-300 hover:shadow-md'}`}>
-                  <div>
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className={`w-2.5 h-2.5 rounded-full shadow-sm ${item.veg_non_veg === 'VEG' ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                      {item.is_sold_out && <span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full uppercase tracking-wider">Sold Out</span>}
-                    </div>
-                    <h3 className="font-bold text-slate-800 leading-tight">{item.name}</h3>
-                    <div className="text-sm font-extrabold text-indigo-600 mt-1.5">₹{Number(item.price || 0).toFixed(2)}</div>
-                  </div>
-                  
-                  <div className="mt-4 flex items-center justify-between">
-                    <span className="text-xs font-medium text-slate-400">{item.veg_non_veg === 'VEG' ? 'Veg' : 'Non-Veg'}</span>
-                    {!item.is_sold_out ? (
-                      <button 
-                        onClick={() => addToCart(item)}
-                        disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cartTotalItems >= 5}
-                        className="w-10 h-10 flex items-center justify-center bg-indigo-50 text-indigo-600 rounded-xl font-bold hover:bg-indigo-600 hover:text-white transition-colors disabled:opacity-50 disabled:hover:bg-indigo-50 disabled:hover:text-indigo-600 shadow-sm"
-                      >
-                        +
-                      </button>
-                    ) : (
-                      <div className="h-10"></div>
-                    )}
-                  </div>
+            {/* Menu Search and Filter Controls */}
+            <div className="space-y-3 mb-6 bg-slate-50/70 border border-slate-200/80 rounded-2xl p-3 sm:p-4">
+              {/* Food Search Bar */}
+              <div className="relative group">
+                <div className="relative flex items-center bg-white border border-slate-300 focus-within:border-indigo-600 focus-within:ring-2 focus-within:ring-indigo-100 rounded-xl shadow-sm transition-all overflow-hidden">
+                  <IconSearch size={16} className="w-4 h-4 text-slate-400 ml-3.5 shrink-0 pointer-events-none" />
+                  <input
+                    type="text"
+                    placeholder="Search food items..."
+                    value={foodSearchQuery}
+                    onChange={e => setFoodSearchQuery(e.target.value)}
+                    className="w-full pl-2.5 pr-10 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none"
+                  />
+                  {foodSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setFoodSearchQuery('')}
+                      className="absolute right-2.5 p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
+                      title="Clear search"
+                    >
+                      <IconX size={14} className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
-              ))}
+              </div>
+
+              {/* Filter Buttons: Veg / Non-Veg & Categories */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+                {/* Food Type Filter (All / Veg / Non-Veg) */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mr-1 hidden xs:inline">Type:</span>
+                  <button
+                    type="button"
+                    onClick={() => setFoodTypeFilter('ALL')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
+                      foodTypeFilter === 'ALL'
+                        ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    All
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFoodTypeFilter('VEG')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 ${
+                      foodTypeFilter === 'VEG'
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                        : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50'
+                    }`}
+                  >
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-emerald-300"></span>
+                    <span>Veg</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFoodTypeFilter('NON_VEG')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 ${
+                      foodTypeFilter === 'NON_VEG'
+                        ? 'bg-rose-600 text-white border-rose-600 shadow-sm'
+                        : 'bg-white text-rose-700 border-rose-200 hover:bg-rose-50'
+                    }`}
+                  >
+                    <span className="w-2 h-2 rounded-full bg-rose-500 ring-2 ring-rose-300"></span>
+                    <span>Non-Veg</span>
+                  </button>
+                </div>
+
+                {/* Category Filter (All Categories / Packed Food / Meals / Drinks) */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mr-1 hidden xs:inline">Category:</span>
+                  <button
+                    type="button"
+                    onClick={() => setCategoryFilter('ALL')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
+                      categoryFilter === 'ALL'
+                        ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    All Categories
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCategoryFilter('PACKED_FOOD')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1 ${
+                      categoryFilter === 'PACKED_FOOD'
+                        ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-amber-50 hover:text-amber-800 hover:border-amber-200'
+                    }`}
+                  >
+                    <span>Packed Food</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCategoryFilter('MEALS')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1 ${
+                      categoryFilter === 'MEALS'
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-indigo-50 hover:text-indigo-800 hover:border-indigo-200'
+                    }`}
+                  >
+                    <span>Meals</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCategoryFilter('DRINKS')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1 ${
+                      categoryFilter === 'DRINKS'
+                        ? 'bg-cyan-600 text-white border-cyan-600 shadow-sm'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-cyan-50 hover:text-cyan-800 hover:border-cyan-200'
+                    }`}
+                  >
+                    <span>Drinks</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Active Filter Indicators & Reset Link */}
+              {(foodSearchQuery.trim() || foodTypeFilter !== 'ALL' || categoryFilter !== 'ALL') && (
+                <div className="flex items-center justify-between pt-2 border-t border-slate-200/60 text-xs">
+                  <span className="text-slate-500 font-medium">
+                    Showing <strong className="text-slate-800">{filteredMenuItems.length}</strong> of {menuItems.length} items
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFoodSearchQuery('');
+                      setFoodTypeFilter('ALL');
+                      setCategoryFilter('ALL');
+                    }}
+                    className="text-indigo-600 hover:text-indigo-800 font-bold transition-colors hover:underline"
+                  >
+                    Reset all filters
+                  </button>
+                </div>
+              )}
             </div>
+
+            {/* Empty State when No Menu Items Match */}
+            {filteredMenuItems.length === 0 ? (
+              <div className="py-12 px-4 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                <IconPackage size={36} className="w-9 h-9 text-slate-300 mx-auto mb-2" />
+                <h3 className="text-base font-bold text-slate-700">No Food Items Found</h3>
+                <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1">
+                  No items matched your current search and filter criteria. Try adjusting your search query, food type, or category.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFoodSearchQuery('');
+                    setFoodTypeFilter('ALL');
+                    setCategoryFilter('ALL');
+                  }}
+                  className="mt-3 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm"
+                >
+                  Reset Filters
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-2 sm:gap-4">
+                {filteredMenuItems.map(item => (
+                  <div key={item.id} className={`flex flex-col justify-between p-5 rounded-2xl border transition-all ${item.is_sold_out ? 'bg-slate-50 border-slate-100 opacity-60' : 'bg-white border-slate-200 hover:border-indigo-300 hover:shadow-md'}`}>
+                    <div>
+                      <div className="flex items-center justify-between gap-2 mb-3">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-2.5 h-2.5 rounded-full shadow-sm ${item.veg_non_veg === 'VEG' ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                          <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">
+                            {getItemCategory(item)}
+                          </span>
+                        </div>
+                        {item.is_sold_out && <span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full uppercase tracking-wider">Sold Out</span>}
+                      </div>
+                      <h3 className="font-bold text-slate-800 leading-tight">{item.name}</h3>
+                      <div className="text-sm font-extrabold text-indigo-600 mt-1.5">₹{Number(item.price || 0).toFixed(2)}</div>
+                    </div>
+                    
+                    <div className="mt-4 flex items-center justify-between">
+                      <span className="text-xs font-medium text-slate-400">{item.veg_non_veg === 'VEG' ? 'Veg' : 'Non-Veg'}</span>
+                      {!item.is_sold_out ? (
+                        <button 
+                          onClick={() => addToCart(item)}
+                          disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cartTotalItems >= 5}
+                          className="w-10 h-10 flex items-center justify-center bg-indigo-50 text-indigo-600 rounded-xl font-bold hover:bg-indigo-600 hover:text-white transition-colors disabled:opacity-50 disabled:hover:bg-indigo-50 disabled:hover:text-indigo-600 shadow-sm"
+                        >
+                          +
+                        </button>
+                      ) : (
+                        <div className="h-10"></div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Floating Bottom Cart Bar */}

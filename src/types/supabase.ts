@@ -106,6 +106,7 @@ export interface Database {
       }
       menu_items: {
         Row: {
+          category: string | null
           created_at: string
           id: string
           is_sold_out: boolean
@@ -117,6 +118,7 @@ export interface Database {
           canteen_id: string
         }
         Insert: {
+          category?: string | null
           created_at?: string
           id?: string
           is_sold_out?: boolean
@@ -128,6 +130,7 @@ export interface Database {
           canteen_id: string
         }
         Update: {
+          category?: string | null
           created_at?: string
           id?: string
           is_sold_out?: boolean
