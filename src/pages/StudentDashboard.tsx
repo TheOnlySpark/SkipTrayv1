@@ -333,13 +333,17 @@ export default function StudentDashboard() {
       if (createError) throw createError;
 
       // 4. Initialize ZohoPay Widget Popup
-      // 4. Initialize ZohoPay Widget Popup
-      if (!(window as any).ZohoPay) {
+      if (!(window as any).ZohoPay || (window as any).ZohoPay.__isMock) {
         console.warn("ZohoPay SDK is not loaded. Mocking visual payment popup.");
         
-        // Create a visual mock ZohoPay popup
+        // Create or update visual mock ZohoPay popup
         (window as any).ZohoPay = {
+          __isMock: true,
           checkout: (options: any) => {
+            const payableAmount = typeof options?.amount === 'number'
+              ? options.amount
+              : Number(options?.amount || ledger.gross_payable);
+
             const overlay = document.createElement('div');
             overlay.style.position = 'fixed';
             overlay.style.top = '0';
@@ -363,7 +367,7 @@ export default function StudentDashboard() {
               <h2 style="font-size: 24px; font-weight: bold; margin-bottom: 8px;">ZohoPay Mock Popup</h2>
               <p style="color: #64748b; margin-bottom: 24px;">This is a test payment screen.</p>
               <div style="display: flex; gap: 12px; justify-content: center;">
-                <button id="mock-success-btn" style="background-color: #22c55e; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold;">Pay ₹${ledger.gross_payable.toFixed(2)}</button>
+                <button id="mock-success-btn" style="background-color: #22c55e; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold;">Pay ₹${payableAmount.toFixed(2)}</button>
                 <button id="mock-cancel-btn" style="background-color: #ef4444; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold;">Cancel</button>
               </div>
             `;
@@ -389,7 +393,8 @@ export default function StudentDashboard() {
       }
 
       const zohoOptions = {
-        sessionId: createData.session_id,
+        sessionId: createData?.session_id,
+        amount: ledger.gross_payable,
         onSuccess: async function (response: any) {
           try {
             // 5. Verify and Create Order
