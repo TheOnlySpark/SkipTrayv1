@@ -911,9 +911,9 @@ export default function StudentDashboard() {
                         aria-label="Close order section"
                         title="Close"
                         style={{
-                          background: 'rgba(255,255,255,0.08)',
-                          border: 'none',
-                          color: '#94a3b8',
+                          background: 'rgba(239, 68, 68, 0.12)',
+                          border: '1px solid rgba(239, 68, 68, 0.25)',
+                          color: '#ef4444',
                           padding: '0.375rem',
                           borderRadius: '0.5rem',
                           cursor: 'pointer',
@@ -923,7 +923,7 @@ export default function StudentDashboard() {
                           transition: 'all 0.2s',
                         }}
                       >
-                        <IconX size={18} className="w-4.5 h-4.5" />
+                        <IconX size={18} className="w-4.5 h-4.5 text-red-500" />
                       </button>
                     </div>
 
