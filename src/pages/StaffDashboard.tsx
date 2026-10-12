@@ -4,7 +4,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/ModalDialogContext';
 import { supabase } from '../lib/supabase';
 import { Database } from '../types/supabase';
-import { formatPickupTime, LUNCH_SLOTS, fetchLunchSlotConfig, generateSlotsFromConfig, LunchSlot } from '../lib/lunchSlots';
+import { formatPickupTime, parseTimeToMinutes, LUNCH_SLOTS, fetchLunchSlotConfig, generateSlotsFromConfig, LunchSlot } from '../lib/lunchSlots';
+import { getPrepUrgencyStatus } from '../lib/smartScheduling';
 import {
   IconAlertTriangle,
   IconCheckCircle,
@@ -42,6 +43,7 @@ export default function StaffDashboard() {
   const [selectedSlot, setSelectedSlot] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [viewMode, setViewMode] = useState<'KANBAN' | 'GRID'>('KANBAN');
+  const [sortByPrepStart, setSortByPrepStart] = useState<boolean>(true);
   const [showBatchSummary, setShowBatchSummary] = useState<boolean>(true);
   const [configuredSlots, setConfiguredSlots] = useState<LunchSlot[]>([]);
 
@@ -572,12 +574,19 @@ export default function StaffDashboard() {
     return orders.filter(order => matchesOrderSearch(order, searchQuery));
   }, [orders, searchQuery]);
 
-  // Filter orders by Slot and Search Query
+  // Helper to extract planned prep start minutes for kitchen cooking sequence
+  const getOrderPrepStartMinutes = (order: OrderWithDetails): number => {
+    const prepTime = (order as any).planned_prep_start_time || (order as any).requested_pickup_time || order.pickup_time || '';
+    if (!prepTime) return 9999;
+    return parseTimeToMinutes(prepTime);
+  };
+
+  // Filter orders by Slot and Search Query, and sort by Planned Prep Start Time sequence
   const filteredOrders = useMemo(() => {
-    return orders.filter(order => {
+    const matched = orders.filter(order => {
       // Slot filtering
       if (selectedSlot !== 'ALL') {
-        const orderTime = order.pickup_time || '';
+        const orderTime = (order as any).requested_pickup_time || order.pickup_time || '';
         if (orderTime !== selectedSlot && !orderTime.startsWith(selectedSlot)) {
           return false;
         }
@@ -590,7 +599,18 @@ export default function StaffDashboard() {
       }
       return true;
     });
-  }, [orders, selectedSlot, searchQuery]);
+
+    if (sortByPrepStart) {
+      return [...matched].sort((a, b) => {
+        const aMin = getOrderPrepStartMinutes(a);
+        const bMin = getOrderPrepStartMinutes(b);
+        if (aMin !== bMin) return aMin - bMin;
+        return (a.order_number || 0) - (b.order_number || 0);
+      });
+    }
+
+    return matched;
+  }, [orders, selectedSlot, searchQuery, sortByPrepStart]);
 
   // Count of matches found in other slots when a specific slot filter is active
   const otherSlotMatchesCount = useMemo(() => {
@@ -648,6 +668,7 @@ export default function StaffDashboard() {
 
   const renderOrderCard = (order: OrderWithDetails) => {
     const overdueInfo = getOrderOverdueInfo(order);
+    const urgency = getPrepUrgencyStatus(order as any, currentTime);
 
     return (
       <div 
@@ -668,13 +689,60 @@ export default function StaffDashboard() {
           </div>
         )}
 
+        {/* Live Kitchen Preparation Urgency Status Banner */}
+        {order.status !== 'COLLECTED' && (
+          <div className="mb-2.5">
+            {urgency.stage === 'START_NOW' ? (
+              <div className="bg-amber-500/15 border border-amber-500/40 text-amber-900 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center justify-between gap-1.5">
+                <span className="flex items-center gap-1.5 min-w-0">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping shrink-0" />
+                  <span className="truncate">⚡ {urgency.label}</span>
+                </span>
+                <span className="text-[10px] bg-amber-500 text-white px-1.5 py-0.5 rounded font-extrabold shrink-0">
+                  URGENT
+                </span>
+              </div>
+            ) : urgency.stage === 'UPCOMING' ? (
+              <div className="bg-blue-50 border border-blue-200 text-blue-800 px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-between gap-1.5">
+                <span className="flex items-center gap-1.5 min-w-0">
+                  <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
+                  <span className="truncate">{urgency.label}</span>
+                </span>
+                <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-bold shrink-0">
+                  {(order as any).planned_prep_start_time ? formatPickupTime((order as any).planned_prep_start_time) : 'UPCOMING'}
+                </span>
+              </div>
+            ) : urgency.stage === 'COOKING' ? (
+              <div className="bg-orange-50 border border-orange-200 text-orange-800 px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-between gap-1.5">
+                <span className="flex items-center gap-1.5 min-w-0">
+                  <IconCooking size={13} className="w-3.5 h-3.5 text-orange-600 shrink-0" />
+                  <span className="truncate">{urgency.label}</span>
+                </span>
+                <span className="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded font-bold shrink-0">
+                  IN KITCHEN
+                </span>
+              </div>
+            ) : urgency.stage === 'READY' ? (
+              <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-between gap-1.5">
+                <span className="flex items-center gap-1.5 min-w-0">
+                  <IconCheckCircle size={13} className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span className="truncate">{urgency.label}</span>
+                </span>
+                <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-bold shrink-0">
+                  HOT & READY
+                </span>
+              </div>
+            ) : null}
+          </div>
+        )}
+
         {/* Card Header */}
         <div className="flex justify-between items-start gap-2 mb-2 pb-2 border-b border-slate-100">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <span className="font-extrabold text-base text-slate-900">#{order.order_number}</span>
-              <span className="text-xs font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">
-                {formatPickupTime(order.pickup_time)}
+              <span className="text-xs font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full" title="Student Expected Arrival Pickup Time">
+                {formatPickupTime((order as any).requested_pickup_time || order.pickup_time)}
               </span>
               <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase ${order.is_takeaway ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-emerald-100 text-emerald-700 border border-emerald-200'}`}>
                 {order.is_takeaway ? 'TAKEAWAY' : 'DINE-IN'}
@@ -690,6 +758,28 @@ export default function StaffDashboard() {
             'bg-emerald-50 text-emerald-700 border-emerald-200'
           }`}>
             {order.status}
+          </div>
+        </div>
+
+        {/* Smart Preparation Scheduling Metrics */}
+        <div className="bg-slate-50 border border-slate-100 rounded-xl p-2.5 my-1.5 grid grid-cols-3 gap-2 text-center">
+          <div className="min-w-0">
+            <span className="block text-[10px] uppercase font-bold text-slate-400 truncate">Prep Starts</span>
+            <span className="block text-xs font-black text-amber-700 truncate">
+              {(order as any).planned_prep_start_time ? formatPickupTime((order as any).planned_prep_start_time) : '—'}
+            </span>
+          </div>
+          <div className="min-w-0">
+            <span className="block text-[10px] uppercase font-bold text-slate-400 truncate">Prep Time</span>
+            <span className="block text-xs font-bold text-slate-700 truncate">
+              {(order as any).estimated_prep_duration_minutes ? `${(order as any).estimated_prep_duration_minutes}m` : '10m'}
+            </span>
+          </div>
+          <div className="min-w-0">
+            <span className="block text-[10px] uppercase font-bold text-slate-400 truncate">Target Ready</span>
+            <span className="block text-xs font-black text-emerald-700 truncate">
+              {formatPickupTime((order as any).target_ready_by_time || (order as any).requested_pickup_time || order.pickup_time)}
+            </span>
           </div>
         </div>
 
@@ -977,6 +1067,20 @@ export default function StaffDashboard() {
             >
               <IconCooking size={14} className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
               <span>Kitchen Batch Prep</span>
+            </button>
+
+            {/* Sort by Planned Prep Start Time Sequence */}
+            <button
+              onClick={() => setSortByPrepStart(!sortByPrepStart)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 ${
+                sortByPrepStart
+                  ? 'bg-amber-50 text-amber-900 border-amber-300 shadow-sm'
+                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+              }`}
+              title="Sort orders by Planned Preparation Start Time for kitchen cooking sequence"
+            >
+              <span className={sortByPrepStart ? 'text-amber-600' : 'text-slate-400'}>⚡</span>
+              <span>{sortByPrepStart ? 'Prep Sequence' : 'Default Order'}</span>
             </button>
 
             <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">

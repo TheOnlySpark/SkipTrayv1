@@ -86,6 +86,72 @@ serve(async (req) => {
       }
     }
 
+    // Smart Preparation Scheduling Calculation & Capacity Validation
+    let defaultPrepMinutes = 10;
+    let maxCapacity = 15;
+    if (slotConfig) {
+      defaultPrepMinutes = slotConfig.default_prep_time_minutes || 10;
+      maxCapacity = slotConfig.max_concurrent_orders || 15;
+    }
+
+    // Fetch prep time for menu items
+    let maxItemPrep = defaultPrepMinutes;
+    let totalItemsCount = 0;
+    if (Array.isArray(cart_items) && cart_items.length > 0) {
+      const itemIds = cart_items.map((i: any) => i.id);
+      const { data: menuData } = await supabase
+        .from('menu_items')
+        .select('id, prep_time_minutes')
+        .in('id', itemIds);
+
+      const prepMap: Record<string, number> = {};
+      (menuData || []).forEach((m: any) => {
+        prepMap[m.id] = m.prep_time_minutes || defaultPrepMinutes;
+      });
+
+      for (const ci of cart_items) {
+        const itemPrep = prepMap[ci.id] || defaultPrepMinutes;
+        if (itemPrep > maxItemPrep) maxItemPrep = itemPrep;
+        totalItemsCount += Number(ci.quantity) || 1;
+      }
+    }
+
+    // Commercial kitchen concurrency formula
+    const prepDurationMinutes = Math.min(35, Math.max(8, maxItemPrep + Math.min(10, Math.max(0, totalItemsCount - 1))));
+
+    // Calculate timestamps (IST: +05:30)
+    const todayStr = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
+    const requestedPickupTimeIso = `${todayStr}T${startTimeStr}:00+05:30`;
+    const requestedPickupMs = new Date(requestedPickupTimeIso).getTime();
+    const plannedPrepStartMs = requestedPickupMs - (prepDurationMinutes * 60 * 1000);
+    const plannedPrepStartIso = new Date(plannedPrepStartMs).toISOString();
+    const targetReadyByIso = requestedPickupTimeIso;
+
+    // Check preparation start time is not in the past (allow 1 min grace)
+    const nowMs = Date.now();
+    if (plannedPrepStartMs < (nowMs - 60000)) {
+      const earliestFeasibleMs = nowMs + (prepDurationMinutes + 2) * 60 * 1000;
+      const earliestDate = new Date(earliestFeasibleMs);
+      const earliestH = String(earliestDate.getHours()).padStart(2, '0');
+      const earliestM = String(earliestDate.getMinutes()).padStart(2, '0');
+      throw new Error(`Kitchen needs ${prepDurationMinutes} minutes to prepare this order. Earliest pickup time is ${earliestH}:${earliestM}.`);
+    }
+
+    // Kitchen Capacity Check for this canteen
+    if (canteen_id) {
+      const { count: activeCount } = await supabase
+        .from('orders')
+        .select('id', { count: 'exact', head: true })
+        .eq('canteen_id', canteen_id)
+        .in('status', ['PLACED', 'ACCEPTED', 'PREPARING'])
+        .gte('planned_prep_start_time', new Date(plannedPrepStartMs - 10 * 60 * 1000).toISOString())
+        .lte('planned_prep_start_time', new Date(plannedPrepStartMs + 10 * 60 * 1000).toISOString());
+
+      if (typeof activeCount === 'number' && activeCount >= maxCapacity) {
+        throw new Error(`Kitchen is currently at peak capacity (${maxCapacity} orders) for this timeframe. Please select a pickup time 15 minutes later.`);
+      }
+    }
+
     // Verify payment with ZohoPay API
     const zohoPaySecret = Deno.env.get("ZOHOPAY_SECRET_KEY");
     if (zohoPaySecret && zohoPaySecret !== "mock") {
@@ -133,7 +199,7 @@ serve(async (req) => {
       throw paymentError;
     }
 
-    // Insert order securely with unique idempotency_key and linking the payment
+    // Insert order securely with unique idempotency_key, smart scheduling fields, and payment link
     const { data: newOrder, error: orderError } = await supabase
       .from('orders')
       .insert({
@@ -141,11 +207,17 @@ serve(async (req) => {
         canteen_id,
         tenant_id,
         pickup_time,
+        requested_pickup_time: requestedPickupTimeIso,
+        estimated_prep_duration_minutes: prepDurationMinutes,
+        planned_prep_start_time: plannedPrepStartIso,
+        target_ready_by_time: targetReadyByIso,
         is_takeaway,
         status: 'PLACED',
         otp_code: generateOTP(),
         idempotency_key,
-        payment_id: paymentRecord.id
+        payment_id: paymentRecord.id,
+        total_tax_amount: Number(ledger?.total_tax_amount ?? ledger?.food_gst_amount ?? 0),
+        tax_snapshot: ledger?.tax_snapshot ?? null
       })
       .select('id')
       .single();
@@ -162,7 +234,7 @@ serve(async (req) => {
       throw orderError;
     }
 
-    // Insert order ledger
+    // Insert order ledger with full GST and fee accounting
     if (ledger) {
       const { error: ledgerError } = await supabase
         .from('order_ledger')
@@ -178,7 +250,21 @@ serve(async (req) => {
           gw_deduction: ledger.gw_deduction,
           net_settled: ledger.net_settled,
           canteen_payable: ledger.canteen_payable,
-          platform_net: ledger.platform_net
+          platform_net: ledger.platform_net,
+          tax_mode: ledger.tax_mode ?? 'TAX_INCLUSIVE',
+          supply_type: ledger.supply_type ?? 'INTRA_STATE',
+          taxable_food_amount: ledger.taxable_food_amount ?? 0,
+          food_gst_rate: ledger.food_gst_rate ?? 5.0,
+          food_gst_amount: ledger.food_gst_amount ?? 0,
+          cgst_rate: ledger.cgst_rate ?? 2.5,
+          cgst_amount: ledger.cgst_amount ?? 0,
+          sgst_rate: ledger.sgst_rate ?? 2.5,
+          sgst_amount: ledger.sgst_amount ?? 0,
+          igst_rate: ledger.igst_rate ?? 0,
+          igst_amount: ledger.igst_amount ?? 0,
+          fee_gst_amount: ledger.fee_gst_amount ?? 0,
+          total_tax_amount: Number(ledger.total_tax_amount ?? ledger.food_gst_amount ?? 0),
+          tax_snapshot: ledger.tax_snapshot ?? null
         });
 
       if (ledgerError) throw ledgerError;

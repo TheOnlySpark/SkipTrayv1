@@ -20,6 +20,12 @@ import {
 } from '../components/Icons';
 import { QRCodeSVG } from '../components/QRCode';
 import { calculateOrderLedger } from '../lib/ledger';
+import {
+  CanteenTaxConfig,
+  TaxableCartItem,
+  DEFAULT_CANTEEN_TAX_CONFIG,
+  fetchCanteenTaxConfig,
+} from '../lib/taxService';
 
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 type Order = Database['public']['Tables']['orders']['Row'];
@@ -44,6 +50,11 @@ import {
   LunchSlot,
   DEFAULT_LUNCH_SLOT_CONFIG,
 } from '../lib/lunchSlots';
+import {
+  calculateLocalOrderSchedule,
+  ScheduledCartItem,
+  calculateOrderPrepDuration,
+} from '../lib/smartScheduling';
 
 export { formatPickupTime, LUNCH_SLOTS };
 
@@ -64,7 +75,7 @@ export default function StudentDashboard() {
   const [categoryFilter, setCategoryFilter] = useState<'ALL' | 'PACKED_FOOD' | 'MEALS' | 'DRINKS'>('ALL');
 
   const [cart, setCart] = useState<{item: MenuItem, quantity: number}[]>([]);
-  const [pickupTime, setPickupTime] = useState('');
+  const [pickupTime, setPickupTime] = useState('12:30');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [cartOpen, setCartOpen] = useState(false);
@@ -100,6 +111,7 @@ export default function StudentDashboard() {
 
   // Configurable Lunch Slot Management State
   const [slotConfig, setSlotConfig] = useState<LunchSlotConfig>(DEFAULT_LUNCH_SLOT_CONFIG);
+  const [taxConfig, setTaxConfig] = useState<CanteenTaxConfig>(DEFAULT_CANTEEN_TAX_CONFIG);
 
   useEffect(() => {
     let isMounted = true;
@@ -109,13 +121,24 @@ export default function StudentDashboard() {
       if (isMounted) setSlotConfig(cfg);
     });
 
+    fetchCanteenTaxConfig(canteenId || undefined).then(tcfg => {
+      if (isMounted) setTaxConfig(tcfg);
+    });
+
     const handleConfigUpdate = (e: any) => {
       if (e.detail && isMounted) {
         setSlotConfig(e.detail);
       }
     };
 
+    const handleTaxConfigUpdate = (e: any) => {
+      if (e.detail && isMounted) {
+        setTaxConfig(e.detail);
+      }
+    };
+
     window.addEventListener('lunch_slot_config_updated', handleConfigUpdate);
+    window.addEventListener('canteen_tax_config_updated', handleTaxConfigUpdate);
 
     const slotSub = supabase
       .channel('public:lunch_slot_configs')
@@ -126,10 +149,21 @@ export default function StudentDashboard() {
       })
       .subscribe();
 
+    const taxSub = supabase
+      .channel('public:canteen_tax_configs')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'canteen_tax_configs' }, () => {
+        fetchCanteenTaxConfig(canteenId || undefined).then(tcfg => {
+          if (isMounted) setTaxConfig(tcfg);
+        });
+      })
+      .subscribe();
+
     return () => {
       isMounted = false;
       window.removeEventListener('lunch_slot_config_updated', handleConfigUpdate);
+      window.removeEventListener('canteen_tax_config_updated', handleTaxConfigUpdate);
       slotSub.unsubscribe();
+      taxSub.unsubscribe();
     };
   }, [cart[0]?.item?.canteen_id, profile?.canteen_id]);
 
@@ -147,35 +181,29 @@ export default function StudentDashboard() {
     return { isAvailable: res.isAvailable, diffMinutes, reason: res.reason };
   };
 
-  // User-Customizable Lunch Timing State
-  const [pickupStartTime, setPickupStartTime] = useState('12:40');
-  const [pickupDuration, setPickupDuration] = useState(15);
+  // User-Selected Lunch Pickup Time & Smart Preparation Scheduling
+  // Student chooses when they expect to arrive and collect their food (supports any minute, e.g. 12:17, 12:26, 12:43)
 
-  // Dynamic user timing validation & interval calculation
-  const customTimingResult = useMemo(() => {
-    return validateUserCustomPickupTiming(
-      pickupStartTime,
-      pickupDuration,
-      currentISTMinutes,
-      slotConfig.serviceStartTime || '12:00',
-      slotConfig.serviceEndTime || '14:00',
-      slotConfig.minNoticeMinutes || 30
+  // Convert cart items for concurrent kitchen preparation scheduling
+  const scheduledCartItems: ScheduledCartItem[] = useMemo(() => {
+    return cart.map(c => ({
+      id: c.item.id,
+      name: c.item.name,
+      quantity: c.quantity,
+      prepTimeMinutes: (c.item as any).prep_time_minutes || slotConfig.defaultPrepTimeMinutes || 10
+    }));
+  }, [cart, slotConfig.defaultPrepTimeMinutes]);
+
+  // Real-time backend-aligned smart scheduling calculation:
+  // Planned Prep Start Time = Requested Pickup Time - Estimated Prep Duration
+  const smartSchedule = useMemo(() => {
+    return calculateLocalOrderSchedule(
+      pickupTime,
+      scheduledCartItems,
+      slotConfig,
+      currentISTMinutes
     );
-  }, [pickupStartTime, pickupDuration, currentISTMinutes, slotConfig]);
-
-  // Full pickup interval string saved with order (e.g. "12:40 – 12:55")
-  const fullPickupIntervalString = useMemo(() => {
-    if (!pickupStartTime) return '';
-    const end = calculateEndTime(pickupStartTime, pickupDuration);
-    return `${pickupStartTime} – ${end}`;
-  }, [pickupStartTime, pickupDuration]);
-
-  // Synchronize pickupTime state with the user's customized interval
-  useEffect(() => {
-    if (fullPickupIntervalString) {
-      setPickupTime(fullPickupIntervalString);
-    }
-  }, [fullPickupIntervalString]);
+  }, [pickupTime, scheduledCartItems, slotConfig, currentISTMinutes]);
 
   const [reviewingItem, setReviewingItem] = useState<{ orderId: string, menuItemId: string, itemName: string } | null>(null);
   const [reviewRating, setReviewRating] = useState(5);
@@ -329,7 +357,23 @@ export default function StudentDashboard() {
 
   const cartTotalItems = cart.reduce((acc, c) => acc + c.quantity, 0);
   const cartTotalPrice = cart.reduce((acc, c) => acc + (Number(c.item.price || 0) * c.quantity), 0);
-  const ledger = useMemo(() => calculateOrderLedger(cartTotalPrice), [cartTotalPrice]);
+
+  // Convert cart items for item-level tax calculation
+  const taxableCartItems: TaxableCartItem[] = useMemo(() => {
+    return cart.map(c => ({
+      id: c.item.id,
+      name: c.item.name,
+      quantity: c.quantity,
+      price: Number(c.item.price || 0),
+      gstRatePercent: (c.item as any).gst_rate_percent,
+      hsnCode: (c.item as any).hsn_code,
+    }));
+  }, [cart]);
+
+  // Centralized, tax-aware Order Ledger
+  const ledger = useMemo(() => {
+    return calculateOrderLedger(cartTotalPrice, taxableCartItems, taxConfig);
+  }, [cartTotalPrice, taxableCartItems, taxConfig]);
 
   const addToCart = (item: MenuItem) => {
     if (isSuspended) {
@@ -365,7 +409,14 @@ export default function StudentDashboard() {
       return;
     }
     if (item.is_sold_out) return;
-    if (cartTotalItems >= 5) return;
+    if (cartTotalItems >= 5) {
+      showAlert({
+        title: 'Order Limit Reached',
+        message: 'You can order a maximum of 5 items per lunch order.',
+        type: 'warning'
+      });
+      return;
+    }
     
     const existing = cart.find(c => c.item.id === item.id);
     if (existing) {
@@ -400,12 +451,12 @@ export default function StudentDashboard() {
     }
     if (cart.length === 0) return;
 
-    if (!customTimingResult.isValid) {
-      setError(customTimingResult.error || 'Please select a valid lunch pickup time and duration.');
+    if (!smartSchedule.isValid) {
+      setError(smartSchedule.reason || 'Please select a valid lunch pickup time.');
       return;
     }
 
-    const finalPickupTime = fullPickupIntervalString || pickupTime;
+    const finalPickupTime = smartSchedule.requestedPickupTime || pickupTime;
     if (!finalPickupTime) {
       setError('Please select your preferred lunch pickup time.');
       return;
@@ -423,7 +474,15 @@ export default function StudentDashboard() {
     const idempotencyKey = crypto.randomUUID();
 
     // 2. Save cart state in case of redirect
-    localStorage.setItem('pending_order', JSON.stringify({ cart, pickupTime: finalPickupTime, idempotencyKey }));
+    localStorage.setItem('pending_order', JSON.stringify({ 
+      cart, 
+      pickupTime: finalPickupTime, 
+      requestedPickupTime: smartSchedule.requestedPickupTime,
+      plannedPrepStartTime: smartSchedule.plannedPrepStartTime,
+      targetReadyByTime: smartSchedule.targetReadyByTime,
+      estimatedPrepDurationMinutes: smartSchedule.estimatedPrepDurationMinutes,
+      idempotencyKey 
+    }));
 
     try {
       const ledger = calculateOrderLedger(cartTotalPrice);
@@ -513,7 +572,11 @@ export default function StudentDashboard() {
                 cart_items: itemsJson,
                 total_amount: ledger.gross_payable,
                 ledger: ledger,
-                pickup_time: pickupTime,
+                pickup_time: finalPickupTime,
+                requested_pickup_time: smartSchedule.requestedPickupTime,
+                estimated_prep_duration_minutes: smartSchedule.estimatedPrepDurationMinutes,
+                planned_prep_start_time: smartSchedule.plannedPrepStartTime,
+                target_ready_by_time: smartSchedule.targetReadyByTime,
                 is_takeaway: false,
                 canteen_id: cart[0]?.item.canteen_id,
                 tenant_id: cart[0]?.item.tenant_id
@@ -709,7 +772,26 @@ export default function StudentDashboard() {
                       <div className="font-bold text-slate-800 text-lg">Order #{o.order_number}</div>
                       <div className="text-xs text-slate-500 font-mono font-medium mb-1">ID: {o.id.split('-')[0].toUpperCase()}</div>
                       <div className="text-xs text-slate-500 font-medium mb-1">Placed on: {new Date(o.created_at).toLocaleDateString()}</div>
-                      <div className="text-sm text-slate-600 mt-1">Pickup: {formatPickupTime(o.pickup_time)} (Lunch)</div>
+                      <div className="text-sm text-slate-600 mt-1">
+                        Pickup: {formatPickupTime((o as any).requested_pickup_time || o.pickup_time)} (Lunch)
+                        {(o as any).estimated_prep_duration_minutes && (
+                          <span className="text-xs text-slate-400 ml-2">
+                            • Prep: {(o as any).estimated_prep_duration_minutes}m
+                          </span>
+                        )}
+                      </div>
+                      {((o as any).tax_snapshot || (o as any).total_tax_amount) && (
+                        <div className="text-xs text-slate-500 mt-1 flex flex-wrap gap-2 items-center">
+                          <span className="bg-slate-100 px-2 py-0.5 rounded text-slate-700 font-medium">
+                            GST ({(o as any).tax_snapshot?.effective_food_gst_rate || 5}%): ₹{Number((o as any).total_tax_amount || (o as any).tax_snapshot?.food_gst_amount || 0).toFixed(2)}
+                          </span>
+                          {(o as any).tax_snapshot?.cgst_amount !== undefined && (
+                            <span className="text-[11px] text-slate-400">
+                              (CGST: ₹{Number((o as any).tax_snapshot.cgst_amount).toFixed(2)} + SGST: ₹{Number((o as any).tax_snapshot.sgst_amount).toFixed(2)})
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div className={`px-3 py-1 rounded-full text-xs font-bold border ${o.status === 'COLLECTED' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
                       {o.status}
@@ -913,7 +995,45 @@ export default function StudentDashboard() {
             </div>
           )}
           
-          <p className="mt-5 text-xs text-indigo-200">Requested Pickup Time: <span className="font-semibold text-white">{formatPickupTime(activeOrder.pickup_time)} (Lunch)</span></p>
+          {/* Smart Scheduling Details in Active Order Card */}
+          <div className="mt-5 pt-4 border-t border-indigo-400/20 grid grid-cols-2 sm:grid-cols-3 gap-3 text-left">
+            <div>
+              <span className="text-[10px] text-indigo-300 uppercase tracking-wider block font-bold">Your Pickup Time</span>
+              <span className="text-sm font-bold text-white">
+                {formatPickupTime((activeOrder as any).requested_pickup_time || activeOrder.pickup_time)}
+              </span>
+            </div>
+            {(activeOrder as any).planned_prep_start_time && (
+              <div>
+                <span className="text-[10px] text-indigo-300 uppercase tracking-wider block font-bold">Kitchen Prep Starts</span>
+                <span className="text-sm font-semibold text-amber-300">
+                  {formatPickupTime((activeOrder as any).planned_prep_start_time)}
+                </span>
+              </div>
+            )}
+            {(activeOrder as any).target_ready_by_time && (
+              <div>
+                <span className="text-[10px] text-indigo-300 uppercase tracking-wider block font-bold">Hot & Ready By</span>
+                <span className="text-sm font-semibold text-emerald-300">
+                  {formatPickupTime((activeOrder as any).target_ready_by_time)}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Confirmed Bill & GST Summary */}
+          {((activeOrder as any).tax_snapshot || (activeOrder as any).total_tax_amount) && (
+            <div className="mt-3 pt-3 border-t border-indigo-400/20 flex flex-wrap items-center justify-between gap-2 text-xs text-indigo-100">
+              <span className="font-semibold">
+                Bill Tax ({(activeOrder as any).tax_snapshot?.effective_food_gst_rate || 5}% GST): ₹{Number((activeOrder as any).total_tax_amount || (activeOrder as any).tax_snapshot?.food_gst_amount || 0).toFixed(2)}
+              </span>
+              {(activeOrder as any).tax_snapshot?.cgst_amount !== undefined && (
+                <span className="text-[11px] text-indigo-200 font-mono">
+                  CGST: ₹{Number((activeOrder as any).tax_snapshot.cgst_amount).toFixed(2)} | SGST: ₹{Number((activeOrder as any).tax_snapshot.sgst_amount).toFixed(2)}
+                </span>
+              )}
+            </div>
+          )}
           </div>
         </div>
       ) : (
@@ -1125,16 +1245,58 @@ export default function StudentDashboard() {
                       <div className="text-sm font-extrabold text-indigo-600 mt-1.5">₹{Number(item.price || 0).toFixed(2)}</div>
                     </div>
                     
-                    <div className="mt-4 flex items-center justify-between">
-                      <span className="text-xs font-medium text-slate-400">{item.veg_non_veg === 'VEG' ? 'Veg' : 'Non-Veg'}</span>
+                    <div className="mt-4 flex items-center justify-between gap-1">
+                      <span className="text-xs font-medium text-slate-400 shrink-0">{item.veg_non_veg === 'VEG' ? 'Veg' : 'Non-Veg'}</span>
                       {!item.is_sold_out ? (
-                        <button 
-                          onClick={() => addToCart(item)}
-                          disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cartTotalItems >= 5}
-                          className="w-10 h-10 flex items-center justify-center bg-indigo-50 text-indigo-600 rounded-xl font-bold hover:bg-indigo-600 hover:text-white transition-colors disabled:opacity-50 disabled:hover:bg-indigo-50 disabled:hover:text-indigo-600 shadow-sm"
-                        >
-                          +
-                        </button>
+                        (() => {
+                          const cartEntry = cart.find(c => c.item.id === item.id);
+                          const quantity = cartEntry?.quantity || 0;
+
+                          if (quantity > 0) {
+                            return (
+                              <div className="flex items-center bg-indigo-50 border border-indigo-100 rounded-xl p-0.5 shadow-xs">
+                                <button
+                                  type="button"
+                                  onClick={() => removeFromCart(item.id)}
+                                  aria-label={`Decrease quantity of ${item.name}`}
+                                  title={`Decrease quantity of ${item.name}`}
+                                  className="w-8 h-8 flex items-center justify-center text-indigo-600 hover:bg-indigo-600 hover:text-white rounded-lg font-bold text-sm transition-colors active:scale-90"
+                                >
+                                  <span className="leading-none text-base font-semibold">−</span>
+                                </button>
+                                <span 
+                                  className="w-6 text-center font-bold text-sm text-indigo-950 tabular-nums select-none"
+                                  aria-label={`${quantity} of ${item.name} in cart`}
+                                >
+                                  {quantity}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => addToCart(item)}
+                                  disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cartTotalItems >= 5}
+                                  aria-label={`Increase quantity of ${item.name}`}
+                                  title={`Increase quantity of ${item.name}`}
+                                  className="w-8 h-8 flex items-center justify-center text-indigo-600 hover:bg-indigo-600 hover:text-white rounded-lg font-bold text-sm transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-indigo-600 active:scale-90"
+                                >
+                                  <span className="leading-none text-base font-semibold">+</span>
+                                </button>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <button 
+                              type="button"
+                              onClick={() => addToCart(item)}
+                              disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cartTotalItems >= 5}
+                              aria-label={`Add ${item.name} to order`}
+                              title={`Add ${item.name} to order`}
+                              className="w-10 h-10 flex items-center justify-center bg-indigo-50 text-indigo-600 rounded-xl font-bold hover:bg-indigo-600 hover:text-white transition-colors disabled:opacity-50 disabled:hover:bg-indigo-50 disabled:hover:text-indigo-600 shadow-sm text-base active:scale-95"
+                            >
+                              +
+                            </button>
+                          );
+                        })()
                       ) : (
                         <div className="h-10"></div>
                       )}
@@ -1274,18 +1436,71 @@ export default function StudentDashboard() {
                                   <span style={{ color: '#818cf8', fontWeight: 600 }}>= ₹{(Number(c.item.price || 0) * c.quantity).toFixed(2)}</span>
                                 </div>
                               </div>
-                              <button
-                                onClick={() => removeFromCart(c.item.id)}
-                                style={{
-                                  fontSize: '0.75rem',
-                                  padding: '0.25rem 0.5rem',
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <div style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  background: '#1e293b',
                                   borderRadius: '0.5rem',
-                                  background: isSoldOut ? 'rgba(239,68,68,0.1)' : '#1e293b',
-                                  color: isSoldOut ? '#f87171' : '#94a3b8',
-                                  border: 'none',
-                                  cursor: 'pointer',
-                                }}
-                              >Remove</button>
+                                  border: '1px solid #334155',
+                                  overflow: 'hidden'
+                                }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => removeFromCart(c.item.id)}
+                                    aria-label={`Decrease quantity of ${c.item.name}`}
+                                    title={`Decrease quantity of ${c.item.name}`}
+                                    style={{
+                                      background: 'transparent',
+                                      border: 'none',
+                                      color: '#94a3b8',
+                                      padding: '0.2rem 0.5rem',
+                                      cursor: 'pointer',
+                                      fontSize: '0.875rem',
+                                      fontWeight: 'bold',
+                                      lineHeight: 1,
+                                    }}
+                                  >
+                                    −
+                                  </button>
+                                  <span style={{ color: '#f8fafc', fontSize: '0.75rem', fontWeight: 700, padding: '0 0.25rem', minWidth: '1.25rem', textAlign: 'center' }}>
+                                    {c.quantity}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => addToCart(c.item)}
+                                    disabled={cartTotalItems >= 5}
+                                    aria-label={`Increase quantity of ${c.item.name}`}
+                                    title={`Increase quantity of ${c.item.name}`}
+                                    style={{
+                                      background: 'transparent',
+                                      border: 'none',
+                                      color: cartTotalItems >= 5 ? '#475569' : '#818cf8',
+                                      padding: '0.2rem 0.5rem',
+                                      cursor: cartTotalItems >= 5 ? 'not-allowed' : 'pointer',
+                                      fontSize: '0.875rem',
+                                      fontWeight: 'bold',
+                                      lineHeight: 1,
+                                    }}
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setCart(cart.filter(x => x.item.id !== c.item.id))}
+                                  aria-label={`Remove ${c.item.name} from cart`}
+                                  style={{
+                                    fontSize: '0.75rem',
+                                    padding: '0.25rem 0.5rem',
+                                    borderRadius: '0.5rem',
+                                    background: isSoldOut ? 'rgba(239,68,68,0.1)' : '#1e293b',
+                                    color: isSoldOut ? '#f87171' : '#94a3b8',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                  }}
+                                >Remove</button>
+                              </div>
                             </div>
                           );
                         })
@@ -1311,90 +1526,77 @@ export default function StudentDashboard() {
                     {/* Pickup time */}
                     <form onSubmit={handlePlaceOrder} style={{ paddingTop: '1rem', borderTop: '1px solid #1e293b' }}>
                       {error && <div style={{ color: '#f87171', fontSize: '0.75rem', marginBottom: '0.75rem', fontWeight: 600 }}>{error}</div>}
-                      {/* User-Customizable Lunch Pickup Timing */}
+                      {/* Flexible User-Selected Lunch Pickup Time & Smart Preparation Scheduling */}
                       <div style={{ marginBottom: '1rem', background: '#1e293b', padding: '0.875rem 1rem', borderRadius: '0.75rem', border: '1px solid #334155' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.625rem' }}>
                           <label style={{ fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em' }}>
-                            Lunch Pickup Window ({formatSingleTime(slotConfig.serviceStartTime)} – {formatSingleTime(slotConfig.serviceEndTime)})
+                            Your Preferred Pickup Time
                           </label>
                           <span style={{ fontSize: '0.65rem', color: '#818cf8', fontWeight: 600, background: 'rgba(99,102,241,0.15)', padding: '2px 6px', borderRadius: '4px' }}>
-                            Min {slotConfig.minNoticeMinutes || 30}m notice
+                            Service: {formatSingleTime(slotConfig.serviceStartTime)} – {formatSingleTime(slotConfig.serviceEndTime)}
                           </span>
                         </div>
 
-                        {/* Preferred Start Time & Duration Controls */}
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.625rem', marginBottom: '0.625rem' }}>
-                          <div>
-                            <label style={{ display: 'block', fontSize: '0.6875rem', color: '#cbd5e1', fontWeight: 600, marginBottom: '0.25rem' }}>
-                              Preferred Start Time
-                            </label>
-                            <input
-                              type="time"
-                              value={pickupStartTime}
-                              onChange={e => setPickupStartTime(e.target.value)}
-                              disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday}
-                              style={{
-                                width: '100%',
-                                background: '#0f172a',
-                                border: '1px solid #334155',
-                                color: 'white',
-                                padding: '0.5rem 0.625rem',
+                        {/* Preferred Time Picker supporting any minute (12:17, 12:26, 12:43 etc.) */}
+                        <div style={{ marginBottom: '0.625rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <div style={{ flex: 1 }}>
+                              <label style={{ display: 'block', fontSize: '0.6875rem', color: '#cbd5e1', fontWeight: 600, marginBottom: '0.25rem' }}>
+                                When will you arrive to collect food?
+                              </label>
+                              <input
+                                type="time"
+                                step="60"
+                                value={pickupTime}
+                                onChange={e => setPickupTime(e.target.value)}
+                                disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday}
+                                style={{
+                                  width: '100%',
+                                  background: '#0f172a',
+                                  border: '1px solid #334155',
+                                  color: 'white',
+                                  padding: '0.5rem 0.625rem',
+                                  borderRadius: '0.5rem',
+                                  fontSize: '0.925rem',
+                                  fontWeight: 700,
+                                  cursor: (isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday) ? 'not-allowed' : 'pointer',
+                                  opacity: (isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday) ? 0.6 : 1,
+                                }}
+                              />
+                            </div>
+                            <div style={{ paddingTop: '1.25rem' }}>
+                              <span style={{
+                                display: 'inline-block',
+                                fontSize: '0.75rem',
+                                fontWeight: 700,
+                                color: smartSchedule.isValid ? '#34d399' : '#f87171',
+                                background: smartSchedule.isValid ? 'rgba(52,211,153,0.1)' : 'rgba(239,68,68,0.1)',
+                                padding: '0.5rem 0.75rem',
                                 borderRadius: '0.5rem',
-                                fontSize: '0.875rem',
-                                fontWeight: 600,
-                                cursor: (isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday) ? 'not-allowed' : 'pointer',
-                                opacity: (isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday) ? 0.6 : 1,
-                              }}
-                            />
-                          </div>
-
-                          <div>
-                            <label style={{ display: 'block', fontSize: '0.6875rem', color: '#cbd5e1', fontWeight: 600, marginBottom: '0.25rem' }}>
-                              Pickup Duration
-                            </label>
-                            <select
-                              value={pickupDuration}
-                              onChange={e => setPickupDuration(Number(e.target.value))}
-                              disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday}
-                              style={{
-                                width: '100%',
-                                background: '#0f172a',
-                                border: '1px solid #334155',
-                                color: 'white',
-                                padding: '0.5rem 0.625rem',
-                                borderRadius: '0.5rem',
-                                fontSize: '0.875rem',
-                                fontWeight: 600,
-                                cursor: (isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday) ? 'not-allowed' : 'pointer',
-                                opacity: (isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday) ? 0.6 : 1,
-                              }}
-                            >
-                              <option value={5}>5 Minutes</option>
-                              <option value={10}>10 Minutes</option>
-                              <option value={15}>15 Minutes</option>
-                              <option value={20}>20 Minutes</option>
-                              <option value={30}>30 Minutes</option>
-                              <option value={45}>45 Minutes</option>
-                            </select>
+                                border: `1px solid ${smartSchedule.isValid ? 'rgba(52,211,153,0.3)' : 'rgba(239,68,68,0.3)'}`
+                              }}>
+                                {smartSchedule.isValid ? smartSchedule.pickupTimeFormatted : 'Invalid Time'}
+                              </span>
+                            </div>
                           </div>
                         </div>
 
-                        {/* Quick Presets for Convenient 1-Tap Selection */}
-                        <div style={{ marginBottom: '0.625rem' }}>
+                        {/* Quick Suggestions for Convenient 1-Tap Selection */}
+                        <div style={{ marginBottom: '0.75rem' }}>
                           <span style={{ fontSize: '0.65rem', color: '#64748b', fontWeight: 600, display: 'block', marginBottom: '0.25rem' }}>
-                            Quick Start Presets:
+                            Quick Suggestions (or pick any exact minute above):
                           </span>
                           <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap' }}>
-                            {['12:30', '12:45', '13:00', '13:15', '13:30'].map(t => (
+                            {['12:15', '12:30', '12:45', '13:00', '13:15', '13:30'].map(t => (
                               <button
                                 key={t}
                                 type="button"
-                                onClick={() => setPickupStartTime(t)}
+                                onClick={() => setPickupTime(t)}
                                 disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday}
                                 style={{
-                                  background: pickupStartTime === t ? '#4f46e5' : '#0f172a',
-                                  color: pickupStartTime === t ? 'white' : '#94a3b8',
-                                  border: `1px solid ${pickupStartTime === t ? '#6366f1' : '#334155'}`,
+                                  background: pickupTime === t ? '#4f46e5' : '#0f172a',
+                                  color: pickupTime === t ? 'white' : '#94a3b8',
+                                  border: `1px solid ${pickupTime === t ? '#6366f1' : '#334155'}`,
                                   borderRadius: '0.375rem',
                                   padding: '2px 7px',
                                   fontSize: '0.6875rem',
@@ -1409,7 +1611,7 @@ export default function StudentDashboard() {
                           </div>
                         </div>
 
-                        {/* Calculated Window Preview Banner & Real-time Validation */}
+                        {/* Smart Preparation Scheduling Breakdown Box */}
                         {isSunday ? (
                           <div style={{ padding: '0.5rem', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '0.5rem', color: '#f87171', fontSize: '0.72rem' }}>
                             Canteen is closed on Sundays.
@@ -1422,66 +1624,156 @@ export default function StudentDashboard() {
                           <div style={{ padding: '0.5rem', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '0.5rem', color: '#f87171', fontSize: '0.72rem' }}>
                             Lunch service is currently closed for today.
                           </div>
-                        ) : customTimingResult.isValid ? (
+                        ) : smartSchedule.isValid ? (
                           <div style={{
-                            padding: '0.5rem 0.75rem',
-                            background: 'rgba(99,102,241,0.12)',
-                            border: '1px solid rgba(99,102,241,0.3)',
-                            borderRadius: '0.5rem',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center'
+                            padding: '0.75rem',
+                            background: 'rgba(99,102,241,0.08)',
+                            border: '1px solid rgba(99,102,241,0.25)',
+                            borderRadius: '0.625rem',
                           }}>
-                            <span style={{ fontSize: '0.75rem', color: '#cbd5e1' }}>
-                              Pickup Window: <strong style={{ color: '#a5b4fc', fontSize: '0.8125rem' }}>{customTimingResult.intervalLabel}</strong>
-                            </span>
-                            <span style={{ fontSize: '0.65rem', color: '#34d399', fontWeight: 700, background: 'rgba(52,211,153,0.15)', padding: '2px 6px', borderRadius: '4px' }}>
-                              {pickupDuration} min duration
-                            </span>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.375rem' }}>
+                              <span style={{ fontSize: '0.7rem', color: '#a5b4fc', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                ⚡ Smart Kitchen Prep Schedule
+                              </span>
+                              <span style={{ fontSize: '0.65rem', color: '#34d399', fontWeight: 700, background: 'rgba(52,211,153,0.15)', padding: '2px 6px', borderRadius: '4px' }}>
+                                Concurrent Prep
+                              </span>
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem', textAlign: 'center' }}>
+                              <div style={{ background: '#0f172a', padding: '0.4rem', borderRadius: '0.375rem', border: '1px solid #334155' }}>
+                                <span style={{ display: 'block', fontSize: '0.6rem', color: '#94a3b8', fontWeight: 600 }}>Kitchen Starts</span>
+                                <span style={{ display: 'block', fontSize: '0.75rem', color: '#fbbf24', fontWeight: 800 }}>{smartSchedule.prepStartFormatted}</span>
+                              </div>
+                              <div style={{ background: '#0f172a', padding: '0.4rem', borderRadius: '0.375rem', border: '1px solid #334155' }}>
+                                <span style={{ display: 'block', fontSize: '0.6rem', color: '#94a3b8', fontWeight: 600 }}>Prep Duration</span>
+                                <span style={{ display: 'block', fontSize: '0.75rem', color: '#e2e8f0', fontWeight: 800 }}>{smartSchedule.estimatedPrepDurationMinutes} mins</span>
+                              </div>
+                              <div style={{ background: '#0f172a', padding: '0.4rem', borderRadius: '0.375rem', border: '1px solid #334155' }}>
+                                <span style={{ display: 'block', fontSize: '0.6rem', color: '#94a3b8', fontWeight: 600 }}>Hot & Ready</span>
+                                <span style={{ display: 'block', fontSize: '0.75rem', color: '#34d399', fontWeight: 800 }}>{smartSchedule.readyByFormatted}</span>
+                              </div>
+                            </div>
+                            <p style={{ margin: '0.5rem 0 0', fontSize: '0.65rem', color: '#94a3b8', textAlign: 'center' }}>
+                              Arrival at {smartSchedule.pickupTimeFormatted} allows fresh preparation starting at {smartSchedule.prepStartFormatted}.
+                            </p>
                           </div>
                         ) : (
                           <div style={{
-                            padding: '0.5rem 0.75rem',
-                            background: 'rgba(239,68,68,0.15)',
+                            padding: '0.625rem 0.75rem',
+                            background: 'rgba(239,68,68,0.12)',
                             border: '1px solid rgba(239,68,68,0.3)',
                             borderRadius: '0.5rem',
-                            color: '#fca5a5',
-                            fontSize: '0.72rem',
-                            fontWeight: 600
                           }}>
-                            ⚠️ {customTimingResult.error}
+                            <div style={{ color: '#fca5a5', fontSize: '0.72rem', fontWeight: 600, marginBottom: smartSchedule.suggestedPickupTime ? '0.5rem' : '0' }}>
+                              ⚠️ {smartSchedule.reason}
+                            </div>
+                            {smartSchedule.suggestedPickupTime && (
+                              <button
+                                type="button"
+                                onClick={() => setPickupTime(smartSchedule.suggestedPickupTime!)}
+                                style={{
+                                  background: '#4f46e5',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '0.375rem',
+                                  padding: '4px 8px',
+                                  fontSize: '0.7rem',
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}
+                              >
+                                Switch to Feasible Time: {smartSchedule.suggestedPickupFormatted}
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>
 
-                      {/* Total Amount Summary */}
+                      {/* Transparent Customer Order Bill */}
                       {cart.length > 0 && (
-                        <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', background: '#1e293b', borderRadius: '0.75rem' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px solid #334155' }}>
-                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>Selected Pickup</span>
-                            <span style={{ color: '#a5b4fc', fontSize: '0.875rem', fontWeight: 600 }}>
-                              {customTimingResult.isValid ? customTimingResult.intervalLabel : `${formatSingleTime(pickupStartTime)} (${pickupDuration} mins)`}
+                        <div style={{ marginBottom: '1rem', padding: '0.875rem 1rem', background: '#1e293b', borderRadius: '0.75rem', border: '1px solid #334155' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px solid #334155' }}>
+                            <span style={{ color: '#cbd5e1', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                              Tax Invoice / Order Bill
+                            </span>
+                            <span style={{
+                              color: ledger.tax_mode === 'TAX_INCLUSIVE' ? '#34d399' : '#a5b4fc',
+                              fontSize: '0.65rem',
+                              fontWeight: 700,
+                              background: ledger.tax_mode === 'TAX_INCLUSIVE' ? 'rgba(52,211,153,0.15)' : 'rgba(99,102,241,0.15)',
+                              padding: '2px 6px',
+                              borderRadius: '4px'
+                            }}>
+                              {ledger.tax_mode === 'TAX_INCLUSIVE' ? 'Prices Include GST' : 'GST Added to Base'}
                             </span>
                           </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>Food Subtotal</span>
-                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem' }}>₹{ledger.food_subtotal.toFixed(2)}</span>
+
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+                            <span style={{ color: '#94a3b8', fontSize: '0.8125rem' }}>Food Subtotal</span>
+                            <span style={{ color: '#e2e8f0', fontSize: '0.8125rem', fontWeight: 600 }}>₹{ledger.food_subtotal.toFixed(2)}</span>
                           </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>Platform Fee (3%)</span>
-                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem' }}>₹{ledger.commission_fee.toFixed(2)}</span>
+
+                          {ledger.tax_mode === 'TAX_INCLUSIVE' && ledger.taxable_food_amount !== undefined && (
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+                              <span style={{ color: '#64748b', fontSize: '0.72rem', paddingLeft: '0.5rem' }}>↳ Net Taxable Value</span>
+                              <span style={{ color: '#94a3b8', fontSize: '0.72rem' }}>₹{ledger.taxable_food_amount.toFixed(2)}</span>
+                            </div>
+                          )}
+
+                          {/* Itemized GST Breakdown (CGST / SGST / IGST) */}
+                          <div style={{
+                            margin: '0.5rem 0',
+                            padding: '0.5rem 0.625rem',
+                            background: '#0f172a',
+                            borderRadius: '0.5rem',
+                            border: '1px solid #334155'
+                          }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                              <span style={{ color: '#a5b4fc', fontSize: '0.7rem', fontWeight: 700 }}>
+                                GST ({ledger.food_gst_rate || 5}%) {ledger.tax_mode === 'TAX_INCLUSIVE' ? 'Included' : 'Levied'}
+                              </span>
+                              <span style={{ color: '#e2e8f0', fontSize: '0.75rem', fontWeight: 700 }}>
+                                ₹{(ledger.food_gst_amount || 0).toFixed(2)}
+                              </span>
+                            </div>
+
+                            {ledger.supply_type === 'INTRA_STATE' ? (
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '0.25rem' }}>
+                                <div style={{ fontSize: '0.6875rem', color: '#94a3b8' }}>
+                                  CGST ({ledger.cgst_rate || 2.5}%): <strong style={{ color: '#cbd5e1' }}>₹{(ledger.cgst_amount || 0).toFixed(2)}</strong>
+                                </div>
+                                <div style={{ fontSize: '0.6875rem', color: '#94a3b8', textAlign: 'right' }}>
+                                  SGST ({ledger.sgst_rate || 2.5}%): <strong style={{ color: '#cbd5e1' }}>₹{(ledger.sgst_amount || 0).toFixed(2)}</strong>
+                                </div>
+                              </div>
+                            ) : (
+                              <div style={{ fontSize: '0.6875rem', color: '#94a3b8', marginTop: '0.25rem' }}>
+                                IGST ({ledger.igst_rate || 5}%): <strong style={{ color: '#cbd5e1' }}>₹{(ledger.igst_amount || 0).toFixed(2)}</strong>
+                              </div>
+                            )}
                           </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>Payment Gateway Fee</span>
-                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem' }}>₹{ledger.gateway_fee.toFixed(2)}</span>
+
+                          {/* Service & Gateway Fees */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+                            <span style={{ color: '#94a3b8', fontSize: '0.8125rem' }}>Platform Fee (3%)</span>
+                            <span style={{ color: '#e2e8f0', fontSize: '0.8125rem' }}>₹{ledger.commission_fee.toFixed(2)}</span>
                           </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem', paddingBottom: '0.75rem', borderBottom: '1px solid #334155' }}>
-                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>GST</span>
-                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>₹0.00 (Included)</span>
+
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px solid #334155' }}>
+                            <span style={{ color: '#94a3b8', fontSize: '0.8125rem' }}>Payment Gateway Fee</span>
+                            <span style={{ color: '#e2e8f0', fontSize: '0.8125rem' }}>₹{ledger.gateway_fee.toFixed(2)}</span>
                           </div>
+
+                          {/* Grand Total */}
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem', fontWeight: 600 }}>Total Amount to Pay</span>
-                            <span style={{ color: '#38bdf8', fontSize: '1.125rem', fontWeight: 700 }}>₹{ledger.gross_payable.toFixed(2)}</span>
+                            <div>
+                              <span style={{ color: '#e2e8f0', fontSize: '0.875rem', fontWeight: 600, display: 'block' }}>Total Payable</span>
+                              <span style={{ color: '#64748b', fontSize: '0.625rem' }}>Includes all taxes and fees</span>
+                            </div>
+                            <span style={{ color: '#38bdf8', fontSize: '1.125rem', fontWeight: 800 }}>₹{ledger.gross_payable.toFixed(2)}</span>
                           </div>
                         </div>
                       )}

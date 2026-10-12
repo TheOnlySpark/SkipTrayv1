@@ -21,6 +21,9 @@ export interface LunchSlotConfig {
   isLunchEnabled: boolean;
   disabledSlots: string[]; // list of slot values that are turned off, e.g. ["12:45"]
   slotCapacities: Record<string, number>; // slot value -> capacity
+  maxConcurrentOrders?: number; // max concurrent kitchen capacity, e.g. 15
+  defaultPrepTimeMinutes?: number; // default preparation duration, e.g. 10
+  orderCutoffMinutes?: number; // buffer before closing, e.g. 15
   updatedAt?: string;
 }
 
@@ -32,6 +35,9 @@ export const DEFAULT_LUNCH_SLOT_CONFIG: LunchSlotConfig = {
   isLunchEnabled: true,
   disabledSlots: [],
   slotCapacities: {},
+  maxConcurrentOrders: 15,
+  defaultPrepTimeMinutes: 10,
+  orderCutoffMinutes: 15,
 };
 
 /**
@@ -263,6 +269,9 @@ export async function fetchLunchSlotConfig(canteenId?: string | null): Promise<L
         isLunchEnabled: data.is_lunch_enabled ?? true,
         disabledSlots: Array.isArray(data.disabled_slots) ? (data.disabled_slots as string[]) : [],
         slotCapacities: typeof data.slot_capacities === 'object' && data.slot_capacities !== null ? (data.slot_capacities as Record<string, number>) : {},
+        maxConcurrentOrders: Number(data.max_concurrent_orders) || 15,
+        defaultPrepTimeMinutes: Number(data.default_prep_time_minutes) || 10,
+        orderCutoffMinutes: Number(data.order_cutoff_minutes) || 15,
         updatedAt: data.updated_at,
       };
 
@@ -319,6 +328,9 @@ export async function saveLunchSlotConfig(
       is_lunch_enabled: updatedConfig.isLunchEnabled,
       disabled_slots: updatedConfig.disabledSlots,
       slot_capacities: updatedConfig.slotCapacities,
+      max_concurrent_orders: updatedConfig.maxConcurrentOrders ?? 15,
+      default_prep_time_minutes: updatedConfig.defaultPrepTimeMinutes ?? 10,
+      order_cutoff_minutes: updatedConfig.orderCutoffMinutes ?? 15,
       updated_at: new Date().toISOString(),
     };
 
