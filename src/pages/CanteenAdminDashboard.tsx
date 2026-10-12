@@ -864,14 +864,14 @@ export default function CanteenAdminDashboard() {
       </div>
 
       {/* Menu Management */}
-      <div className="col-span-12 md:col-span-6 bg-white border border-slate-200 rounded-[2rem] p-5 sm:p-8 shadow-sm flex flex-col">
-        <div className="flex justify-between items-center mb-6">
+      <div className="col-span-12 md:col-span-6 bg-white border border-slate-200 rounded-[2rem] p-5 sm:p-8 shadow-sm flex flex-col h-[620px]">
+        <div className="flex justify-between items-center mb-5 shrink-0">
           <h2 className="text-xl font-bold text-slate-800">Manage Menu</h2>
           <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">
             {menuItems.length} {menuItems.length === 1 ? 'item' : 'items'}
           </span>
         </div>
-        <form onSubmit={handleAddItem} className="flex flex-col gap-3 mb-8 bg-slate-50 p-4 rounded-xl border border-slate-100">
+        <form onSubmit={handleAddItem} className="flex flex-col gap-3 mb-5 bg-slate-50 p-4 rounded-xl border border-slate-100 shrink-0">
           <input 
             type="text" 
             placeholder="Item Name" 
@@ -900,7 +900,7 @@ export default function CanteenAdminDashboard() {
             </select>
             <button 
               type="submit" 
-              className="px-5 py-2 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 active:scale-95 transition-all shrink-0"
+              className="px-5 py-2 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 active:scale-95 transition-all shrink-0 cursor-pointer"
             >
               Add Item
             </button>
@@ -908,9 +908,9 @@ export default function CanteenAdminDashboard() {
         </form>
 
         {loading && menuItems.length === 0 ? (
-          <div className="text-slate-500 text-sm flex-1 min-h-[200px] flex items-center justify-center">Loading menu...</div>
+          <div className="text-slate-500 text-sm flex-1 flex items-center justify-center">Loading menu...</div>
         ) : (
-          <div className="space-y-3 overflow-y-auto max-h-[460px] pr-1.5 scrollbar-thin">
+          <div className="space-y-3 overflow-y-auto flex-1 pr-1.5 custom-scrollbar">
             {menuItems.map(item => (
               <div key={item.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-white border border-slate-200 rounded-xl hover:border-slate-300 transition-colors shadow-sm gap-3">
                 <div className="flex items-center gap-3">
@@ -926,13 +926,13 @@ export default function CanteenAdminDashboard() {
                 <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
                   <button
                     onClick={() => handleToggleSoldOut(item.id, item.is_sold_out)}
-                    className="text-[10px] sm:text-xs font-semibold text-slate-500 bg-slate-100 px-2 sm:px-3 py-1.5 rounded-lg hover:bg-slate-200 transition-colors"
+                    className="text-[10px] sm:text-xs font-semibold text-slate-500 bg-slate-100 px-2 sm:px-3 py-1.5 rounded-lg hover:bg-slate-200 transition-colors cursor-pointer"
                   >
                     {item.is_sold_out ? 'Mark Available' : 'Mark Sold Out'}
                   </button>
                   <button
                     onClick={() => handleDeleteMenuItem(item.id, item.name)}
-                    className="text-[10px] sm:text-xs font-semibold text-rose-500 bg-rose-50 px-2 sm:px-3 py-1.5 rounded-lg hover:bg-rose-100 border border-rose-100 transition-colors"
+                    className="text-[10px] sm:text-xs font-semibold text-rose-500 bg-rose-50 px-2 sm:px-3 py-1.5 rounded-lg hover:bg-rose-100 border border-rose-100 transition-colors cursor-pointer"
                     title="Permanently delete this item"
                   >
                     Delete
@@ -941,7 +941,7 @@ export default function CanteenAdminDashboard() {
               </div>
             ))}
             {menuItems.length === 0 && (
-              <div className="text-slate-500 text-sm text-center py-4">
+              <div className="text-slate-500 text-sm text-center py-8">
                 No menu items for this location yet.
               </div>
             )}
@@ -950,15 +950,20 @@ export default function CanteenAdminDashboard() {
       </div>
 
       {/* Feedback & Reviews */}
-      <div className="col-span-12 md:col-span-6 bg-white border border-slate-200 rounded-[2rem] p-5 sm:p-8 shadow-sm flex flex-col">
-        <h2 className="text-xl font-bold text-slate-800 mb-6">Student Feedback & Reviews</h2>
+      <div className="col-span-12 md:col-span-6 bg-white border border-slate-200 rounded-[2rem] p-5 sm:p-8 shadow-sm flex flex-col h-[620px]">
+        <div className="flex justify-between items-center mb-5 shrink-0">
+          <h2 className="text-xl font-bold text-slate-800">Student Feedback & Reviews</h2>
+          <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">
+            {reviews.length} {reviews.length === 1 ? 'review' : 'reviews'}
+          </span>
+        </div>
 
         {reviewsLoading ? (
-          <div className="text-slate-500 text-sm">Loading reviews...</div>
+          <div className="text-slate-500 text-sm flex-1 flex items-center justify-center">Loading reviews...</div>
         ) : reviews.length === 0 ? (
-          <div className="text-slate-500 text-sm py-4">No reviews yet.</div>
+          <div className="text-slate-400 text-sm flex-1 flex items-center justify-center">No reviews yet.</div>
         ) : (
-          <div className="flex flex-col gap-4 overflow-y-auto max-h-[460px] pr-1.5 scrollbar-thin">
+          <div className="flex flex-col gap-4 overflow-y-auto flex-1 pr-1.5 custom-scrollbar">
             {reviews.map(review => (
               <div key={review.id} className="p-5 rounded-2xl border border-slate-200 bg-slate-50 flex flex-col gap-3 hover:shadow-md transition-shadow">
                 <div className="flex justify-between items-start">

@@ -1,11 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, Mail, Lock, User, Hash, AlertCircle, CheckCircle } from 'lucide-react';
+import { Eye, EyeOff, Mail, Lock, User, Hash, AlertCircle, CheckCircle, Building, ArrowRight, Search } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useTenant } from '../contexts/TenantContext';
 
 type Step = 'LOGIN' | 'REGISTER' | 'FORGOT_PASSWORD' | 'RESET_SENT';
+
+interface TenantOption {
+  id: string;
+  slug: string;
+  name: string;
+}
 
 export default function Login() {
   const [step, setStep] = useState<Step>('LOGIN');
@@ -30,9 +36,31 @@ export default function Login() {
   const [error, setError]     = useState('');
   const [success, setSuccess] = useState('');
 
+  // Dynamic tenant discovery state
+  const [availableTenants, setAvailableTenants] = useState<TenantOption[]>([]);
+  const [fetchingTenants, setFetchingTenants]   = useState(false);
+  const [searchQuery, setSearchQuery]           = useState('');
+
   const { user, profile, refreshProfile, signUp } = useAuth();
-  const { tenantId, tenantName, settings, error: tenantError, loading: tenantLoading } = useTenant();
+  const { tenantId, tenantSlug, tenantName, settings, error: tenantError, loading: tenantLoading, switchTenant } = useTenant();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (tenantError === 'NOT_FOUND') {
+      setFetchingTenants(true);
+      supabase
+        .from('tenants')
+        .select('id, slug, name')
+        .eq('is_active', true)
+        .order('name')
+        .then(({ data, error }) => {
+          if (!error && data) {
+            setAvailableTenants(data as TenantOption[]);
+          }
+          setFetchingTenants(false);
+        });
+    }
+  }, [tenantError]);
 
   useEffect(() => {
     console.log("Login state:", { user, profile, tenantId });
@@ -197,17 +225,65 @@ export default function Login() {
   }
 
   if (!tenantLoading && tenantError === 'NOT_FOUND') {
+    const filteredTenants = availableTenants.filter(t =>
+      t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      t.slug.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+
     return (
-      <div className="bg-white border border-slate-200 rounded-[2rem] p-8 flex flex-col gap-4 shadow-sm w-full max-w-md mx-auto">
-        <div className="flex flex-col items-center gap-3 text-center py-4">
-          <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
-            <AlertCircle className="w-6 h-6 text-red-600" />
+      <div className="bg-white border border-slate-200 rounded-[2rem] p-6 md:p-8 flex flex-col gap-5 shadow-sm w-full max-w-md mx-auto">
+        <div className="flex flex-col items-center gap-2 text-center">
+          <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center">
+            <Building className="w-6 h-6" />
           </div>
-          <h2 className="text-xl font-bold text-slate-900">Organization Not Found</h2>
+          <h2 className="text-xl font-bold text-slate-900">Select Your Organization</h2>
           <p className="text-slate-500 text-sm leading-relaxed">
-            This subdomain is not registered on SkipTray. Please check your link or contact support.
+            {tenantSlug && tenantSlug !== 'system'
+              ? `The organization "${tenantSlug}" is not registered on SkipTray.`
+              : 'Select your registered institution to sign in:'}
           </p>
         </div>
+
+        {availableTenants.length > 4 && (
+          <div className="relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Search organizations..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+            />
+          </div>
+        )}
+
+        {fetchingTenants ? (
+          <div className="py-8 text-center text-sm text-slate-400">Loading organizations...</div>
+        ) : filteredTenants.length > 0 ? (
+          <div className="space-y-2 max-h-64 overflow-y-auto pr-0.5">
+            {filteredTenants.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => switchTenant(t.slug)}
+                className="w-full text-left p-3.5 rounded-xl border border-slate-200 hover:border-indigo-500 hover:bg-indigo-50/50 transition flex items-center justify-between group cursor-pointer"
+              >
+                <div>
+                  <div className="font-semibold text-slate-800 text-sm group-hover:text-indigo-600 transition">
+                    {t.name}
+                  </div>
+                  <div className="text-xs text-slate-400 font-mono">
+                    {t.slug}
+                  </div>
+                </div>
+                <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-600 group-hover:translate-x-0.5 transition" />
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="py-6 text-center text-sm text-slate-400">
+            No active organizations found.
+          </div>
+        )}
       </div>
     );
   }

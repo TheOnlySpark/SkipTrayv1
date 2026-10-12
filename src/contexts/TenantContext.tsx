@@ -15,27 +15,44 @@ interface TenantContextType {
   isActive: boolean;
   loading: boolean;
   error: 'NOT_FOUND' | 'INACTIVE' | null;
+  switchTenant: (slug: string) => void;
 }
 
 const TenantContext = createContext<TenantContextType | undefined>(undefined);
 
 /**
- * Extracts the subdomain slug from the current hostname.
- * - "acme.skiptray.com"  → "acme"
- * - "acme.localhost"     → "acme"
- * - "localhost" / "skiptray.com" → "default"
+ * Extracts the subdomain slug from the current hostname or URL parameters.
+ * - "?tenant=slug" / "?slug=slug"  → explicit query override
+ * - "acme.skiptray.com"           → "acme"
+ * - "acme.localhost"              → "acme"
+ * - Stored user preference in localStorage (for localhost/IP testing)
+ * - Default fallback              → "system"
  */
 function extractSlug(hostname: string): string {
+  if (typeof window !== 'undefined') {
+    const params = new URLSearchParams(window.location.search);
+    const paramSlug = params.get('tenant') || params.get('slug');
+    if (paramSlug) {
+      const cleanSlug = paramSlug.toLowerCase().trim();
+      localStorage.setItem('skiptray_tenant_slug', cleanSlug);
+      return cleanSlug;
+    }
+  }
+
   // Strip port if present
   const host = hostname.split(':')[0];
+  const isIp = /^(\d{1,3}\.){3}\d{1,3}$/.test(host);
   const parts = host.split('.');
 
-  // acme.localhost → ["acme", "localhost"] → slug = "acme"
-  // acme.skiptray.com → ["acme", "skiptray", "com"] → slug = "acme"
-  // localhost → ["localhost"] → default
-  // skiptray.com → ["skiptray", "com"] → default
-  if (parts.length >= 2 && parts[0] !== 'www' && parts[0] !== 'skiptray') {
-    return parts[0];
+  // Extract subdomain if on domain or custom localhost subdomain (e.g., org.localhost)
+  if (!isIp && parts.length >= 2 && parts[0] !== 'www' && parts[0] !== 'skiptray') {
+    return parts[0].toLowerCase();
+  }
+
+  // If on localhost or direct IP, check if user previously chose an organization
+  if (typeof window !== 'undefined') {
+    const saved = localStorage.getItem('skiptray_tenant_slug');
+    if (saved) return saved.toLowerCase().trim();
   }
 
   return 'system';
@@ -52,6 +69,16 @@ export const TenantProvider = ({ children }: { children: React.ReactNode }) => {
   const [loading, setLoading]       = useState<boolean>(true);
   const [error, setError]           = useState<'NOT_FOUND' | 'INACTIVE' | null>(null);
 
+  const switchTenant = (slug: string) => {
+    if (typeof window !== 'undefined') {
+      const cleanSlug = slug.toLowerCase().trim();
+      localStorage.setItem('skiptray_tenant_slug', cleanSlug);
+      const url = new URL(window.location.href);
+      url.searchParams.set('tenant', cleanSlug);
+      window.location.href = url.toString();
+    }
+  };
+
   useEffect(() => {
     const slug = extractSlug(window.location.hostname);
     setTenantSlug(slug);
@@ -66,13 +93,8 @@ export const TenantProvider = ({ children }: { children: React.ReactNode }) => {
           }
         });
 
-        if (res.status === 404) {
-          setError('NOT_FOUND');
-          setLoading(false);
-          return;
-        }
-
-        if (!res.ok) {
+        if (res.status === 404 || !res.ok) {
+          localStorage.removeItem('skiptray_tenant_slug');
           setError('NOT_FOUND');
           setLoading(false);
           return;
@@ -112,7 +134,7 @@ export const TenantProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   return (
-    <TenantContext.Provider value={{ tenantId, tenantSlug, tenantName, settings, isActive, loading, error }}>
+    <TenantContext.Provider value={{ tenantId, tenantSlug, tenantName, settings, isActive, loading, error, switchTenant }}>
       {children}
     </TenantContext.Provider>
   );
