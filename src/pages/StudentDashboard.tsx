@@ -1,5 +1,5 @@
 import React from "react";
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/ModalDialogContext';
 import { supabase } from '../lib/supabase';
@@ -226,6 +226,7 @@ export default function StudentDashboard() {
 
   const cartTotalItems = cart.reduce((acc, c) => acc + c.quantity, 0);
   const cartTotalPrice = cart.reduce((acc, c) => acc + (Number(c.item.price || 0) * c.quantity), 0);
+  const ledger = useMemo(() => calculateOrderLedger(cartTotalPrice), [cartTotalPrice]);
 
   const addToCart = (item: MenuItem) => {
     if (isSuspended) {
@@ -362,7 +363,7 @@ export default function StudentDashboard() {
               <h2 style="font-size: 24px; font-weight: bold; margin-bottom: 8px;">ZohoPay Mock Popup</h2>
               <p style="color: #64748b; margin-bottom: 24px;">This is a test payment screen.</p>
               <div style="display: flex; gap: 12px; justify-content: center;">
-                <button id="mock-success-btn" style="background-color: #22c55e; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold;">Pay ₹${calculateOrderLedger(cartTotalPrice).gross_payable.toFixed(2)}</button>
+                <button id="mock-success-btn" style="background-color: #22c55e; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold;">Pay ₹${ledger.gross_payable.toFixed(2)}</button>
                 <button id="mock-cancel-btn" style="background-color: #ef4444; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold;">Cancel</button>
               </div>
             `;
@@ -397,8 +398,8 @@ export default function StudentDashboard() {
                 payment_id: response.payment_id || response.transaction_id || `ZOHO_${Date.now()}`,
                 idempotency_key: idempotencyKey,
                 cart_items: itemsJson,
-                total_amount: calculateOrderLedger(cartTotalPrice).gross_payable,
-                ledger: calculateOrderLedger(cartTotalPrice),
+                total_amount: ledger.gross_payable,
+                ledger: ledger,
                 pickup_time: pickupTime,
                 is_takeaway: false,
                 canteen_id: cart[0]?.item.canteen_id,
@@ -1083,15 +1084,23 @@ export default function StudentDashboard() {
                         <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', background: '#1e293b', borderRadius: '0.75rem' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
                             <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>Food Subtotal</span>
-                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem' }}>₹{calculateOrderLedger(cartTotalPrice).food_subtotal.toFixed(2)}</span>
+                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem' }}>₹{ledger.food_subtotal.toFixed(2)}</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>Platform Fee (3%)</span>
+                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem' }}>₹{ledger.commission_fee.toFixed(2)}</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>Payment Gateway Fee</span>
+                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem' }}>₹{ledger.gateway_fee.toFixed(2)}</span>
                           </div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem', paddingBottom: '0.75rem', borderBottom: '1px solid #334155' }}>
-                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>GST and other</span>
-                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem' }}>₹{(calculateOrderLedger(cartTotalPrice).commission_fee + calculateOrderLedger(cartTotalPrice).gateway_fee).toFixed(2)}</span>
+                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>GST</span>
+                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>₹0.00 (Included)</span>
                           </div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span style={{ color: '#e2e8f0', fontSize: '0.875rem', fontWeight: 600 }}>Total Amount to Pay</span>
-                            <span style={{ color: '#38bdf8', fontSize: '1.125rem', fontWeight: 700 }}>₹{calculateOrderLedger(cartTotalPrice).gross_payable.toFixed(2)}</span>
+                            <span style={{ color: '#38bdf8', fontSize: '1.125rem', fontWeight: 700 }}>₹{ledger.gross_payable.toFixed(2)}</span>
                           </div>
                         </div>
                       )}
@@ -1149,7 +1158,7 @@ export default function StudentDashboard() {
                                 ? 'Lunch Booking Opens at 9:30 AM'
                                 : isLunchClosedForToday
                                   ? 'Lunch Ordering Closed Today'
-                                  : (submitting ? 'Placing...' : `Place Order (${cartTotalItems} items • ₹${calculateOrderLedger(cartTotalPrice).gross_payable.toFixed(2)})`)}
+                                  : (submitting ? 'Placing...' : `Place Order (${cartTotalItems} items • ₹${ledger.gross_payable.toFixed(2)})`)}
                         </button>
                       </div>
                     </form>
@@ -1185,7 +1194,7 @@ export default function StudentDashboard() {
                     <span style={{ color: '#f1f5f9', fontWeight: 700, fontSize: '0.95rem' }}>Your Order</span>
                     {cartTotalItems > 0 && (
                       <span style={{ color: '#818cf8', fontSize: '0.75rem', fontWeight: 600 }}>
-                        ₹{calculateOrderLedger(cartTotalPrice).gross_payable.toFixed(2)} • {cartTotalItems} item{cartTotalItems > 1 ? 's' : ''}
+                        ₹{ledger.gross_payable.toFixed(2)} • {cartTotalItems} item{cartTotalItems > 1 ? 's' : ''}
                       </span>
                     )}
                   </div>

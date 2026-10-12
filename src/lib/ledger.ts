@@ -13,7 +13,21 @@ export interface OrderLedger {
 export function calculateOrderLedger(foodSubtotal: number): OrderLedger {
   const round2 = (val: number) => Number((Math.round(val * 100) / 100).toFixed(2));
 
-  const food_subtotal = round2(foodSubtotal);
+  const food_subtotal = round2(Number(foodSubtotal) || 0);
+  if (food_subtotal <= 0) {
+    return {
+      food_subtotal: 0,
+      commission_fee: 0,
+      target_net: 0,
+      gross_payable: 0,
+      gateway_fee: 0,
+      gw_deduction: 0,
+      net_settled: 0,
+      canteen_payable: 0,
+      platform_net: 0
+    };
+  }
+
   const commission_fee = round2(food_subtotal * 0.03);
   const target_net = round2(food_subtotal + commission_fee);
   const gross_payable = round2(target_net / 0.9941);
