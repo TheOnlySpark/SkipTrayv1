@@ -22,6 +22,7 @@ export default function Login() {
   const [regName, setRegName]         = useState('');
   const [regIdNumber, setRegIdNumber] = useState('');
   const [showRegPw, setShowRegPw]     = useState(false);
+  const [acceptTerms, setAcceptTerms] = useState(false);
 
   // Forgot password
   const [forgotEmail, setForgotEmail] = useState('');
@@ -100,6 +101,10 @@ export default function Login() {
   // ── REGISTER ───────────────────────────────────────────────────────────────
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!acceptTerms) {
+      setError('Please accept the Terms of Service and Privacy Policy to create an account.');
+      return;
+    }
     setLoading(true);
     setError('');
 
@@ -418,6 +423,8 @@ export default function Login() {
               <input
                 type="checkbox"
                 id="accept-terms"
+                checked={acceptTerms}
+                onChange={(e) => setAcceptTerms(e.target.checked)}
                 required
                 className="mt-0.5 accent-indigo-600 w-4 h-4 cursor-pointer shrink-0"
               />
@@ -427,15 +434,15 @@ export default function Login() {
             </div>
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || !acceptTerms}
               id="register-submit"
-              className="w-full px-4 py-3 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition-colors shadow-sm disabled:opacity-50 mt-2"
+              className="w-full px-4 py-3 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed mt-2"
             >
               {loading ? 'Creating account…' : 'Create Account'}
             </button>
             <button
               type="button"
-              onClick={() => { setStep('LOGIN'); setError(''); }}
+              onClick={() => { setStep('LOGIN'); setError(''); setAcceptTerms(false); }}
               className="w-full text-center text-xs font-bold text-slate-500 mt-2 hover:text-slate-800"
             >
               ← Back to Sign in
