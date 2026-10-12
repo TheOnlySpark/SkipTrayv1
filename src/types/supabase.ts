@@ -407,6 +407,55 @@ export interface Database {
           }
         ]
       }
+      user_notifications: {
+        Row: {
+          id: string
+          user_id: string
+          order_id: string | null
+          order_number: number | null
+          status: string
+          title: string
+          message: string
+          read: boolean
+          created_at: string
+        }
+        Insert: {
+          id: string
+          user_id: string
+          order_id?: string | null
+          order_number?: number | null
+          status: string
+          title: string
+          message: string
+          read?: boolean
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          order_id?: string | null
+          order_number?: number | null
+          status?: string
+          title?: string
+          message?: string
+          read?: boolean
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_notifications_user_id_fkey"
+            columns: ["user_id"]
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_notifications_order_id_fkey"
+            columns: ["order_id"]
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
     }
     Views: {
       [_ in never]: never
