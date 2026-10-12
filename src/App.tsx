@@ -156,65 +156,65 @@ export default function App() {
               <Router basename={import.meta.env.BASE_URL}>
                 <NotificationToast />
                 <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center font-sans text-slate-900 p-4 pt-20 md:p-6 md:pt-24">
-                <TopStickyHeader />
-                <NavigationHeader />
+                  <TopStickyHeader />
+                  <NavigationHeader />
 
-                <main className="w-full flex-grow flex flex-col items-center justify-center">
-                <Routes>
-                  <Route path="/" element={<Landing />} />
-                  <Route path="/privacy" element={<PrivacyPolicy />} />
-                  <Route path="/terms" element={<TermsOfService />} />
-                  <Route path="/login" element={<Login />} />
-                  <Route path="/dashboard" element={
-                    <ProtectedRoute>
-                      <Dashboard />
-                    </ProtectedRoute>
-                  } />
-                  <Route path="/student" element={
-                    <ProtectedRoute allowedRoles={['STUDENT', 'TEACHER']}>
-                      <StudentDashboard />
-                    </ProtectedRoute>
-                  } />
-                  <Route path="/staff" element={
-                    <ProtectedRoute allowedRoles={['STAFF', 'CANTEEN_ADMIN', 'UNI_ADMIN', 'SUPER_ADMIN']}>
-                      <StaffDashboard />
-                    </ProtectedRoute>
-                  } />
-                  <Route path="/canteen-admin" element={
-                    <ProtectedRoute allowedRoles={['CANTEEN_ADMIN', 'UNI_ADMIN', 'SUPER_ADMIN']}>
-                      <CanteenAdminDashboard />
-                    </ProtectedRoute>
-                  } />
-                  <Route path="/uni-admin" element={
-                    <ProtectedRoute allowedRoles={['UNI_ADMIN', 'SUPER_ADMIN', 'ADMIN']}>
-                      <UniAdminDashboard />
-                    </ProtectedRoute>
-                  } />
-                  <Route path="/super-admin" element={
-                    <ProtectedRoute allowedRoles={['SUPER_ADMIN']}>
-                      <SuperAdminDashboard />
-                    </ProtectedRoute>
-                  } />
-                </Routes>
-              </main>
+                  <main className="w-full flex-grow flex flex-col items-center justify-center">
+                    <Routes>
+                      <Route path="/" element={<Landing />} />
+                      <Route path="/privacy" element={<PrivacyPolicy />} />
+                      <Route path="/terms" element={<TermsOfService />} />
+                      <Route path="/login" element={<Login />} />
+                      <Route path="/dashboard" element={
+                        <ProtectedRoute>
+                          <Dashboard />
+                        </ProtectedRoute>
+                      } />
+                      <Route path="/student" element={
+                        <ProtectedRoute allowedRoles={['STUDENT', 'TEACHER']}>
+                          <StudentDashboard />
+                        </ProtectedRoute>
+                      } />
+                      <Route path="/staff" element={
+                        <ProtectedRoute allowedRoles={['STAFF']}>
+                          <StaffDashboard />
+                        </ProtectedRoute>
+                      } />
+                      <Route path="/canteen-admin" element={
+                        <ProtectedRoute allowedRoles={['CANTEEN_ADMIN']}>
+                          <CanteenAdminDashboard />
+                        </ProtectedRoute>
+                      } />
+                      <Route path="/uni-admin" element={
+                        <ProtectedRoute allowedRoles={['UNI_ADMIN', 'ADMIN']}>
+                          <UniAdminDashboard />
+                        </ProtectedRoute>
+                      } />
+                      <Route path="/super-admin" element={
+                        <ProtectedRoute allowedRoles={['SUPER_ADMIN']}>
+                          <SuperAdminDashboard />
+                        </ProtectedRoute>
+                      } />
+                    </Routes>
+                  </main>
 
-              <footer className="w-full max-w-4xl mt-12 py-6 border-t border-slate-200 flex flex-col md:flex-row justify-between items-center gap-4 text-[10px] text-slate-400 uppercase tracking-widest">
-                <div className="flex items-center gap-4">
-                  <span>&copy; 2026 SkipTray</span>
+                  <footer className="w-full max-w-4xl mt-12 py-6 border-t border-slate-200 flex flex-col md:flex-row justify-between items-center gap-4 text-[10px] text-slate-400 uppercase tracking-widest">
+                    <div className="flex items-center gap-4">
+                      <span>&copy; 2026 SkipTray</span>
+                    </div>
+                    <div className="flex gap-4">
+                      <Link to="/privacy" className="hover:text-slate-600 transition-colors">Privacy</Link>
+                      <Link to="/terms" className="hover:text-slate-600 transition-colors">Terms</Link>
+                    </div>
+                  </footer>
                 </div>
-                <div className="flex gap-4">
-                  <Link to="/privacy" className="hover:text-slate-600 transition-colors">Privacy</Link>
-                  <Link to="/terms" className="hover:text-slate-600 transition-colors">Terms</Link>
-                </div>
-              </footer>
-            </div>
-            <Analytics />
-            <SpeedInsights />
-          </Router>
-        </ModalDialogProvider>
-        </NotificationProvider>
-      </AuthProvider>
-    </QueryClientProvider>
+                <Analytics />
+                <SpeedInsights />
+              </Router>
+            </ModalDialogProvider>
+          </NotificationProvider>
+        </AuthProvider>
+      </QueryClientProvider>
     </TenantProvider>
   );
 }
