@@ -170,6 +170,17 @@ export default function CanteenAdminDashboard() {
   const handleCreateStaff = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentCanteenId) return;
+
+    const EMAIL_DOT_COM_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.com$/i;
+    if (!EMAIL_DOT_COM_REGEX.test(newStaffEmail.trim())) {
+      showAlert({ title: 'Validation Error', message: 'Invalid Email', type: 'error' });
+      return;
+    }
+    if (newStaffPassword.length < 8) {
+      showAlert({ title: 'Validation Error', message: 'Password must be at least 8 digits/characters long', type: 'error' });
+      return;
+    }
+
     setCreatingStaff(true);
     try {
       const functionsUrl = import.meta.env.VITE_SUPABASE_URL
@@ -698,6 +709,8 @@ export default function CanteenAdminDashboard() {
             <input
               type="email"
               required
+              pattern="[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[cC][oO][mM]"
+              title="Email must follow the format ____@____.com"
               placeholder="Email Address"
               value={newStaffEmail}
               onChange={(e) => setNewStaffEmail(e.target.value)}
@@ -706,8 +719,8 @@ export default function CanteenAdminDashboard() {
             <input
               type="password"
               required
-              minLength={6}
-              placeholder="Password (Min. 6 chars)"
+              minLength={8}
+              placeholder="Password (Min. 8 chars)"
               value={newStaffPassword}
               onChange={(e) => setNewStaffPassword(e.target.value)}
               className="px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"

@@ -109,6 +109,17 @@ export default function UniAdminDashboard() {
       showAlert({ title: 'Error', message: 'Please select a canteen first', type: 'error' });
       return;
     }
+
+    const EMAIL_DOT_COM_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.com$/i;
+    if (!EMAIL_DOT_COM_REGEX.test(newAdminEmail.trim())) {
+      showAlert({ title: 'Validation Error', message: 'Invalid Email', type: 'error' });
+      return;
+    }
+    if (newAdminPassword.length < 8) {
+      showAlert({ title: 'Validation Error', message: 'Password must be at least 8 digits/characters long', type: 'error' });
+      return;
+    }
+
     setCreatingAdmin(true);
     try {
       const functionsUrl = import.meta.env.VITE_SUPABASE_URL
@@ -297,8 +308,8 @@ export default function UniAdminDashboard() {
             {canteens.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
           <input type="text" required placeholder="Admin Name" value={newAdminName} onChange={e => setNewAdminName(e.target.value)} className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm" />
-          <input type="email" required placeholder="Admin Email" value={newAdminEmail} onChange={e => setNewAdminEmail(e.target.value)} className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm" />
-          <input type="password" required placeholder="Password" value={newAdminPassword} onChange={e => setNewAdminPassword(e.target.value)} className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm" />
+          <input type="email" required pattern="[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[cC][oO][mM]" title="Email must follow the format ____@____.com" placeholder="Admin Email" value={newAdminEmail} onChange={e => setNewAdminEmail(e.target.value)} className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm" />
+          <input type="password" required minLength={8} placeholder="Password (Min. 8 chars)" value={newAdminPassword} onChange={e => setNewAdminPassword(e.target.value)} className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm" />
           <button type="submit" disabled={creatingAdmin || !selectedCanteenId} className="px-5 py-2.5 bg-slate-800 text-white rounded-xl text-sm font-semibold hover:bg-slate-900 transition">
             {creatingAdmin ? 'Creating...' : 'Create Admin'}
           </button>
