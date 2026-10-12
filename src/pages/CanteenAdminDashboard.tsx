@@ -23,7 +23,14 @@ import {
   X,
   Clock,
   Package,
-  User
+  User,
+  Users,
+  UserPlus,
+  Mail,
+  Lock,
+  Eye,
+  EyeOff,
+  ShieldCheck
 } from 'lucide-react';
 
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
@@ -35,7 +42,7 @@ type Review = Database['public']['Tables']['item_reviews']['Row'] & {
 };
 
 export default function CanteenAdminDashboard() {
-  const { profile } = useAuth();
+  const { profile, onlineUserIds = new Set<string>() } = useAuth();
   const { tenantId } = useTenant();
   const { showAlert, showConfirm } = useDialog();
   const queryClient = useQueryClient();
@@ -238,7 +245,45 @@ export default function CanteenAdminDashboard() {
   const [newStaffName, setNewStaffName] = useState('');
   const [newStaffEmail, setNewStaffEmail] = useState('');
   const [newStaffPassword, setNewStaffPassword] = useState('');
+  const [showStaffPassword, setShowStaffPassword] = useState(false);
   const [creatingStaff, setCreatingStaff] = useState(false);
+  const [staffSearch, setStaffSearch] = useState('');
+
+  const { data: canteenStaff = [], isLoading: staffLoading } = useQuery({
+    queryKey: ['canteenStaff', currentCanteenId],
+    enabled: !!currentCanteenId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('canteen_id', currentCanteenId)
+        .eq('role', 'STAFF')
+        .order('created_at', { ascending: false });
+      if (error) {
+        console.error('Error fetching staff list:', error);
+        return [];
+      }
+      return (data as any[]) || [];
+    }
+  });
+
+  const activeStaffCount = useMemo(() => {
+    return canteenStaff.filter((s: any) => !s.suspended_until || new Date(s.suspended_until) <= new Date()).length;
+  }, [canteenStaff]);
+
+  const onlineStaffCount = useMemo(() => {
+    return canteenStaff.filter((s: any) => onlineUserIds.has(s.id)).length;
+  }, [canteenStaff, onlineUserIds]);
+
+  const filteredStaff = useMemo(() => {
+    if (!staffSearch.trim()) return canteenStaff;
+    const q = staffSearch.toLowerCase().trim();
+    return canteenStaff.filter((s: any) =>
+      (s.name || '').toLowerCase().includes(q) ||
+      (s.id_number || '').toLowerCase().includes(q) ||
+      (s.id || '').toLowerCase().includes(q)
+    );
+  }, [canteenStaff, staffSearch]);
 
   const handleCreateStaff = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -277,10 +322,65 @@ export default function CanteenAdminDashboard() {
       setNewStaffName('');
       setNewStaffEmail('');
       setNewStaffPassword('');
+      queryClient.invalidateQueries({ queryKey: ['canteenStaff', currentCanteenId] });
     } catch (err: any) {
       showAlert({ title: 'Error', message: err.message, type: 'error' });
     } finally {
       setCreatingStaff(false);
+    }
+  };
+
+  const handleToggleStaffStatus = async (staffMember: any) => {
+    const isCurrentlySuspended = Boolean(staffMember.suspended_until && new Date(staffMember.suspended_until) > new Date());
+    const actionText = isCurrentlySuspended ? 'Activate' : 'Deactivate';
+
+    const confirmed = await showConfirm({
+      title: `${actionText} Staff Account`,
+      message: `Are you sure you want to ${actionText.toLowerCase()} login access for ${staffMember.name || 'this staff member'}?`,
+      confirmText: actionText,
+      cancelText: 'Cancel',
+      type: isCurrentlySuspended ? 'info' : 'danger'
+    });
+    if (!confirmed) return;
+
+    const newSuspendedUntil = isCurrentlySuspended ? null : new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString();
+
+    // 1. Instant Optimistic UI Update: immediately change status in local cache
+    queryClient.setQueryData(['canteenStaff', currentCanteenId], (old: any[] = []) => {
+      return old.map((s: any) => s.id === staffMember.id ? { ...s, suspended_until: newSuspendedUntil } : s);
+    });
+
+    // 2. Persist to database
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        suspended_until: newSuspendedUntil
+      })
+      .eq('id', staffMember.id);
+
+    if (error) {
+      // Revert cache on error
+      queryClient.invalidateQueries({ queryKey: ['canteenStaff', currentCanteenId] });
+      showAlert({ title: 'Error', message: error.message, type: 'error' });
+    } else {
+      // 3. Broadcast real-time change to all other connected tabs / windows
+      try {
+        const staffChannel = supabase.channel(`canteen_staff_profiles_${currentCanteenId}`);
+        staffChannel.send({
+          type: 'broadcast',
+          event: 'staff_status_updated',
+          payload: { id: staffMember.id, suspended_until: newSuspendedUntil }
+        }).catch(() => {});
+      } catch (err) {
+        // ignore broadcast error
+      }
+
+      queryClient.invalidateQueries({ queryKey: ['canteenStaff', currentCanteenId] });
+      showAlert({
+        title: 'Status Updated',
+        message: `${staffMember.name || 'Staff account'} is now ${isCurrentlySuspended ? 'Active' : 'Inactive (Deactivated)'}.`,
+        type: 'success'
+      });
     }
   };
 
@@ -336,10 +436,31 @@ export default function CanteenAdminDashboard() {
       })
       .subscribe();
 
+    // Realtime Postgres changes and broadcasts for staff profiles (instant update across all clients)
+    const staffProfileSub = supabase
+      .channel(`canteen_staff_profiles_${currentCanteenId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'profiles',
+          filter: `canteen_id=eq.${currentCanteenId}`
+        },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['canteenStaff', currentCanteenId] });
+        }
+      )
+      .on('broadcast', { event: 'staff_status_updated' }, () => {
+        queryClient.invalidateQueries({ queryKey: ['canteenStaff', currentCanteenId] });
+      })
+      .subscribe();
+
     return () => {
       orderSub.unsubscribe();
       menuSub.unsubscribe();
       reviewSub.unsubscribe();
+      staffProfileSub.unsubscribe();
     };
   }, [currentCanteenId, queryClient]);
 
@@ -1102,46 +1223,310 @@ export default function CanteenAdminDashboard() {
 
       {/* Manage Staff Section */}
       <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 shadow-sm flex flex-col">
-        <h2 className="text-xl font-bold text-slate-800 mb-6">Manage Staff</h2>
-        <form onSubmit={handleCreateStaff} className="mb-6 bg-slate-50 p-6 rounded-2xl border border-slate-200">
-          <h3 className="font-bold text-slate-800 mb-4">Create New Staff User</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-            <input
-              type="text"
-              required
-              placeholder="Full Name"
-              value={newStaffName}
-              onChange={(e) => setNewStaffName(e.target.value)}
-              className="px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-            />
-            <input
-              type="email"
-              required
-              placeholder="Email Address"
-              value={newStaffEmail}
-              onChange={(e) => setNewStaffEmail(e.target.value)}
-              className="px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-            />
-            <input
-              type="password"
-              required
-              minLength={6}
-              placeholder="Password (Min. 6 chars)"
-              value={newStaffPassword}
-              onChange={(e) => setNewStaffPassword(e.target.value)}
-              className="px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-            />
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+          <div>
+            <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2.5">
+              <span className="w-8 h-8 rounded-xl bg-emerald-100/80 text-emerald-700 flex items-center justify-center shrink-0 shadow-xs">
+                <Users className="w-4 h-4" />
+              </span>
+              <span>Manage Staff</span>
+            </h2>
+            <p className="text-xs text-slate-500 mt-1">
+              Create and manage canteen staff accounts authorized to process kitchen orders and verify pickups.
+            </p>
           </div>
-          <div className="flex justify-end gap-2">
+          <span className="text-xs font-semibold px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-100 rounded-full w-fit flex items-center gap-1.5 self-start sm:self-auto">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span>{onlineStaffCount} Online • {activeStaffCount} Active • {canteenStaff.length} Total</span>
+          </span>
+        </div>
+
+        <form
+          onSubmit={handleCreateStaff}
+          className="relative bg-gradient-to-br from-slate-50 via-white to-emerald-50/20 p-6 md:p-7 rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden"
+        >
+          {/* Decorative ambient background accent */}
+          <div className="pointer-events-none absolute -right-16 -top-16 w-48 h-48 bg-emerald-100/40 rounded-full blur-3xl opacity-60" />
+
+          <div className="flex items-center gap-2.5 mb-5 relative z-10">
+            <span className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center shadow-xs">
+              <UserPlus className="w-3.5 h-3.5" />
+            </span>
+            <div>
+              <h3 className="font-bold text-slate-800 text-sm md:text-base leading-tight">Create New Staff User</h3>
+              <p className="text-[11px] text-slate-500">Provide staff credentials to grant access to the Staff Dashboard</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5 relative z-10">
+            {/* Full Name Field */}
+            <div className="flex flex-col">
+              <label className="text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1">
+                Full Name
+                <span className="text-rose-500">*</span>
+              </label>
+              <div className="relative group">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 group-focus-within:text-emerald-600 transition-colors">
+                  <User className="w-4 h-4" />
+                </div>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. John Doe"
+                  value={newStaffName}
+                  onChange={(e) => setNewStaffName(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200/90 rounded-xl text-sm text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 focus:outline-none transition-all shadow-xs hover:border-slate-300"
+                />
+              </div>
+            </div>
+
+            {/* Email Address Field */}
+            <div className="flex flex-col">
+              <label className="text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1">
+                Email Address
+                <span className="text-rose-500">*</span>
+              </label>
+              <div className="relative group">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 group-focus-within:text-emerald-600 transition-colors">
+                  <Mail className="w-4 h-4" />
+                </div>
+                <input
+                  type="email"
+                  required
+                  placeholder="e.g. staff@institution.edu"
+                  value={newStaffEmail}
+                  onChange={(e) => setNewStaffEmail(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200/90 rounded-xl text-sm text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 focus:outline-none transition-all shadow-xs hover:border-slate-300"
+                />
+              </div>
+            </div>
+
+            {/* Password Field */}
+            <div className="flex flex-col">
+              <label className="text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+                <span className="flex items-center gap-1">
+                  Password
+                  <span className="text-rose-500">*</span>
+                </span>
+                <span className="text-[10px] font-normal text-slate-400">Min. 6 chars</span>
+              </label>
+              <div className="relative group">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 group-focus-within:text-emerald-600 transition-colors">
+                  <Lock className="w-4 h-4" />
+                </div>
+                <input
+                  type={showStaffPassword ? "text" : "password"}
+                  required
+                  minLength={6}
+                  placeholder="Enter password"
+                  value={newStaffPassword}
+                  onChange={(e) => setNewStaffPassword(e.target.value)}
+                  className="w-full pl-10 pr-10 py-2.5 bg-white border border-slate-200/90 rounded-xl text-sm text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 focus:outline-none transition-all shadow-xs hover:border-slate-300"
+                />
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onClick={() => setShowStaffPassword(!showStaffPassword)}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                  aria-label={showStaffPassword ? "Hide password" : "Show password"}
+                >
+                  {showStaffPassword ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-slate-200/60 relative z-10">
+            <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <span>Created staff will have access to order queue and OTP scanner</span>
+            </div>
             <button
               type="submit"
               disabled={creatingStaff}
-              className="px-4 py-2 bg-emerald-600 text-white text-sm font-semibold rounded-xl hover:bg-emerald-700 disabled:opacity-50 transition"
+              className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white text-xs md:text-sm font-semibold rounded-xl shadow-xs hover:shadow-emerald-600/25 disabled:opacity-50 disabled:pointer-events-none transition-all duration-150 self-end sm:self-auto cursor-pointer"
             >
-              {creatingStaff ? 'Creating...' : 'Create Staff'}
+              <UserPlus className="w-4 h-4" />
+              <span>{creatingStaff ? 'Creating Staff Account...' : 'Create Staff User'}</span>
             </button>
           </div>
         </form>
+
+        {/* Existing Staff Members Sub-List */}
+        <div className="mt-8 pt-6 border-t border-slate-100 flex flex-col">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+            <div>
+              <h3 className="font-bold text-slate-800 text-sm md:text-base flex items-center gap-2 flex-wrap">
+                <span>Staff Accounts &amp; Login List</span>
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 shadow-2xs">
+                  {activeStaffCount} Active
+                </span>
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-sky-100 text-sky-800 flex items-center gap-1 shadow-2xs">
+                  <span className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-pulse" />
+                  {onlineStaffCount} Online Now
+                </span>
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-600">
+                  {canteenStaff.length} Total
+                </span>
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Real-time active account status and live staff session presence
+              </p>
+            </div>
+
+            {canteenStaff.length > 2 && (
+              <div className="relative w-full sm:w-64">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search staff members..."
+                  value={staffSearch}
+                  onChange={(e) => setStaffSearch(e.target.value)}
+                  className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+            )}
+          </div>
+
+          {staffLoading ? (
+            <div className="py-10 text-center text-sm text-slate-500 flex flex-col items-center justify-center gap-2">
+              <div className="w-6 h-6 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" />
+              <span className="text-xs font-medium">Loading registered staff...</span>
+            </div>
+          ) : filteredStaff.length === 0 ? (
+            <div className="p-8 bg-slate-50/70 border border-dashed border-slate-200 rounded-2xl text-center flex flex-col items-center justify-center">
+              <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mb-2">
+                <Users className="w-5 h-5" />
+              </div>
+              <p className="text-sm font-semibold text-slate-700">No Staff Accounts Found</p>
+              <p className="text-xs text-slate-400 mt-1 max-w-sm">
+                {staffSearch
+                  ? "No staff member matching your search query was found."
+                  : "No staff members are registered for this canteen yet. Use the form above to create your first staff user."}
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-2xl border border-slate-200/80">
+              <table className="w-full text-left border-collapse bg-white">
+                <thead>
+                  <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                    <th className="py-3 px-4">Staff Member</th>
+                    <th className="py-3 px-4">Role &amp; Access</th>
+                    <th className="py-3 px-4">Staff ID / Ref</th>
+                    <th className="py-3 px-4">Date Registered</th>
+                    <th className="py-3 px-4">Status &amp; Session</th>
+                    <th className="py-3 px-4 text-right">Account Access</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-sm">
+                  {filteredStaff.map((staff: any) => {
+                    const initials = (staff.name || 'S')
+                      .split(' ')
+                      .map((n: string) => n[0])
+                      .slice(0, 2)
+                      .join('')
+                      .toUpperCase();
+
+                    const isOnline = onlineUserIds.has(staff.id);
+                    const isSuspended = Boolean(staff.suspended_until && new Date(staff.suspended_until) > new Date());
+
+                    return (
+                      <tr key={staff.id} className="hover:bg-slate-50/60 transition-colors">
+                        <td className="py-3.5 px-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-100 to-emerald-200 text-emerald-800 font-bold text-xs flex items-center justify-center shadow-2xs shrink-0">
+                              {initials}
+                            </div>
+                            <div>
+                              <div className="font-semibold text-slate-900 leading-tight">
+                                {staff.name || 'Unnamed Staff'}
+                              </div>
+                              <div className="text-[11px] text-slate-400">
+                                {staff.id_number ? `ID: ${staff.id_number}` : 'Canteen Staff Member'}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60">
+                            <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                            STAFF
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 font-mono text-xs text-slate-500">
+                          {staff.id_number || `#${staff.id.substring(0, 8)}`}
+                        </td>
+                        <td className="py-3.5 px-4 text-xs text-slate-500">
+                          <div className="flex items-center gap-1.5">
+                            <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span>
+                              {staff.created_at
+                                ? new Date(staff.created_at).toLocaleDateString(undefined, {
+                                    year: 'numeric',
+                                    month: 'short',
+                                    day: 'numeric'
+                                  })
+                                : 'Recent'}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="py-3.5 px-4">
+                          {isSuspended ? (
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-700 bg-rose-50 px-2.5 py-1 rounded-full border border-rose-200 shadow-2xs">
+                                <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                                Inactive
+                              </span>
+                              <span className="text-[11px] text-slate-400 font-medium">
+                                (Deactivated)
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200 shadow-2xs">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                Active
+                              </span>
+                              {isOnline ? (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-100/90 px-2 py-0.5 rounded-full border border-emerald-300">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                  Online Now
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+                                  Offline
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4 text-right">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleStaffStatus(staff)}
+                            className={`px-3 py-1 rounded-lg text-xs font-semibold border transition cursor-pointer ${
+                              isSuspended
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100 shadow-2xs'
+                                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200'
+                            }`}
+                            title={isSuspended ? 'Activate staff login access' : 'Deactivate staff login access'}
+                          >
+                            {isSuspended ? 'Activate' : 'Deactivate'}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Student Penalties & Account Suspensions */}
