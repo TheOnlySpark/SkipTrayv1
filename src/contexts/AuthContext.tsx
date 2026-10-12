@@ -24,7 +24,6 @@ interface AuthContextType {
    * raw_app_meta_data → handle_new_user trigger → profiles.tenant_id
    */
   signUp: (email: string, password: string, tenantId: string) => Promise<SignUpResult>;
-  onlineUserIds: Set<string>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -34,7 +33,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [onlineUserIds, setOnlineUserIds] = useState<Set<string>>(new Set());
 
   const fetchProfile = async (userId: string) => {
     const { data, error } = await supabase
@@ -80,80 +78,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     };
   }, []);
 
-  // Realtime Presence tracking for users logged into a canteen
-  useEffect(() => {
-    if (!user?.id || !profile?.canteen_id) {
-      setOnlineUserIds(new Set());
-      return;
-    }
-
-    const channelName = `canteen_presence_${profile.canteen_id}`;
-    const presenceChannel = supabase.channel(channelName, {
-      config: {
-        presence: { key: user.id }
-      }
-    });
-
-    const syncPresence = () => {
-      const state = presenceChannel.presenceState();
-      const ids = new Set<string>();
-      Object.keys(state).forEach(key => {
-        ids.add(key);
-        const metas = state[key] as any[];
-        metas?.forEach(m => {
-          if (m?.user_id) ids.add(m.user_id);
-        });
-      });
-      if (user?.id) ids.add(user.id);
-      setOnlineUserIds(ids);
-    };
-
-    presenceChannel
-      .on('presence', { event: 'sync' }, () => {
-        syncPresence();
-      })
-      .on('presence', { event: 'join' }, ({ key, newPresences }) => {
-        setOnlineUserIds(prev => {
-          const next = new Set(prev);
-          next.add(key);
-          newPresences?.forEach((p: any) => {
-            if (p?.user_id) next.add(p.user_id);
-          });
-          return next;
-        });
-      })
-      .on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
-        setOnlineUserIds(prev => {
-          const next = new Set(prev);
-          next.delete(key);
-          leftPresences?.forEach((p: any) => {
-            if (p?.user_id) next.delete(p.user_id);
-          });
-          return next;
-        });
-      })
-      .subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') {
-          try {
-            await presenceChannel.track({
-              user_id: user.id,
-              name: profile.name,
-              role: profile.role,
-              online_at: new Date().toISOString()
-            });
-            syncPresence();
-          } catch (err) {
-            console.error('Error tracking presence:', err);
-          }
-        }
-      });
-
-    return () => {
-      presenceChannel.untrack().catch(() => {});
-      supabase.removeChannel(presenceChannel);
-    };
-  }, [user?.id, profile?.canteen_id, profile?.name, profile?.role]);
-
   const signOut = async () => {
     await supabase.auth.signOut();
   };
@@ -172,7 +96,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ session, user, profile, loading, signOut, refreshProfile: () => user ? fetchProfile(user.id) : Promise.resolve(), signUp, onlineUserIds }}>
+    <AuthContext.Provider value={{ session, user, profile, loading, signOut, refreshProfile: () => user ? fetchProfile(user.id) : Promise.resolve(), signUp }}>
       {children}
     </AuthContext.Provider>
   );
