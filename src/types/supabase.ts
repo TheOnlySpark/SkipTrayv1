@@ -352,6 +352,110 @@ export interface Database {
           }
         ]
       }
+      inv_products: {
+        Row: {
+          id: string
+          tenant_id: string
+          product_name: string
+          category: string | null
+          product_type: Database["public"]["Enums"]["inventory_product_type"]
+          sku: string | null
+          purchase_price: number | null
+          selling_price: number
+          current_stock: number
+          min_stock: number
+          expiry_date: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          tenant_id?: string
+          product_name: string
+          category?: string | null
+          product_type: Database["public"]["Enums"]["inventory_product_type"]
+          sku?: string | null
+          purchase_price?: number | null
+          selling_price: number
+          current_stock?: number
+          min_stock?: number
+          expiry_date?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          tenant_id?: string
+          product_name?: string
+          category?: string | null
+          product_type?: Database["public"]["Enums"]["inventory_product_type"]
+          sku?: string | null
+          purchase_price?: number | null
+          selling_price?: number
+          current_stock?: number
+          min_stock?: number
+          expiry_date?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inv_products_tenant_id_fkey"
+            columns: ["tenant_id"]
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      user_notifications: {
+        Row: {
+          id: string
+          user_id: string
+          order_id: string | null
+          order_number: number | null
+          status: string
+          title: string
+          message: string
+          read: boolean
+          created_at: string
+        }
+        Insert: {
+          id: string
+          user_id: string
+          order_id?: string | null
+          order_number?: number | null
+          status: string
+          title: string
+          message: string
+          read?: boolean
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          order_id?: string | null
+          order_number?: number | null
+          status?: string
+          title?: string
+          message?: string
+          read?: boolean
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_notifications_user_id_fkey"
+            columns: ["user_id"]
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_notifications_order_id_fkey"
+            columns: ["order_id"]
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
     }
     Views: {
       [_ in never]: never
