@@ -29,11 +29,15 @@ type PastOrder = Order & {
 
 import {
   formatPickupTime,
+  formatSingleTime,
   LUNCH_SLOTS,
   fetchLunchSlotConfig,
   generateSlotsFromConfig,
   validateSlotSelection,
+  validateUserCustomPickupTiming,
+  calculateEndTime,
   parseTimeToMinutes,
+  minutesToTimeString,
   LunchSlotConfig,
   LunchSlot,
   DEFAULT_LUNCH_SLOT_CONFIG,
@@ -133,6 +137,36 @@ export default function StudentDashboard() {
     const diffMinutes = slotMinutes - currentISTMinutes;
     return { isAvailable: res.isAvailable, diffMinutes, reason: res.reason };
   };
+
+  // User-Customizable Lunch Timing State
+  const [pickupStartTime, setPickupStartTime] = useState('12:40');
+  const [pickupDuration, setPickupDuration] = useState(15);
+
+  // Dynamic user timing validation & interval calculation
+  const customTimingResult = useMemo(() => {
+    return validateUserCustomPickupTiming(
+      pickupStartTime,
+      pickupDuration,
+      currentISTMinutes,
+      slotConfig.serviceStartTime || '12:00',
+      slotConfig.serviceEndTime || '14:00',
+      slotConfig.minNoticeMinutes || 30
+    );
+  }, [pickupStartTime, pickupDuration, currentISTMinutes, slotConfig]);
+
+  // Full pickup interval string saved with order (e.g. "12:40 – 12:55")
+  const fullPickupIntervalString = useMemo(() => {
+    if (!pickupStartTime) return '';
+    const end = calculateEndTime(pickupStartTime, pickupDuration);
+    return `${pickupStartTime} – ${end}`;
+  }, [pickupStartTime, pickupDuration]);
+
+  // Synchronize pickupTime state with the user's customized interval
+  useEffect(() => {
+    if (fullPickupIntervalString) {
+      setPickupTime(fullPickupIntervalString);
+    }
+  }, [fullPickupIntervalString]);
 
   const [reviewingItem, setReviewingItem] = useState<{ orderId: string, menuItemId: string, itemName: string } | null>(null);
   const [reviewRating, setReviewRating] = useState(5);
@@ -323,11 +357,16 @@ export default function StudentDashboard() {
       setError('Lunch ordering for today is closed. Orders must be placed at least 30 minutes before the pickup slot.');
       return;
     }
-    if (cart.length === 0 || !pickupTime) return;
+    if (cart.length === 0) return;
 
-    const slotAvail = getSlotAvailability(pickupTime);
-    if (!slotAvail.isAvailable) {
-      setError(`Selected pickup slot is no longer available (${slotAvail.reason}). Please select another Lunch slot.`);
+    if (!customTimingResult.isValid) {
+      setError(customTimingResult.error || 'Please select a valid lunch pickup time and duration.');
+      return;
+    }
+
+    const finalPickupTime = fullPickupIntervalString || pickupTime;
+    if (!finalPickupTime) {
+      setError('Please select your preferred lunch pickup time.');
       return;
     }
 
@@ -343,7 +382,7 @@ export default function StudentDashboard() {
     const idempotencyKey = crypto.randomUUID();
 
     // 2. Save cart state in case of redirect
-    localStorage.setItem('pending_order', JSON.stringify({ cart, pickupTime, idempotencyKey }));
+    localStorage.setItem('pending_order', JSON.stringify({ cart, pickupTime: finalPickupTime, idempotencyKey }));
 
     try {
       const ledger = calculateOrderLedger(cartTotalPrice);
@@ -1065,59 +1104,158 @@ export default function StudentDashboard() {
                     {/* Pickup time */}
                     <form onSubmit={handlePlaceOrder} style={{ paddingTop: '1rem', borderTop: '1px solid #1e293b' }}>
                       {error && <div style={{ color: '#f87171', fontSize: '0.75rem', marginBottom: '0.75rem', fontWeight: 600 }}>{error}</div>}
-                      <div style={{ marginBottom: '1rem' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                          <label style={{ fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em' }}>
-                            Lunch Pickup Slot ({formatPickupTime(slotConfig.serviceStartTime)} – {formatPickupTime(slotConfig.serviceEndTime)})
+                      {/* User-Customizable Lunch Pickup Timing */}
+                      <div style={{ marginBottom: '1rem', background: '#1e293b', padding: '0.875rem 1rem', borderRadius: '0.75rem', border: '1px solid #334155' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.625rem' }}>
+                          <label style={{ fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em' }}>
+                            Lunch Pickup Window ({formatSingleTime(slotConfig.serviceStartTime)} – {formatSingleTime(slotConfig.serviceEndTime)})
                           </label>
                           <span style={{ fontSize: '0.65rem', color: '#818cf8', fontWeight: 600, background: 'rgba(99,102,241,0.15)', padding: '2px 6px', borderRadius: '4px' }}>
                             Min {slotConfig.minNoticeMinutes || 30}m notice
                           </span>
                         </div>
 
-                        <select
-                          value={pickupTime}
-                          onChange={e => setPickupTime(e.target.value)}
-                          disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday}
-                          style={{
-                            width: '100%',
-                            background: '#1e293b',
-                            border: '1px solid #334155',
-                            color: 'white',
-                            padding: '0.625rem 0.875rem',
-                            borderRadius: '0.75rem',
-                            fontSize: '0.875rem',
-                            cursor: (isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday) ? 'not-allowed' : 'pointer',
-                            opacity: (isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday) ? 0.6 : 1,
-                            appearance: 'none' as const,
-                          }}
-                        >
-                          <option value="">
-                            {isSunday 
-                              ? 'Closed on Sundays' 
-                              : isBeforeOpeningTime
-                                ? 'Lunch Booking Opens at 9:30 AM'
-                                : isLunchClosedForToday 
-                                  ? 'Lunch Ordering Closed for Today' 
-                                  : availableLunchSlots.length === 0
-                                    ? 'No Lunch Slots Available'
-                                    : `Select a Lunch Slot (${slotConfig.slotDurationMinutes}-min intervals)...`}
-                          </option>
-                          {availableLunchSlots.map(slot => {
-                            const { isAvailable, reason } = getSlotAvailability(slot.value);
-                            const isDisabled = !slot.enabled || !isAvailable;
-                            return (
-                              <option key={slot.value} value={slot.value} disabled={isDisabled}>
-                                {slot.rangeLabel || slot.label} {!slot.enabled ? '(Unavailable)' : !isAvailable && reason ? `(${reason})` : ''}
-                              </option>
-                            );
-                          })}
-                        </select>
+                        {/* Preferred Start Time & Duration Controls */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.625rem', marginBottom: '0.625rem' }}>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.6875rem', color: '#cbd5e1', fontWeight: 600, marginBottom: '0.25rem' }}>
+                              Preferred Start Time
+                            </label>
+                            <input
+                              type="time"
+                              value={pickupStartTime}
+                              onChange={e => setPickupStartTime(e.target.value)}
+                              disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday}
+                              style={{
+                                width: '100%',
+                                background: '#0f172a',
+                                border: '1px solid #334155',
+                                color: 'white',
+                                padding: '0.5rem 0.625rem',
+                                borderRadius: '0.5rem',
+                                fontSize: '0.875rem',
+                                fontWeight: 600,
+                                cursor: (isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday) ? 'not-allowed' : 'pointer',
+                                opacity: (isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday) ? 0.6 : 1,
+                              }}
+                            />
+                          </div>
+
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.6875rem', color: '#cbd5e1', fontWeight: 600, marginBottom: '0.25rem' }}>
+                              Pickup Duration
+                            </label>
+                            <select
+                              value={pickupDuration}
+                              onChange={e => setPickupDuration(Number(e.target.value))}
+                              disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday}
+                              style={{
+                                width: '100%',
+                                background: '#0f172a',
+                                border: '1px solid #334155',
+                                color: 'white',
+                                padding: '0.5rem 0.625rem',
+                                borderRadius: '0.5rem',
+                                fontSize: '0.875rem',
+                                fontWeight: 600,
+                                cursor: (isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday) ? 'not-allowed' : 'pointer',
+                                opacity: (isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday) ? 0.6 : 1,
+                              }}
+                            >
+                              <option value={5}>5 Minutes</option>
+                              <option value={10}>10 Minutes</option>
+                              <option value={15}>15 Minutes</option>
+                              <option value={20}>20 Minutes</option>
+                              <option value={30}>30 Minutes</option>
+                              <option value={45}>45 Minutes</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* Quick Presets for Convenient 1-Tap Selection */}
+                        <div style={{ marginBottom: '0.625rem' }}>
+                          <span style={{ fontSize: '0.65rem', color: '#64748b', fontWeight: 600, display: 'block', marginBottom: '0.25rem' }}>
+                            Quick Start Presets:
+                          </span>
+                          <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap' }}>
+                            {['12:30', '12:45', '13:00', '13:15', '13:30'].map(t => (
+                              <button
+                                key={t}
+                                type="button"
+                                onClick={() => setPickupStartTime(t)}
+                                disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday}
+                                style={{
+                                  background: pickupStartTime === t ? '#4f46e5' : '#0f172a',
+                                  color: pickupStartTime === t ? 'white' : '#94a3b8',
+                                  border: `1px solid ${pickupStartTime === t ? '#6366f1' : '#334155'}`,
+                                  borderRadius: '0.375rem',
+                                  padding: '2px 7px',
+                                  fontSize: '0.6875rem',
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease'
+                                }}
+                              >
+                                {formatSingleTime(t)}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Calculated Window Preview Banner & Real-time Validation */}
+                        {isSunday ? (
+                          <div style={{ padding: '0.5rem', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '0.5rem', color: '#f87171', fontSize: '0.72rem' }}>
+                            Canteen is closed on Sundays.
+                          </div>
+                        ) : isBeforeOpeningTime ? (
+                          <div style={{ padding: '0.5rem', background: 'rgba(234,179,8,0.1)', border: '1px solid rgba(234,179,8,0.2)', borderRadius: '0.5rem', color: '#facc15', fontSize: '0.72rem' }}>
+                            Lunch booking opens at 9:30 AM.
+                          </div>
+                        ) : isLunchClosedForToday ? (
+                          <div style={{ padding: '0.5rem', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '0.5rem', color: '#f87171', fontSize: '0.72rem' }}>
+                            Lunch service is currently closed for today.
+                          </div>
+                        ) : customTimingResult.isValid ? (
+                          <div style={{
+                            padding: '0.5rem 0.75rem',
+                            background: 'rgba(99,102,241,0.12)',
+                            border: '1px solid rgba(99,102,241,0.3)',
+                            borderRadius: '0.5rem',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center'
+                          }}>
+                            <span style={{ fontSize: '0.75rem', color: '#cbd5e1' }}>
+                              Pickup Window: <strong style={{ color: '#a5b4fc', fontSize: '0.8125rem' }}>{customTimingResult.intervalLabel}</strong>
+                            </span>
+                            <span style={{ fontSize: '0.65rem', color: '#34d399', fontWeight: 700, background: 'rgba(52,211,153,0.15)', padding: '2px 6px', borderRadius: '4px' }}>
+                              {pickupDuration} min duration
+                            </span>
+                          </div>
+                        ) : (
+                          <div style={{
+                            padding: '0.5rem 0.75rem',
+                            background: 'rgba(239,68,68,0.15)',
+                            border: '1px solid rgba(239,68,68,0.3)',
+                            borderRadius: '0.5rem',
+                            color: '#fca5a5',
+                            fontSize: '0.72rem',
+                            fontWeight: 600
+                          }}>
+                            ⚠️ {customTimingResult.error}
+                          </div>
+                        )}
                       </div>
 
                       {/* Total Amount Summary */}
                       {cart.length > 0 && (
                         <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', background: '#1e293b', borderRadius: '0.75rem' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px solid #334155' }}>
+                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>Selected Pickup</span>
+                            <span style={{ color: '#a5b4fc', fontSize: '0.875rem', fontWeight: 600 }}>
+                              {customTimingResult.isValid ? customTimingResult.intervalLabel : `${formatSingleTime(pickupStartTime)} (${pickupDuration} mins)`}
+                            </span>
+                          </div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
                             <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>Food Subtotal</span>
                             <span style={{ color: '#e2e8f0', fontSize: '0.875rem' }}>₹{ledger.food_subtotal.toFixed(2)}</span>

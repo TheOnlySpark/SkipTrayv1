@@ -71,7 +71,12 @@ export default function StaffDashboard() {
     if (order.status !== 'READY') return { isOverdue: false, minutesOverdue: 0 };
     try {
       const createdDate = new Date(order.created_at);
-      const [hours, minutes] = order.pickup_time.split(':').map(Number);
+      const timePart = order.pickup_time.includes('–')
+        ? order.pickup_time.split('–')[1].trim()
+        : order.pickup_time.includes('-')
+          ? order.pickup_time.split('-')[1].trim()
+          : order.pickup_time;
+      const [hours, minutes] = timePart.split(':').map(Number);
       if (isNaN(hours) || isNaN(minutes)) return { isOverdue: false, minutesOverdue: 0 };
 
       const pickupDate = new Date(createdDate);
@@ -504,8 +509,11 @@ export default function StaffDashboard() {
   const filteredOrders = useMemo(() => {
     return orders.filter(order => {
       // Slot filtering
-      if (selectedSlot !== 'ALL' && order.pickup_time !== selectedSlot) {
-        return false;
+      if (selectedSlot !== 'ALL') {
+        const orderTime = order.pickup_time || '';
+        if (orderTime !== selectedSlot && !orderTime.startsWith(selectedSlot)) {
+          return false;
+        }
       }
       // Search filtering (Order #, Name, ID, Order ID)
       if (searchQuery.trim()) {
@@ -532,10 +540,18 @@ export default function StaffDashboard() {
   const slotCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     orders.forEach(o => {
-      counts[o.pickup_time] = (counts[o.pickup_time] || 0) + 1;
+      const orderTime = o.pickup_time || '';
+      // Direct count
+      counts[orderTime] = (counts[orderTime] || 0) + 1;
+      // Also credit matching configured tab if orderTime starts with slot value
+      activeLunchSlots.forEach(s => {
+        if (orderTime !== s.value && orderTime.startsWith(s.value)) {
+          counts[s.value] = (counts[s.value] || 0) + 1;
+        }
+      });
     });
     return counts;
-  }, [orders]);
+  }, [orders, activeLunchSlots]);
 
   // Compute Live Kitchen Batch Preparation Summary
   const batchPrepSummary = useMemo(() => {

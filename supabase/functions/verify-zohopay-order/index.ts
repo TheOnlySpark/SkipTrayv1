@@ -36,12 +36,20 @@ serve(async (req) => {
       throw new Error("Missing payment verification details");
     }
 
-    // Backend validation of pickup_time
-    if (!pickup_time || typeof pickup_time !== 'string' || !/^\d{2}:\d{2}$/.test(pickup_time)) {
-      throw new Error("Invalid pickup time. Expected format HH:MM.");
+    // Backend validation of pickup_time (supports HH:MM or HH:MM - HH:MM)
+    if (!pickup_time || typeof pickup_time !== 'string' || !/^\d{2}:\d{2}(\s*[-–]\s*\d{2}:\d{2})?$/.test(pickup_time.trim())) {
+      throw new Error("Invalid pickup time format. Expected HH:MM or HH:MM - HH:MM.");
     }
 
-    // Validate pickup_time against canteen lunch slot configuration
+    // Extract start and end times
+    const timeParts = pickup_time.split(/[-–]/).map((s: string) => s.trim());
+    const startTimeStr = timeParts[0];
+    const endTimeStr = timeParts[1] || null;
+
+    // Validate against canteen lunch service configuration
+    let serviceStartTime = '12:00';
+    let serviceEndTime = '14:00';
+
     if (canteen_id) {
       const { data: slotConfig } = await supabase
         .from('lunch_slot_configs')
@@ -53,23 +61,28 @@ serve(async (req) => {
         if (!slotConfig.is_lunch_enabled) {
           throw new Error("Lunch ordering is currently closed for this canteen.");
         }
+        serviceStartTime = slotConfig.service_start_time || '12:00';
+        serviceEndTime = slotConfig.service_end_time || '14:00';
+      }
+    }
 
-        const disabledSlots = Array.isArray(slotConfig.disabled_slots) ? slotConfig.disabled_slots : [];
-        if (disabledSlots.includes(pickup_time)) {
-          throw new Error(`The selected lunch pickup slot (${pickup_time}) is currently disabled.`);
-        }
+    const [pH, pM] = startTimeStr.split(':').map(Number);
+    const [sH, sM] = serviceStartTime.split(':').map(Number);
+    const [eH, eM] = serviceEndTime.split(':').map(Number);
 
-        const [pH, pM] = pickup_time.split(':').map(Number);
-        const [sH, sM] = (slotConfig.service_start_time || '12:00').split(':').map(Number);
-        const [eH, eM] = (slotConfig.service_end_time || '14:00').split(':').map(Number);
+    const startMinutes = pH * 60 + pM;
+    const serviceStartMin = sH * 60 + sM;
+    const serviceEndMin = eH * 60 + eM;
 
-        const pickupMinutes = pH * 60 + pM;
-        const startMinutes = sH * 60 + sM;
-        const endMinutes = eH * 60 + eM;
+    if (startMinutes < serviceStartMin || startMinutes >= serviceEndMin) {
+      throw new Error(`Pickup start time (${startTimeStr}) is outside the allowed lunch period (${serviceStartTime} - ${serviceEndTime}).`);
+    }
 
-        if (pickupMinutes < startMinutes || pickupMinutes >= endMinutes) {
-          throw new Error(`Pickup time ${pickup_time} is outside the configured lunch period (${slotConfig.service_start_time} - ${slotConfig.service_end_time}).`);
-        }
+    if (endTimeStr) {
+      const [endH, endM] = endTimeStr.split(':').map(Number);
+      const endMinutes = endH * 60 + endM;
+      if (endMinutes > serviceEndMin) {
+        throw new Error(`Pickup end time (${endTimeStr}) exceeds lunch closing time (${serviceEndTime}).`);
       }
     }
 

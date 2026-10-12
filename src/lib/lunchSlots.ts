@@ -35,15 +35,34 @@ export const DEFAULT_LUNCH_SLOT_CONFIG: LunchSlotConfig = {
 };
 
 /**
- * Format a 24-hr time string ('12:30', '13:00') into 12-hr format ('12:30 PM', '1:00 PM').
+ * Format a single 24-hr time string ('12:30', '13:00') into 12-hr format ('12:30 PM', '1:00 PM').
  */
-export const formatPickupTime = (timeStr?: string | null): string => {
+export const formatSingleTime = (timeStr?: string | null): string => {
   if (!timeStr) return '';
-  const [h, m] = timeStr.split(':').map(Number);
-  if (isNaN(h) || isNaN(m)) return timeStr;
+  const trimmed = timeStr.trim();
+  if (/AM|PM/i.test(trimmed)) return trimmed;
+  const [h, m] = trimmed.split(':').map(Number);
+  if (isNaN(h) || isNaN(m)) return trimmed;
   const period = h >= 12 ? 'PM' : 'AM';
   const displayHour = h > 12 ? h - 12 : h === 0 ? 12 : h;
   return `${displayHour}:${String(m).padStart(2, '0')} ${period}`;
+};
+
+/**
+ * Format a 24-hr time string or interval range ('12:30', '12:30 - 12:45', '12:30 – 12:45') into 12-hr format.
+ */
+export const formatPickupTime = (timeStr?: string | null): string => {
+  if (!timeStr) return '';
+  const trimmed = timeStr.trim();
+  if (trimmed.includes('–')) {
+    const parts = trimmed.split('–').map(s => s.trim());
+    return `${formatSingleTime(parts[0])} – ${formatSingleTime(parts[1])}`;
+  }
+  if (trimmed.includes(' - ')) {
+    const parts = trimmed.split(' - ').map(s => s.trim());
+    return `${formatSingleTime(parts[0])} – ${formatSingleTime(parts[1])}`;
+  }
+  return formatSingleTime(trimmed);
 };
 
 /**
@@ -68,7 +87,91 @@ export const minutesToTimeString = (totalMinutes: number): string => {
  * Format two time strings as a range: e.g. "12:00 PM – 12:15 PM"
  */
 export const formatTimeRange = (startTime: string, endTime: string): string => {
-  return `${formatPickupTime(startTime)} – ${formatPickupTime(endTime)}`;
+  return `${formatSingleTime(startTime)} – ${formatSingleTime(endTime)}`;
+};
+
+/**
+  * Calculate the end time string from start time and duration in minutes.
+  */
+export const calculateEndTime = (startTime: string, durationMinutes: number): string => {
+  const startMin = parseTimeToMinutes(startTime);
+  return minutesToTimeString(startMin + durationMinutes);
+};
+
+/**
+  * Validates a user's customized pickup timing against service hours and advance notice.
+  */
+export const validateUserCustomPickupTiming = (
+  startTime: string,
+  durationMinutes: number,
+  currentISTMinutes: number,
+  serviceStartTime = '12:00',
+  serviceEndTime = '14:00',
+  minNoticeMinutes = 30
+): { isValid: boolean; error?: string; endTime: string; intervalLabel: string } => {
+  if (!startTime || !/^\d{2}:\d{2}$/.test(startTime)) {
+    return {
+      isValid: false,
+      error: 'Please select a valid pickup start time (HH:MM).',
+      endTime: '',
+      intervalLabel: ''
+    };
+  }
+
+  const startMin = parseTimeToMinutes(startTime);
+  const endMin = startMin + durationMinutes;
+  const serviceStartMin = parseTimeToMinutes(serviceStartTime);
+  const serviceEndMin = parseTimeToMinutes(serviceEndTime);
+  const endTime = minutesToTimeString(endMin);
+  const intervalLabel = `${formatSingleTime(startTime)} – ${formatSingleTime(endTime)}`;
+
+  // 1. Check if start time is before service starts
+  if (startMin < serviceStartMin) {
+    return {
+      isValid: false,
+      error: `Pickup start time must be at or after ${formatSingleTime(serviceStartTime)}.`,
+      endTime,
+      intervalLabel
+    };
+  }
+
+  // 2. Check if start time is at or after service ends
+  if (startMin >= serviceEndMin) {
+    return {
+      isValid: false,
+      error: `Pickup start time must be before lunch service closes at ${formatSingleTime(serviceEndTime)}.`,
+      endTime,
+      intervalLabel
+    };
+  }
+
+  // 3. Check if calculated end time exceeds service closing time
+  if (endMin > serviceEndMin) {
+    return {
+      isValid: false,
+      error: `Calculated pickup window (${intervalLabel}) extends past lunch closing at ${formatSingleTime(serviceEndTime)}. Please choose an earlier time or shorter duration.`,
+      endTime,
+      intervalLabel
+    };
+  }
+
+  // 4. Check advance notice
+  const diffMinutes = startMin - currentISTMinutes;
+  if (diffMinutes < minNoticeMinutes) {
+    const earliestTime = minutesToTimeString(currentISTMinutes + minNoticeMinutes);
+    return {
+      isValid: false,
+      error: `Orders require at least ${minNoticeMinutes} minutes advance notice. Earliest available pickup is ${formatSingleTime(earliestTime)}.`,
+      endTime,
+      intervalLabel
+    };
+  }
+
+  return {
+    isValid: true,
+    endTime,
+    intervalLabel
+  };
 };
 
 /**
