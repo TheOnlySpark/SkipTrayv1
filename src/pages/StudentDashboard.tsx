@@ -901,8 +901,30 @@ export default function StudentDashboard() {
                 {cartOpen && (
                   <div style={{ padding: '1.5rem 1.5rem 0', maxHeight: '60vh', overflowY: 'auto' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                      <h3 style={{ color: '#f1f5f9', fontWeight: 700, fontSize: '1.1rem' }}>Your Order</h3>
-                      <span style={{ color: '#64748b', fontSize: '0.75rem', fontWeight: 600 }}>Max 5 items</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <h3 style={{ color: '#f1f5f9', fontWeight: 700, fontSize: '1.1rem', margin: 0 }}>Your Order</h3>
+                        <span style={{ color: '#64748b', fontSize: '0.75rem', fontWeight: 600 }}>Max 5 items</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setCartOpen(false)}
+                        aria-label="Close order section"
+                        title="Close"
+                        style={{
+                          background: 'rgba(255,255,255,0.08)',
+                          border: 'none',
+                          color: '#94a3b8',
+                          padding: '0.375rem',
+                          borderRadius: '0.5rem',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          transition: 'all 0.2s',
+                        }}
+                      >
+                        <IconX size={18} className="w-4.5 h-4.5" />
+                      </button>
                     </div>
 
                     {/* Sunday closure banner in cart */}
@@ -1074,42 +1096,62 @@ export default function StudentDashboard() {
                         </div>
                       )}
 
-                      <button
-                        type="submit"
-                        disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out)}
-                        style={{
-                          width: '100%',
-                          padding: '0.875rem',
-                          background: isSuspended
-                            ? '#ef4444'
+                      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem' }}>
+                        <button
+                          type="button"
+                          onClick={() => setCartOpen(false)}
+                          aria-label="Cancel order"
+                          style={{
+                            padding: '0.875rem 1.25rem',
+                            background: '#1e293b',
+                            color: '#94a3b8',
+                            borderRadius: '0.875rem',
+                            fontWeight: 600,
+                            fontSize: '0.875rem',
+                            border: '1px solid #334155',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out)}
+                          style={{
+                            flex: 1,
+                            padding: '0.875rem',
+                            background: isSuspended
+                              ? '#ef4444'
+                              : isSunday
+                                ? '#64748b'
+                                : isBeforeOpeningTime
+                                  ? '#4f46e5'
+                                  : isLunchClosedForToday
+                                    ? '#64748b'
+                                    : (cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out))
+                                      ? 'rgba(99,102,241,0.4)' : '#6366f1',
+                            color: 'white',
+                            borderRadius: '0.875rem',
+                            fontWeight: 700,
+                            fontSize: '0.875rem',
+                            border: 'none',
+                            cursor: isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cart.length === 0 || !pickupTime || submitting ? 'not-allowed' : 'pointer',
+                            transition: 'background 0.2s',
+                          }}
+                        >
+                          {isSuspended
+                            ? 'Account Deactivated (3-Day Penalty)'
                             : isSunday
-                              ? '#64748b'
+                              ? 'Closed on Sundays'
                               : isBeforeOpeningTime
-                                ? '#4f46e5'
+                                ? 'Lunch Booking Opens at 9:30 AM'
                                 : isLunchClosedForToday
-                                  ? '#64748b'
-                                  : (cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out))
-                                    ? 'rgba(99,102,241,0.4)' : '#6366f1',
-                          color: 'white',
-                          borderRadius: '0.875rem',
-                          fontWeight: 700,
-                          fontSize: '0.875rem',
-                          border: 'none',
-                          cursor: isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cart.length === 0 || !pickupTime || submitting ? 'not-allowed' : 'pointer',
-                          transition: 'background 0.2s',
-                          marginBottom: '1rem',
-                        }}
-                      >
-                        {isSuspended
-                          ? 'Account Deactivated (3-Day Penalty)'
-                          : isSunday
-                            ? 'Closed on Sundays'
-                            : isBeforeOpeningTime
-                              ? 'Lunch Booking Opens at 9:30 AM'
-                              : isLunchClosedForToday
-                                ? 'Lunch Ordering Closed Today'
-                                : (submitting ? 'Placing...' : `Place Order (${cartTotalItems} items • ₹${calculateOrderLedger(cartTotalPrice).gross_payable.toFixed(2)})`)}
-                      </button>
+                                  ? 'Lunch Ordering Closed Today'
+                                  : (submitting ? 'Placing...' : `Place Order (${cartTotalItems} items • ₹${calculateOrderLedger(cartTotalPrice).gross_payable.toFixed(2)})`)}
+                        </button>
+                      </div>
                     </form>
                   </div>
                 )}
