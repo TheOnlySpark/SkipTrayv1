@@ -36,6 +36,43 @@ serve(async (req) => {
       throw new Error("Missing payment verification details");
     }
 
+    // Backend validation of pickup_time
+    if (!pickup_time || typeof pickup_time !== 'string' || !/^\d{2}:\d{2}$/.test(pickup_time)) {
+      throw new Error("Invalid pickup time. Expected format HH:MM.");
+    }
+
+    // Validate pickup_time against canteen lunch slot configuration
+    if (canteen_id) {
+      const { data: slotConfig } = await supabase
+        .from('lunch_slot_configs')
+        .select('*')
+        .eq('canteen_id', canteen_id)
+        .maybeSingle();
+
+      if (slotConfig) {
+        if (!slotConfig.is_lunch_enabled) {
+          throw new Error("Lunch ordering is currently closed for this canteen.");
+        }
+
+        const disabledSlots = Array.isArray(slotConfig.disabled_slots) ? slotConfig.disabled_slots : [];
+        if (disabledSlots.includes(pickup_time)) {
+          throw new Error(`The selected lunch pickup slot (${pickup_time}) is currently disabled.`);
+        }
+
+        const [pH, pM] = pickup_time.split(':').map(Number);
+        const [sH, sM] = (slotConfig.service_start_time || '12:00').split(':').map(Number);
+        const [eH, eM] = (slotConfig.service_end_time || '14:00').split(':').map(Number);
+
+        const pickupMinutes = pH * 60 + pM;
+        const startMinutes = sH * 60 + sM;
+        const endMinutes = eH * 60 + eM;
+
+        if (pickupMinutes < startMinutes || pickupMinutes >= endMinutes) {
+          throw new Error(`Pickup time ${pickup_time} is outside the configured lunch period (${slotConfig.service_start_time} - ${slotConfig.service_end_time}).`);
+        }
+      }
+    }
+
     // Verify payment with ZohoPay API
     const zohoPaySecret = Deno.env.get("ZOHOPAY_SECRET_KEY");
     if (zohoPaySecret && zohoPaySecret !== "mock") {

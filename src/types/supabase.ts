@@ -43,6 +43,67 @@ export interface Database {
           }
         ]
       }
+      lunch_slot_configs: {
+        Row: {
+          id: string
+          canteen_id: string | null
+          tenant_id: string | null
+          service_start_time: string
+          service_end_time: string
+          slot_duration_minutes: number
+          min_notice_minutes: number
+          is_lunch_enabled: boolean
+          disabled_slots: Json
+          slot_capacities: Json
+          custom_slots: Json
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          canteen_id?: string | null
+          tenant_id?: string | null
+          service_start_time?: string
+          service_end_time?: string
+          slot_duration_minutes?: number
+          min_notice_minutes?: number
+          is_lunch_enabled?: boolean
+          disabled_slots?: Json
+          slot_capacities?: Json
+          custom_slots?: Json
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          canteen_id?: string | null
+          tenant_id?: string | null
+          service_start_time?: string
+          service_end_time?: string
+          slot_duration_minutes?: number
+          min_notice_minutes?: number
+          is_lunch_enabled?: boolean
+          disabled_slots?: Json
+          slot_capacities?: Json
+          custom_slots?: Json
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lunch_slot_configs_canteen_id_fkey"
+            columns: ["canteen_id"]
+            referencedRelation: "canteens"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lunch_slot_configs_tenant_id_fkey"
+            columns: ["tenant_id"]
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
       menu_items: {
         Row: {
           created_at: string

@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/ModalDialogContext';
 import { supabase } from '../lib/supabase';
 import { Database } from '../types/supabase';
-import { formatPickupTime, LUNCH_SLOTS } from './StudentDashboard';
+import { formatPickupTime, LUNCH_SLOTS, fetchLunchSlotConfig, generateSlotsFromConfig, LunchSlot } from '../lib/lunchSlots';
 import {
   IconAlertTriangle,
   IconCheckCircle,
@@ -43,6 +43,12 @@ export default function StaffDashboard() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [viewMode, setViewMode] = useState<'KANBAN' | 'GRID'>('KANBAN');
   const [showBatchSummary, setShowBatchSummary] = useState<boolean>(true);
+  const [configuredSlots, setConfiguredSlots] = useState<LunchSlot[]>([]);
+
+  const activeLunchSlots = useMemo(() => {
+    return configuredSlots.length > 0 ? configuredSlots : LUNCH_SLOTS;
+  }, [configuredSlots]);
+
 
   // Quick OTP & QR Scanner Verification State
   const [quickOtpInput, setQuickOtpInput] = useState('');
@@ -107,6 +113,17 @@ export default function StaffDashboard() {
     fetchOrders();
     fetchMenu();
 
+    fetchLunchSlotConfig(profile.canteen_id).then(cfg => {
+      setConfiguredSlots(generateSlotsFromConfig(cfg));
+    });
+
+    const handleConfigUpdate = (e: any) => {
+      if (e.detail) {
+        setConfiguredSlots(generateSlotsFromConfig(e.detail));
+      }
+    };
+    window.addEventListener('lunch_slot_config_updated', handleConfigUpdate);
+
     // Realtime subscriptions strictly locked to this staff member's assigned canteen
     const orderSub = supabase.channel(`staff_orders_${profile.canteen_id}`)
       .on('postgres_changes', { 
@@ -130,9 +147,24 @@ export default function StaffDashboard() {
       })
       .subscribe();
 
+    const slotSub = supabase.channel(`staff_slots_${profile.canteen_id}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'lunch_slot_configs',
+        filter: `canteen_id=eq.${profile.canteen_id}`
+      }, () => {
+        fetchLunchSlotConfig(profile.canteen_id).then(cfg => {
+          setConfiguredSlots(generateSlotsFromConfig(cfg));
+        });
+      })
+      .subscribe();
+
     return () => {
+      window.removeEventListener('lunch_slot_config_updated', handleConfigUpdate);
       orderSub.unsubscribe();
       menuSub.unsubscribe();
+      slotSub.unsubscribe();
     };
   }, [profile?.canteen_id]);
 
@@ -895,7 +927,7 @@ export default function StaffDashboard() {
             </span>
           </button>
 
-          {LUNCH_SLOTS.map(slot => {
+          {activeLunchSlots.map(slot => {
             const count = slotCounts[slot.value] || 0;
             const isSelected = selectedSlot === slot.value;
             return (
@@ -910,7 +942,7 @@ export default function StaffDashboard() {
                       : 'bg-slate-50 text-slate-400 border-slate-200 opacity-70'
                 }`}
               >
-                <span>{slot.label}</span>
+                <span>{slot.rangeLabel || slot.label}</span>
                 <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
                   isSelected 
                     ? 'bg-indigo-800 text-white' 

@@ -10,8 +10,17 @@ import {
   IconAlertTriangle,
   IconBan,
   IconStar,
-  IconSparkles
+  IconSparkles,
+  IconClock,
+  IconCheckCircle
 } from '../components/Icons';
+import {
+  fetchLunchSlotConfig,
+  saveLunchSlotConfig,
+  generateSlotsFromConfig,
+  LunchSlotConfig,
+  DEFAULT_LUNCH_SLOT_CONFIG
+} from '../lib/lunchSlots';
 
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 type FoodType = Database['public']['Enums']['food_type'];
@@ -234,6 +243,99 @@ export default function CanteenAdminDashboard() {
   const [newItemPrice, setNewItemPrice] = useState('');
   const [newItemType, setNewItemType] = useState<FoodType>('VEG');
   const [priceError, setPriceError] = useState<string | null>(null);
+
+  // Lunch Pickup Time Slots Management State
+  const [slotConfig, setSlotConfig] = useState<LunchSlotConfig>(DEFAULT_LUNCH_SLOT_CONFIG);
+  const [slotConfigLoading, setSlotConfigLoading] = useState(true);
+  const [savingSlotConfig, setSavingSlotConfig] = useState(false);
+  const [slotSaveSuccess, setSlotSaveSuccess] = useState(false);
+
+  useEffect(() => {
+    async function loadSlotConfig() {
+      setSlotConfigLoading(true);
+      const cfg = await fetchLunchSlotConfig(currentCanteenId);
+      setSlotConfig(cfg);
+      setSlotConfigLoading(false);
+    }
+    loadSlotConfig();
+  }, [currentCanteenId]);
+
+  const generatedSlots = React.useMemo(() => {
+    return generateSlotsFromConfig(slotConfig);
+  }, [slotConfig]);
+
+  const handleToggleSlot = (slotValue: string) => {
+    setSlotConfig(prev => {
+      const disabled = new Set(prev.disabledSlots || []);
+      if (disabled.has(slotValue)) {
+        disabled.delete(slotValue);
+      } else {
+        disabled.add(slotValue);
+      }
+      return {
+        ...prev,
+        disabledSlots: Array.from(disabled),
+      };
+    });
+  };
+
+  const handleToggleAllSlots = (enableAll: boolean) => {
+    if (enableAll) {
+      setSlotConfig(prev => ({ ...prev, disabledSlots: [] }));
+    } else {
+      setSlotConfig(prev => ({
+        ...prev,
+        disabledSlots: generatedSlots.map(s => s.value),
+      }));
+    }
+  };
+
+  const handleSaveSlotConfig = async () => {
+    setSavingSlotConfig(true);
+    setSlotSaveSuccess(false);
+
+    const [startH, startM] = slotConfig.serviceStartTime.split(':').map(Number);
+    const [endH, endM] = slotConfig.serviceEndTime.split(':').map(Number);
+    const startMinutes = (startH || 0) * 60 + (startM || 0);
+    const endMinutes = (endH || 0) * 60 + (endM || 0);
+
+    if (startMinutes >= endMinutes) {
+      showAlert({
+        title: 'Invalid Timings',
+        message: 'Lunch service end time must be later than the start time.',
+        type: 'warning',
+      });
+      setSavingSlotConfig(false);
+      return;
+    }
+
+    const res = await saveLunchSlotConfig(slotConfig, currentCanteenId, currentTenantId);
+    setSavingSlotConfig(false);
+
+    if (res.success) {
+      setSlotSaveSuccess(true);
+      setTimeout(() => setSlotSaveSuccess(false), 3500);
+      showAlert({
+        title: 'Settings Saved',
+        message: 'Lunch pickup time slot configuration has been saved successfully!',
+        type: 'success',
+      });
+    } else {
+      showAlert({
+        title: 'Save Failed',
+        message: res.error || 'Failed to save lunch slot configuration.',
+        type: 'error',
+      });
+    }
+  };
+
+  const handleResetSlotDefaults = () => {
+    setSlotConfig({
+      ...DEFAULT_LUNCH_SLOT_CONFIG,
+      canteenId: currentCanteenId,
+      tenantId: currentTenantId,
+    });
+  };
 
   useEffect(() => {
     if (!currentCanteenId) return;
@@ -752,6 +854,235 @@ export default function CanteenAdminDashboard() {
             </button>
           </div>
         </form>
+      </div>
+
+      {/* Lunch Pickup Time Slots Management */}
+      <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 shadow-sm flex flex-col">
+        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-6 pb-4 border-b border-slate-100">
+          <div>
+            <div className="flex items-center gap-2">
+              <div className="w-9 h-9 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600">
+                <IconClock size={20} className="w-5 h-5 text-indigo-600 shrink-0" />
+              </div>
+              <h2 className="text-xl font-bold text-slate-800">Lunch Pickup Time Slots Management</h2>
+            </div>
+            <p className="text-xs text-slate-500 mt-1">
+              Configure available lunch service hours, interval durations (5m, 10m, 15m, 20m, 30m), and toggle individual slot availability.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+              slotConfig.isLunchEnabled 
+                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
+                : 'bg-rose-50 text-rose-700 border border-rose-200'
+            }`}>
+              {slotConfig.isLunchEnabled ? 'Lunch Ordering Active' : 'Lunch Ordering Disabled'}
+            </span>
+          </div>
+        </div>
+
+        {slotConfigLoading ? (
+          <div className="text-slate-500 text-sm py-8 text-center">Loading lunch slot configuration...</div>
+        ) : (
+          <div className="space-y-6">
+            {/* Global Timing & Interval Settings */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 p-4 sm:p-5 bg-slate-50 border border-slate-200/80 rounded-2xl">
+              <div>
+                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+                  Service Start Time
+                </label>
+                <input
+                  type="time"
+                  value={slotConfig.serviceStartTime}
+                  onChange={e => setSlotConfig(prev => ({ ...prev, serviceStartTime: e.target.value }))}
+                  className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                <span className="text-[11px] text-slate-400 mt-1 block">
+                  Current: {formatPickupTime(slotConfig.serviceStartTime)}
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+                  Service End Time
+                </label>
+                <input
+                  type="time"
+                  value={slotConfig.serviceEndTime}
+                  onChange={e => setSlotConfig(prev => ({ ...prev, serviceEndTime: e.target.value }))}
+                  className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                <span className="text-[11px] text-slate-400 mt-1 block">
+                  Current: {formatPickupTime(slotConfig.serviceEndTime)}
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+                  Slot Interval Duration
+                </label>
+                <select
+                  value={slotConfig.slotDurationMinutes}
+                  onChange={e => setSlotConfig(prev => ({ ...prev, slotDurationMinutes: Number(e.target.value) }))}
+                  className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value={5}>5 Minutes</option>
+                  <option value={10}>10 Minutes</option>
+                  <option value={15}>15 Minutes (Default)</option>
+                  <option value={20}>20 Minutes</option>
+                  <option value={30}>30 Minutes</option>
+                  <option value={45}>45 Minutes</option>
+                  <option value={60}>60 Minutes</option>
+                </select>
+                <span className="text-[11px] text-slate-400 mt-1 block">
+                  Generates slots across service hours
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+                  Advance Notice Cutoff
+                </label>
+                <select
+                  value={slotConfig.minNoticeMinutes}
+                  onChange={e => setSlotConfig(prev => ({ ...prev, minNoticeMinutes: Number(e.target.value) }))}
+                  className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value={0}>No notice required</option>
+                  <option value={15}>15 Minutes before slot</option>
+                  <option value={30}>30 Minutes before slot (Default)</option>
+                  <option value={45}>45 Minutes before slot</option>
+                  <option value={60}>60 Minutes before slot</option>
+                </select>
+                <span className="text-[11px] text-slate-400 mt-1 block">
+                  Buffer time for kitchen preparation
+                </span>
+              </div>
+            </div>
+
+            {/* Service Toggle */}
+            <div className="flex items-center justify-between p-4 bg-indigo-50/50 border border-indigo-100 rounded-2xl">
+              <div className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  id="enableLunchToggle"
+                  checked={slotConfig.isLunchEnabled}
+                  onChange={e => setSlotConfig(prev => ({ ...prev, isLunchEnabled: e.target.checked }))}
+                  className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+                />
+                <label htmlFor="enableLunchToggle" className="text-sm font-bold text-slate-800 cursor-pointer">
+                  Enable Lunch Ordering Service
+                </label>
+              </div>
+              <span className="text-xs text-slate-500">
+                Turn off to temporarily stop accepting lunch pickup orders.
+              </span>
+            </div>
+
+            {/* Generated Slots Grid & Individual Slot Toggles */}
+            <div>
+              <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 mb-3">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-800">
+                    Active Slots ({generatedSlots.filter(s => s.enabled).length} of {generatedSlots.length} Enabled)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Click any slot badge to toggle availability on or off. Disabled slots will be hidden or grayed out for students.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleAllSlots(true)}
+                    className="text-xs font-semibold px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors"
+                  >
+                    Enable All
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleAllSlots(false)}
+                    className="text-xs font-semibold px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors"
+                  >
+                    Disable All
+                  </button>
+                </div>
+              </div>
+
+              {generatedSlots.length === 0 ? (
+                <div className="p-6 text-center text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-2xl">
+                  No slots generated. Please check that End Time is later than Start Time and duration is valid.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                  {generatedSlots.map(slot => {
+                    const isDisabled = !slot.enabled;
+                    return (
+                      <div
+                        key={slot.value}
+                        className={`p-3 rounded-xl border transition-all flex flex-col justify-between gap-2 ${
+                          isDisabled
+                            ? 'bg-slate-100 border-slate-200 opacity-60'
+                            : 'bg-white border-indigo-200/80 hover:border-indigo-400 shadow-xs'
+                        }`}
+                      >
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <span className="text-xs font-mono font-bold text-slate-800">
+                              {slot.rangeLabel}
+                            </span>
+                            <div className="text-[11px] text-slate-500">
+                              Pickup: {formatPickupTime(slot.value)}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleSlot(slot.value)}
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider transition-colors ${
+                              isDisabled
+                                ? 'bg-slate-200 text-slate-600 hover:bg-slate-300'
+                                : 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                            }`}
+                          >
+                            {isDisabled ? 'Disabled' : 'Enabled'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Save Button Row */}
+            <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-4 border-t border-slate-200">
+              <button
+                type="button"
+                onClick={handleResetSlotDefaults}
+                className="text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors"
+              >
+                Reset to Default (12:00 PM – 2:00 PM, 15m intervals)
+              </button>
+
+              <div className="flex items-center gap-3">
+                {slotSaveSuccess && (
+                  <span className="text-xs text-emerald-600 font-bold flex items-center gap-1">
+                    <IconCheckCircle size={14} className="w-3.5 h-3.5 text-emerald-600" />
+                    Configuration Saved!
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={handleSaveSlotConfig}
+                  disabled={savingSlotConfig || generatedSlots.length === 0}
+                  className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl shadow-sm transition-all active:scale-95 flex items-center gap-2"
+                >
+                  <IconCheckCircle size={16} className="w-4 h-4" />
+                  <span>{savingSlotConfig ? 'Saving Configuration...' : 'Save Slot Configuration'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Student Penalties & Account Suspensions */}

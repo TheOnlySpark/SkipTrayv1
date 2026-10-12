@@ -27,25 +27,20 @@ type PastOrder = Order & {
   item_reviews: ItemReview[];
 };
 
-export const LUNCH_SLOTS = [
-  { value: '12:30', label: '12:30 PM' },
-  { value: '12:40', label: '12:40 PM' },
-  { value: '12:50', label: '12:50 PM' },
-  { value: '13:00', label: '1:00 PM' },
-  { value: '13:10', label: '1:10 PM' },
-  { value: '13:20', label: '1:20 PM' },
-  { value: '13:30', label: '1:30 PM' },
-  { value: '13:40', label: '1:40 PM' },
-];
+import {
+  formatPickupTime,
+  LUNCH_SLOTS,
+  fetchLunchSlotConfig,
+  generateSlotsFromConfig,
+  validateSlotSelection,
+  parseTimeToMinutes,
+  LunchSlotConfig,
+  LunchSlot,
+  DEFAULT_LUNCH_SLOT_CONFIG,
+} from '../lib/lunchSlots';
 
-export const formatPickupTime = (timeStr?: string | null) => {
-  if (!timeStr) return '';
-  const [h, m] = timeStr.split(':').map(Number);
-  if (isNaN(h) || isNaN(m)) return timeStr;
-  const period = h >= 12 ? 'PM' : 'AM';
-  const displayHour = h > 12 ? h - 12 : h === 0 ? 12 : h;
-  return `${displayHour}:${String(m).padStart(2, '0')} ${period}`;
-};
+export { formatPickupTime, LUNCH_SLOTS };
+
 
 export default function StudentDashboard() {
   const { profile, signOut } = useAuth();
@@ -90,21 +85,54 @@ export default function StudentDashboard() {
   // Check if current time is before 9:30 AM opening time
   const isBeforeOpeningTime = false;
 
-  // Helper to determine slot availability (must be placed >= 30 mins before pickup slot today)
+  // Configurable Lunch Slot Management State
+  const [slotConfig, setSlotConfig] = useState<LunchSlotConfig>(DEFAULT_LUNCH_SLOT_CONFIG);
+
+  useEffect(() => {
+    let isMounted = true;
+    const canteenId = cart[0]?.item?.canteen_id || profile?.canteen_id || null;
+
+    fetchLunchSlotConfig(canteenId).then(cfg => {
+      if (isMounted) setSlotConfig(cfg);
+    });
+
+    const handleConfigUpdate = (e: any) => {
+      if (e.detail && isMounted) {
+        setSlotConfig(e.detail);
+      }
+    };
+
+    window.addEventListener('lunch_slot_config_updated', handleConfigUpdate);
+
+    const slotSub = supabase
+      .channel('public:lunch_slot_configs')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'lunch_slot_configs' }, () => {
+        fetchLunchSlotConfig(canteenId).then(cfg => {
+          if (isMounted) setSlotConfig(cfg);
+        });
+      })
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener('lunch_slot_config_updated', handleConfigUpdate);
+      slotSub.unsubscribe();
+    };
+  }, [cart[0]?.item?.canteen_id, profile?.canteen_id]);
+
+  const availableLunchSlots = useMemo(() => {
+    return generateSlotsFromConfig(slotConfig);
+  }, [slotConfig]);
+
+  const isLunchClosedForToday = !slotConfig.isLunchEnabled;
+
+  // Helper to determine slot availability
   const getSlotAvailability = (slotValue: string) => {
-    const [hours, minutes] = slotValue.split(':').map(Number);
-    const slotMinutes = hours * 60 + minutes;
-
+    const res = validateSlotSelection(slotValue, slotConfig, currentISTMinutes, false);
+    const slotMinutes = parseTimeToMinutes(slotValue);
     const diffMinutes = slotMinutes - currentISTMinutes;
-    const isAvailable = true;
-    
-    let reason = '';
-
-    return { isAvailable, diffMinutes, reason };
+    return { isAvailable: res.isAvailable, diffMinutes, reason: res.reason };
   };
-
-  const availableLunchSlots = LUNCH_SLOTS;
-  const isLunchClosedForToday = false;
 
   const [reviewingItem, setReviewingItem] = useState<{ orderId: string, menuItemId: string, itemName: string } | null>(null);
   const [reviewRating, setReviewRating] = useState(5);
@@ -256,7 +284,7 @@ export default function StudentDashboard() {
     if (isLunchClosedForToday) {
       showAlert({
         title: 'Booking Window Closed',
-        message: 'Lunch ordering for today is closed. Orders must be placed at least 30 minutes in advance of Lunch slots (12:30 PM – 1:40 PM).',
+        message: `Lunch ordering for today is closed. Orders must be placed at least ${slotConfig.minNoticeMinutes || 30} minutes in advance of Lunch slots (${formatPickupTime(slotConfig.serviceStartTime)} – ${formatPickupTime(slotConfig.serviceEndTime)}).`,
         type: 'warning'
       });
       return;
@@ -1040,10 +1068,10 @@ export default function StudentDashboard() {
                       <div style={{ marginBottom: '1rem' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
                           <label style={{ fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em' }}>
-                            Lunch Pickup Slot (12:30 PM – 1:40 PM)
+                            Lunch Pickup Slot ({formatPickupTime(slotConfig.serviceStartTime)} – {formatPickupTime(slotConfig.serviceEndTime)})
                           </label>
                           <span style={{ fontSize: '0.65rem', color: '#818cf8', fontWeight: 600, background: 'rgba(99,102,241,0.15)', padding: '2px 6px', borderRadius: '4px' }}>
-                            Min 30m notice
+                            Min {slotConfig.minNoticeMinutes || 30}m notice
                           </span>
                         </div>
 
@@ -1071,13 +1099,16 @@ export default function StudentDashboard() {
                                 ? 'Lunch Booking Opens at 9:30 AM'
                                 : isLunchClosedForToday 
                                   ? 'Lunch Ordering Closed for Today' 
-                                  : 'Select a Lunch Slot (10-min intervals)...'}
+                                  : availableLunchSlots.length === 0
+                                    ? 'No Lunch Slots Available'
+                                    : `Select a Lunch Slot (${slotConfig.slotDurationMinutes}-min intervals)...`}
                           </option>
-                          {LUNCH_SLOTS.map(slot => {
+                          {availableLunchSlots.map(slot => {
                             const { isAvailable, reason } = getSlotAvailability(slot.value);
+                            const isDisabled = !slot.enabled || !isAvailable;
                             return (
-                              <option key={slot.value} value={slot.value} disabled={!isAvailable}>
-                                {slot.label} {!isAvailable ? `(${reason})` : ''}
+                              <option key={slot.value} value={slot.value} disabled={isDisabled}>
+                                {slot.rangeLabel || slot.label} {!slot.enabled ? '(Unavailable)' : !isAvailable && reason ? `(${reason})` : ''}
                               </option>
                             );
                           })}
