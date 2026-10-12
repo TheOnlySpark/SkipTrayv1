@@ -57,6 +57,7 @@ export default function StudentDashboard() {
   
   const [cart, setCart] = useState<{item: MenuItem, quantity: number}[]>([]);
   const [pickupTime, setPickupTime] = useState('');
+  const [isTakeaway, setIsTakeaway] = useState<boolean>(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [cartOpen, setCartOpen] = useState(false);
@@ -314,7 +315,7 @@ export default function StudentDashboard() {
     const idempotencyKey = crypto.randomUUID();
 
     // 2. Save cart state in case of redirect
-    localStorage.setItem('pending_order', JSON.stringify({ cart, pickupTime, idempotencyKey }));
+    localStorage.setItem('pending_order', JSON.stringify({ cart, pickupTime, isTakeaway, idempotencyKey }));
 
     try {
       const ledger = calculateOrderLedger(cartTotalPrice);
@@ -325,7 +326,7 @@ export default function StudentDashboard() {
           items: itemsJson,
           total_amount: ledger.gross_payable,
           idempotency_key: idempotencyKey,
-          is_takeaway: false
+          is_takeaway: isTakeaway
         }
       });
 
@@ -400,7 +401,7 @@ export default function StudentDashboard() {
                 total_amount: calculateOrderLedger(cartTotalPrice).gross_payable,
                 ledger: calculateOrderLedger(cartTotalPrice),
                 pickup_time: pickupTime,
-                is_takeaway: false,
+                is_takeaway: isTakeaway,
                 canteen_id: cart[0]?.item.canteen_id,
                 tenant_id: cart[0]?.item.tenant_id
               }
@@ -416,6 +417,7 @@ export default function StudentDashboard() {
               }
               setCart([]);
               setPickupTime('');
+              setIsTakeaway(false);
               localStorage.removeItem('pending_order');
             } else {
               throw new Error(verifyData.error || 'Payment verification failed');
@@ -595,7 +597,12 @@ export default function StudentDashboard() {
                       <div className="font-bold text-slate-800 text-lg">Order #{o.order_number}</div>
                       <div className="text-xs text-slate-500 font-mono font-medium mb-1">ID: {o.id.split('-')[0].toUpperCase()}</div>
                       <div className="text-xs text-slate-500 font-medium mb-1">Placed on: {new Date(o.created_at).toLocaleDateString()}</div>
-                      <div className="text-sm text-slate-600 mt-1">Pickup: {formatPickupTime(o.pickup_time)} (Lunch)</div>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-sm text-slate-600">Pickup: {formatPickupTime(o.pickup_time)} (Lunch)</span>
+                        <span className={`px-2 py-0.5 rounded text-xs font-semibold ${o.is_takeaway ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'bg-sky-100 text-sky-800 border border-sky-200'}`}>
+                          {o.is_takeaway ? '🛍️ Takeaway' : '🍽️ Dine-in'}
+                        </span>
+                      </div>
                     </div>
                     <div className={`px-3 py-1 rounded-full text-xs font-bold border ${o.status === 'COLLECTED' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
                       {o.status}
@@ -733,6 +740,11 @@ export default function StudentDashboard() {
                 ID: {activeOrder.id.split('-')[0].toUpperCase()}
               </span>
             </div>
+            <div className="flex items-center gap-2 mb-2">
+              <span className={`px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wider ${activeOrder.is_takeaway ? 'bg-amber-400 text-amber-950 shadow-sm' : 'bg-sky-300 text-sky-950 shadow-sm'}`}>
+                {activeOrder.is_takeaway ? '🛍️ Takeaway' : '🍽️ Dine-in'}
+              </span>
+            </div>
             <p className="text-indigo-200 font-medium tracking-wide mb-4 text-sm">Your Order Status</p>
           
           <div className={`mt-2 px-6 py-2 rounded-full font-bold text-sm tracking-wider uppercase ${getStatusColor(activeOrder.status).replace('100', '900').replace('600', '100')}`}>
@@ -799,7 +811,12 @@ export default function StudentDashboard() {
             </div>
           )}
           
-          <p className="mt-5 text-xs text-indigo-200">Requested Pickup Time: <span className="font-semibold text-white">{formatPickupTime(activeOrder.pickup_time)} (Lunch)</span></p>
+          <div className="mt-5 flex items-center justify-center gap-2 flex-wrap">
+            <p className="text-xs text-indigo-200">Requested Pickup Time: <span className="font-semibold text-white">{formatPickupTime(activeOrder.pickup_time)} (Lunch)</span></p>
+            <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${activeOrder.is_takeaway ? 'bg-amber-400 text-amber-950 shadow-sm' : 'bg-sky-400 text-sky-950 shadow-sm'}`}>
+              {activeOrder.is_takeaway ? '🛍️ Takeaway' : '🍽️ Dine-in'}
+            </span>
+          </div>
           </div>
         </div>
       ) : (
@@ -1009,6 +1026,62 @@ export default function StudentDashboard() {
                     {/* Pickup time */}
                     <form onSubmit={handlePlaceOrder} style={{ paddingTop: '1rem', borderTop: '1px solid #1e293b' }}>
                       {error && <div style={{ color: '#f87171', fontSize: '0.75rem', marginBottom: '0.75rem', fontWeight: 600 }}>{error}</div>}
+
+                      {/* Dine-in vs Takeaway Segmented Toggle */}
+                      <div style={{ marginBottom: '1rem' }}>
+                        <label style={{ display: 'block', fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em', marginBottom: '0.5rem' }}>
+                          Order Preference
+                        </label>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', background: '#0f172a', padding: '0.25rem', borderRadius: '0.75rem', border: '1px solid #1e293b' }}>
+                          <button
+                            type="button"
+                            onClick={() => setIsTakeaway(false)}
+                            style={{
+                              padding: '0.625rem 0.5rem',
+                              borderRadius: '0.5rem',
+                              border: 'none',
+                              cursor: 'pointer',
+                              fontWeight: 700,
+                              fontSize: '0.85rem',
+                              background: !isTakeaway ? '#0284c7' : 'transparent',
+                              color: !isTakeaway ? '#ffffff' : '#94a3b8',
+                              boxShadow: !isTakeaway ? '0 2px 8px rgba(2, 132, 199, 0.4)' : 'none',
+                              transition: 'all 0.2s ease',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '0.375rem',
+                            }}
+                          >
+                            <span>🍽️</span>
+                            <span>Dine-in</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsTakeaway(true)}
+                            style={{
+                              padding: '0.625rem 0.5rem',
+                              borderRadius: '0.5rem',
+                              border: 'none',
+                              cursor: 'pointer',
+                              fontWeight: 700,
+                              fontSize: '0.85rem',
+                              background: isTakeaway ? '#d97706' : 'transparent',
+                              color: isTakeaway ? '#ffffff' : '#94a3b8',
+                              boxShadow: isTakeaway ? '0 2px 8px rgba(217, 119, 6, 0.4)' : 'none',
+                              transition: 'all 0.2s ease',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '0.375rem',
+                            }}
+                          >
+                            <span>🛍️</span>
+                            <span>Takeaway</span>
+                          </button>
+                        </div>
+                      </div>
+
                       <div style={{ marginBottom: '1rem' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
                           <label style={{ fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em' }}>

@@ -418,12 +418,19 @@ export default function CanteenAdminDashboard() {
                     <h3 className="font-bold text-slate-800">Order #{order.order_number}</h3>
                     <div className="text-xs text-slate-500 font-mono mt-0.5">ID: {order.id.split('-')[0].toUpperCase()}</div>
                   </div>
-                  <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${order.status === 'COLLECTED' ? 'bg-green-100 text-green-700' :
-                      order.status === 'REJECTED' ? 'bg-red-100 text-red-700' :
-                        'bg-amber-100 text-amber-700'
+                  <div className="flex items-center gap-1.5">
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                      order.is_takeaway ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'bg-sky-100 text-sky-800 border border-sky-200'
                     }`}>
-                    {order.status}
-                  </span>
+                      {order.is_takeaway ? '🛍️ Takeaway' : '🍽️ Dine-in'}
+                    </span>
+                    <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${order.status === 'COLLECTED' ? 'bg-green-100 text-green-700' :
+                        order.status === 'REJECTED' ? 'bg-red-100 text-red-700' :
+                          'bg-amber-100 text-amber-700'
+                      }`}>
+                      {order.status}
+                    </span>
+                  </div>
                 </div>
 
                 <div className="text-sm text-slate-600">
@@ -431,7 +438,7 @@ export default function CanteenAdminDashboard() {
                 </div>
 
                 <div className="text-xs text-slate-500">
-                  Pickup: {formatPickupTime(order.pickup_time)} (Lunch) ΓÇó {new Date(order.created_at).toLocaleDateString()}
+                  Pickup: {formatPickupTime(order.pickup_time)} (Lunch) • {new Date(order.created_at).toLocaleDateString()}
                 </div>
 
                 <div className="mt-2 pt-3 border-t border-slate-200">
