@@ -30,7 +30,8 @@ serve(async (req) => {
       throw new Error("Unauthorized");
     }
 
-    const { payment_id, idempotency_key, cart_items, total_amount, is_takeaway, pickup_time, canteen_id, tenant_id, ledger } = await req.json();
+    const body = await req.json();
+    const { payment_id, idempotency_key, cart_items, total_amount, is_takeaway, pickup_time, requested_pickup_time, pickup_date, canteen_id, tenant_id, ledger } = body;
 
     if (!payment_id || !idempotency_key) {
       throw new Error("Missing payment verification details");
@@ -138,18 +139,38 @@ serve(async (req) => {
     const prepDurationMinutes = Math.min(35, Math.max(8, maxItemPrep + Math.min(10, Math.max(0, totalItemsCount - 1))));
 
     // Calculate timestamps (IST: +05:30)
-    const todayStr = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
-    const requestedPickupTimeIso = `${todayStr}T${startTimeStr}:00+05:30`;
+    const istNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    const todayStr = `${istNow.getFullYear()}-${String(istNow.getMonth() + 1).padStart(2, '0')}-${String(istNow.getDate()).padStart(2, '0')}`;
+    
+    let serviceDateStr = todayStr;
+    if (requested_pickup_time && typeof requested_pickup_time === 'string' && requested_pickup_time.includes('T')) {
+      serviceDateStr = requested_pickup_time.split('T')[0];
+    } else if (pickup_date && typeof pickup_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(pickup_date)) {
+      serviceDateStr = pickup_date;
+    }
+
+    // Check service date is not in the past
+    if (serviceDateStr < todayStr) {
+      throw new Error("Selected service date has already passed. Please choose an upcoming service date.");
+    }
+
+    // Check if Sunday
+    const serviceDateObj = new Date(`${serviceDateStr}T12:00:00+05:30`);
+    if (serviceDateObj.getDay() === 0) {
+      throw new Error("Canteen is closed on Sundays. Please select a valid weekday or Saturday.");
+    }
+
+    const requestedPickupTimeIso = `${serviceDateStr}T${startTimeStr}:00+05:30`;
     const requestedPickupMs = new Date(requestedPickupTimeIso).getTime();
     const plannedPrepStartMs = requestedPickupMs - (prepDurationMinutes * 60 * 1000);
     const plannedPrepStartIso = new Date(plannedPrepStartMs).toISOString();
     const targetReadyByIso = requestedPickupTimeIso;
 
-    // Check preparation start time is not in the past (allow 1 min grace)
+    // Check preparation start time is not in the past for today's orders (allow 1 min grace)
     const nowMs = Date.now();
-    if (plannedPrepStartMs < (nowMs - 60000)) {
+    if (serviceDateStr === todayStr && plannedPrepStartMs < (nowMs - 60000)) {
       const earliestFeasibleMs = nowMs + (prepDurationMinutes + 2) * 60 * 1000;
-      const earliestDate = new Date(earliestFeasibleMs);
+      const earliestDate = new Date(new Date(earliestFeasibleMs).toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
       const earliestH = String(earliestDate.getHours()).padStart(2, '0');
       const earliestM = String(earliestDate.getMinutes()).padStart(2, '0');
       throw new Error(`Kitchen needs ${prepDurationMinutes} minutes to prepare this order. Earliest pickup time is ${earliestH}:${earliestM}.`);

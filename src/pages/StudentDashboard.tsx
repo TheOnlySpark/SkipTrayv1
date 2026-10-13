@@ -50,6 +50,10 @@ import {
   LunchSlotConfig,
   LunchSlot,
   DEFAULT_LUNCH_SLOT_CONFIG,
+  getAvailableServiceDates,
+  getNextFeasibleServiceDate,
+  getISTDateTime,
+  AvailableServiceDate,
 } from '../lib/lunchSlots';
 import {
   calculateLocalOrderSchedule,
@@ -75,12 +79,27 @@ export default function StudentDashboard() {
   const [foodTypeFilter, setFoodTypeFilter] = useState<'ALL' | 'VEG' | 'NON_VEG'>('ALL');
   const [categoryFilter, setCategoryFilter] = useState<'ALL' | 'PACKED_FOOD' | 'MEALS' | 'DRINKS'>('ALL');
 
+  // Date-Aware Service Scheduling State
+  const [selectedDate, setSelectedDate] = useState(() => {
+    return getNextFeasibleServiceDate(Date.now(), DEFAULT_LUNCH_SLOT_CONFIG, 10).dateStr;
+  });
+
   const getInitialPickupTime = () => {
-    const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-    const totalMin = now.getHours() * 60 + now.getMinutes();
-    const nextFeasible = totalMin < 720 ? 720 : Math.ceil((totalMin + 15) / 5) * 5;
-    const clamped = Math.min(840, Math.max(720, nextFeasible));
-    return minutesToTimeString(clamped);
+    const nowIST = getISTDateTime(Date.now());
+    const nextFeasible = getNextFeasibleServiceDate(Date.now(), DEFAULT_LUNCH_SLOT_CONFIG, 10);
+    const isToday = nextFeasible.dateStr === nowIST.dateStr;
+    const startMin = 720; // 12:00
+    const endMin = 840;   // 14:00
+
+    if (!isToday) {
+      return minutesToTimeString(startMin);
+    }
+
+    const earliest = Math.max(startMin, nowIST.totalMinutes + 15);
+    if (earliest <= endMin) {
+      return minutesToTimeString(earliest);
+    }
+    return minutesToTimeString(startMin);
   };
 
   const [cart, setCart] = useState<{item: MenuItem, quantity: number}[]>([]);
@@ -180,7 +199,8 @@ export default function StudentDashboard() {
     return generateSlotsFromConfig(slotConfig);
   }, [slotConfig]);
 
-  const isLunchClosedForToday = !slotConfig.isLunchEnabled;
+  const isTodayServiceEnded = currentISTMinutes >= parseTimeToMinutes(slotConfig.serviceEndTime || '14:00');
+  const isLunchClosedForToday = !slotConfig.isLunchEnabled || isTodayServiceEnded;
 
   // Helper to determine slot availability
   const getSlotAvailability = (slotValue: string) => {
@@ -203,6 +223,12 @@ export default function StudentDashboard() {
     }));
   }, [cart, slotConfig.defaultPrepTimeMinutes]);
 
+  // Available service dates based on canteen business rules
+  const availableServiceDates = useMemo(() => {
+    const prepDuration = calculateOrderPrepDuration(scheduledCartItems, slotConfig.defaultPrepTimeMinutes || 10);
+    return getAvailableServiceDates(currentTime, slotConfig, prepDuration, 3);
+  }, [currentTime, slotConfig, scheduledCartItems]);
+
   // Real-time backend-aligned smart scheduling calculation:
   // Planned Prep Start Time = Requested Pickup Time - Estimated Prep Duration
   const smartSchedule = useMemo(() => {
@@ -210,31 +236,34 @@ export default function StudentDashboard() {
       pickupTime,
       scheduledCartItems,
       slotConfig,
-      currentISTMinutes
+      currentISTMinutes,
+      selectedDate,
+      currentTime
     );
-  }, [pickupTime, scheduledCartItems, slotConfig, currentISTMinutes]);
+  }, [pickupTime, scheduledCartItems, slotConfig, currentISTMinutes, selectedDate, currentTime]);
 
   const suggestedQuickSlots = useMemo(() => {
     const startMin = parseTimeToMinutes(slotConfig.serviceStartTime || '12:00');
     const endMin = parseTimeToMinutes(slotConfig.serviceEndTime || '14:00');
     const prepDuration = calculateOrderPrepDuration(scheduledCartItems, slotConfig.defaultPrepTimeMinutes || 10);
-    const earliestFeasibleMin = Math.max(startMin, currentISTMinutes + prepDuration);
+    const todayDateStr = getISTDateTime(currentTime).dateStr;
+    const isToday = selectedDate === todayDateStr;
+
+    const earliestFeasibleMin = isToday
+      ? Math.max(startMin, currentISTMinutes + prepDuration)
+      : startMin;
+
+    if (isToday && earliestFeasibleMin > endMin) {
+      return [];
+    }
 
     const list: string[] = [];
-    if (earliestFeasibleMin <= endMin) {
-      const firstSlot = Math.ceil(earliestFeasibleMin / 15) * 15;
-      for (let m = firstSlot; m <= endMin && list.length < 6; m += 15) {
-        list.push(minutesToTimeString(m));
-      }
-    }
-
-    if (list.length === 0) {
-      for (let m = startMin + 15; m <= endMin && list.length < 6; m += 15) {
-        list.push(minutesToTimeString(m));
-      }
+    const firstSlot = Math.max(startMin, Math.ceil(earliestFeasibleMin / 15) * 15);
+    for (let m = firstSlot; m <= endMin && list.length < 6; m += 15) {
+      list.push(minutesToTimeString(m));
     }
     return list;
-  }, [slotConfig, currentISTMinutes, scheduledCartItems]);
+  }, [slotConfig, currentISTMinutes, scheduledCartItems, selectedDate, currentTime]);
 
   useEffect(() => {
     if (smartSchedule.isValid && error) {
@@ -474,18 +503,6 @@ export default function StudentDashboard() {
 
   const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSunday) {
-      setError('Orders cannot be placed on Sundays. The canteen is closed.');
-      return;
-    }
-    if (isBeforeOpeningTime) {
-      setError('Lunch booking opens at 9:30 AM in the morning.');
-      return;
-    }
-    if (isLunchClosedForToday) {
-      setError('Lunch ordering for today is closed. Orders must be placed at least 30 minutes before the pickup slot.');
-      return;
-    }
     if (cart.length === 0) return;
 
     if (!smartSchedule.isValid) {
@@ -621,6 +638,7 @@ export default function StudentDashboard() {
                   total_amount: ledger.gross_payable,
                   ledger: ledger,
                   pickup_time: finalPickupTime,
+                  pickup_date: selectedDate,
                   requested_pickup_time: smartSchedule.requestedPickupTime,
                   estimated_prep_duration_minutes: smartSchedule.estimatedPrepDurationMinutes,
                   planned_prep_start_time: smartSchedule.plannedPrepStartTime,
@@ -669,6 +687,10 @@ export default function StudentDashboard() {
                 canteen_id: canteenId,
                 tenant_id: tenantId,
                 pickup_time: finalPickupTime,
+                requested_pickup_time: smartSchedule.requestedPickupTime,
+                planned_prep_start_time: smartSchedule.plannedPrepStartTime,
+                target_ready_by_time: smartSchedule.targetReadyByTime,
+                estimated_prep_duration_minutes: smartSchedule.estimatedPrepDurationMinutes,
                 is_takeaway: false,
                 status: 'PLACED',
                 otp_code: otpCode,
@@ -1673,6 +1695,53 @@ export default function StudentDashboard() {
                           </span>
                         </div>
 
+                        {/* Service Date Selector */}
+                        <div style={{ marginBottom: '0.75rem' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.375rem' }}>
+                            <label style={{ fontSize: '0.6875rem', color: '#cbd5e1', fontWeight: 600 }}>
+                              Service Date
+                            </label>
+                            <span style={{ fontSize: '0.625rem', color: '#818cf8', fontWeight: 600 }}>
+                              {smartSchedule.serviceDateFormatted}
+                            </span>
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.max(1, availableServiceDates.length)}, 1fr)`, gap: '0.375rem' }}>
+                            {availableServiceDates.map(d => {
+                              const isSelected = selectedDate === d.dateStr;
+                              return (
+                                <button
+                                  key={d.dateStr}
+                                  type="button"
+                                  onClick={() => {
+                                    if (d.isBookable) {
+                                      setSelectedDate(d.dateStr);
+                                      if (error) setError('');
+                                    }
+                                  }}
+                                  disabled={!d.isBookable}
+                                  title={d.unbookableReason || undefined}
+                                  style={{
+                                    padding: '0.45rem 0.25rem',
+                                    borderRadius: '0.5rem',
+                                    border: isSelected ? '1px solid #6366f1' : '1px solid #334155',
+                                    background: isSelected ? '#4f46e5' : d.isBookable ? '#0f172a' : 'rgba(30,41,59,0.5)',
+                                    color: isSelected ? 'white' : d.isBookable ? '#e2e8f0' : '#64748b',
+                                    cursor: d.isBookable ? 'pointer' : 'not-allowed',
+                                    opacity: d.isBookable ? 1 : 0.5,
+                                    textAlign: 'center',
+                                    transition: 'all 0.15s ease',
+                                  }}
+                                >
+                                  <div style={{ fontSize: '0.72rem', fontWeight: 700 }}>{d.dayName}</div>
+                                  <div style={{ fontSize: '0.6rem', color: isSelected ? '#e0e7ff' : d.isBookable ? '#94a3b8' : '#64748b' }}>
+                                    {d.isBookable ? d.displayLabel : 'Closed'}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
                         {/* Preferred Time Picker supporting any minute (12:17, 12:26, 12:43 etc.) */}
                         <div style={{ marginBottom: '0.625rem' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -1688,7 +1757,7 @@ export default function StudentDashboard() {
                                   setPickupTime(e.target.value);
                                   if (error) setError('');
                                 }}
-                                disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday}
+                                disabled={isSuspended}
                                 style={{
                                   width: '100%',
                                   background: '#0f172a',
@@ -1698,8 +1767,8 @@ export default function StudentDashboard() {
                                   borderRadius: '0.5rem',
                                   fontSize: '0.925rem',
                                   fontWeight: 700,
-                                  cursor: (isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday) ? 'not-allowed' : 'pointer',
-                                  opacity: (isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday) ? 0.6 : 1,
+                                  cursor: isSuspended ? 'not-allowed' : 'pointer',
+                                  opacity: isSuspended ? 0.6 : 1,
                                 }}
                               />
                             </div>
@@ -1726,47 +1795,41 @@ export default function StudentDashboard() {
                             Quick Suggestions (or pick any exact minute above):
                           </span>
                           <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap' }}>
-                            {suggestedQuickSlots.map(t => (
-                              <button
-                                key={t}
-                                type="button"
-                                onClick={() => {
-                                  setPickupTime(t);
-                                  if (error) setError('');
-                                }}
-                                disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday}
-                                style={{
-                                  background: (normalizeTimeTo24h(pickupTime) === t) ? '#4f46e5' : '#0f172a',
-                                  color: (normalizeTimeTo24h(pickupTime) === t) ? 'white' : '#94a3b8',
-                                  border: `1px solid ${(normalizeTimeTo24h(pickupTime) === t) ? '#6366f1' : '#334155'}`,
-                                  borderRadius: '0.375rem',
-                                  padding: '2px 7px',
-                                  fontSize: '0.6875rem',
-                                  fontWeight: 600,
-                                  cursor: 'pointer',
-                                  transition: 'all 0.15s ease'
-                                }}
-                              >
-                                {formatSingleTime(t)}
-                              </button>
-                            ))}
+                            {suggestedQuickSlots.length > 0 ? (
+                              suggestedQuickSlots.map(t => (
+                                <button
+                                  key={t}
+                                  type="button"
+                                  onClick={() => {
+                                    setPickupTime(t);
+                                    if (error) setError('');
+                                  }}
+                                  disabled={isSuspended}
+                                  style={{
+                                    background: (normalizeTimeTo24h(pickupTime) === t) ? '#4f46e5' : '#0f172a',
+                                    color: (normalizeTimeTo24h(pickupTime) === t) ? 'white' : '#94a3b8',
+                                    border: `1px solid ${(normalizeTimeTo24h(pickupTime) === t) ? '#6366f1' : '#334155'}`,
+                                    borderRadius: '0.375rem',
+                                    padding: '2px 7px',
+                                    fontSize: '0.6875rem',
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s ease'
+                                  }}
+                                >
+                                  {formatSingleTime(t)}
+                                </button>
+                              ))
+                            ) : (
+                              <span style={{ fontSize: '0.6875rem', color: '#94a3b8', fontStyle: 'italic', padding: '0.25rem 0' }}>
+                                No pickup times remain today. Choose the next available service date above.
+                              </span>
+                            )}
                           </div>
                         </div>
 
                         {/* Smart Preparation Scheduling Breakdown Box */}
-                        {isSunday ? (
-                          <div style={{ padding: '0.5rem', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '0.5rem', color: '#f87171', fontSize: '0.72rem' }}>
-                            Canteen is closed on Sundays.
-                          </div>
-                        ) : isBeforeOpeningTime ? (
-                          <div style={{ padding: '0.5rem', background: 'rgba(234,179,8,0.1)', border: '1px solid rgba(234,179,8,0.2)', borderRadius: '0.5rem', color: '#facc15', fontSize: '0.72rem' }}>
-                            Lunch booking opens at 9:30 AM.
-                          </div>
-                        ) : isLunchClosedForToday ? (
-                          <div style={{ padding: '0.5rem', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '0.5rem', color: '#f87171', fontSize: '0.72rem' }}>
-                            Lunch service is currently closed for today.
-                          </div>
-                        ) : smartSchedule.isValid ? (
+                        {smartSchedule.isValid ? (
                           <div style={{
                             padding: '0.75rem',
                             background: 'rgba(99,102,241,0.08)',
@@ -1796,7 +1859,7 @@ export default function StudentDashboard() {
                               </div>
                             </div>
                             <p style={{ margin: '0.5rem 0 0', fontSize: '0.65rem', color: '#94a3b8', textAlign: 'center' }}>
-                              Arrival at {smartSchedule.pickupTimeFormatted} allows fresh preparation starting at {smartSchedule.prepStartFormatted}.
+                              Arrival on {smartSchedule.serviceDateFormatted} at {smartSchedule.pickupTimeFormatted} allows fresh preparation starting at {smartSchedule.prepStartFormatted}.
                             </p>
                           </div>
                         ) : (
@@ -1813,7 +1876,12 @@ export default function StudentDashboard() {
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setPickupTime(smartSchedule.suggestedPickupTime!);
+                                  if (smartSchedule.suggestedDateStr) {
+                                    setSelectedDate(smartSchedule.suggestedDateStr);
+                                  }
+                                  if (smartSchedule.suggestedPickupTime) {
+                                    setPickupTime(smartSchedule.suggestedPickupTime);
+                                  }
                                   if (error) setError('');
                                 }}
                                 style={{
@@ -1821,7 +1889,7 @@ export default function StudentDashboard() {
                                   color: 'white',
                                   border: 'none',
                                   borderRadius: '0.375rem',
-                                  padding: '4px 8px',
+                                  padding: '5px 10px',
                                   fontSize: '0.7rem',
                                   fontWeight: 700,
                                   cursor: 'pointer',
@@ -1830,7 +1898,9 @@ export default function StudentDashboard() {
                                   gap: '4px'
                                 }}
                               >
-                                Switch to Feasible Time: {smartSchedule.suggestedPickupFormatted}
+                                {smartSchedule.suggestedDateStr && smartSchedule.suggestedDateStr !== selectedDate
+                                  ? `Switch to ${smartSchedule.suggestedDateFormatted || 'Next Date'}: ${smartSchedule.suggestedPickupFormatted}`
+                                  : `Switch to Feasible Time: ${smartSchedule.suggestedPickupFormatted}`}
                               </button>
                             )}
                           </div>

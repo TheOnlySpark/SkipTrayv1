@@ -445,3 +445,129 @@ export function validateSlotSelection(
 
   return { isAvailable: true, reason: '' };
 }
+
+export interface ISTDateTime {
+  year: number;
+  month: number;
+  day: number;
+  dayOfWeek: number; // 0=Sunday, 1=Monday...
+  hours: number;
+  minutes: number;
+  totalMinutes: number; // minutes from midnight (0-1439)
+  dateStr: string; // "YYYY-MM-DD"
+  timeStr: string; // "HH:mm"
+  formattedDisplay: string; // "h:mm AM/PM"
+  timestampMs: number;
+}
+
+/**
+ * Derives authoritative Indian Standard Time (IST, UTC+05:30) date & time information.
+ */
+export function getISTDateTime(currentTimeMs = Date.now()): ISTDateTime {
+  const d = new Date(currentTimeMs);
+  const istString = d.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' });
+  const istDate = new Date(istString);
+  const year = istDate.getFullYear();
+  const month = istDate.getMonth() + 1;
+  const day = istDate.getDate();
+  const dayOfWeek = istDate.getDay();
+  const hours = istDate.getHours();
+  const minutes = istDate.getMinutes();
+  const totalMinutes = hours * 60 + minutes;
+  const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  const timeStr = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+  return {
+    year,
+    month,
+    day,
+    dayOfWeek,
+    hours,
+    minutes,
+    totalMinutes,
+    dateStr,
+    timeStr,
+    formattedDisplay: formatSingleTime(timeStr),
+    timestampMs: currentTimeMs,
+  };
+}
+
+export interface AvailableServiceDate {
+  dateStr: string; // "2026-10-14"
+  dayName: string; // "Today", "Tomorrow", "Thursday"
+  displayLabel: string; // "Wed, 14 Oct"
+  fullLabel: string; // "Today (Tue, 13 Oct)"
+  isToday: boolean;
+  isBookable: boolean;
+  unbookableReason?: string;
+}
+
+/**
+ * Returns available service dates (Today + next days) based on canteen business rules.
+ */
+export function getAvailableServiceDates(
+  currentTimeMs = Date.now(),
+  config: LunchSlotConfig = DEFAULT_LUNCH_SLOT_CONFIG,
+  prepDurationMinutes = 10,
+  maxDaysAhead = 3
+): AvailableServiceDate[] {
+  const todayIST = getISTDateTime(currentTimeMs);
+  const serviceEndMin = parseTimeToMinutes(config.serviceEndTime || '14:00');
+
+  const dates: AvailableServiceDate[] = [];
+
+  for (let i = 0; i <= maxDaysAhead; i++) {
+    const targetMs = currentTimeMs + i * 24 * 60 * 60 * 1000;
+    const targetIST = getISTDateTime(targetMs);
+
+    const isToday = i === 0;
+    const isSunday = targetIST.dayOfWeek === 0;
+
+    const dayName = isToday ? 'Today' : i === 1 ? 'Tomorrow' : new Date(targetMs).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'Asia/Kolkata' });
+    const monthName = new Date(targetMs).toLocaleDateString('en-US', { month: 'short', day: 'numeric', weekday: 'short', timeZone: 'Asia/Kolkata' });
+
+    let isBookable = true;
+    let unbookableReason: string | undefined = undefined;
+
+    if (config.isLunchEnabled === false) {
+      isBookable = false;
+      unbookableReason = 'Lunch service closed';
+    } else if (isSunday) {
+      isBookable = false;
+      unbookableReason = 'Closed on Sundays';
+    } else if (isToday) {
+      if (todayIST.totalMinutes >= serviceEndMin) {
+        isBookable = false;
+        unbookableReason = `Closed for today (Ended at ${formatSingleTime(config.serviceEndTime)})`;
+      } else if (todayIST.totalMinutes + prepDurationMinutes > serviceEndMin) {
+        isBookable = false;
+        unbookableReason = `No feasible slots remain today (${prepDurationMinutes}m prep required)`;
+      }
+    }
+
+    dates.push({
+      dateStr: targetIST.dateStr,
+      dayName,
+      displayLabel: monthName,
+      fullLabel: `${dayName} (${monthName})`,
+      isToday,
+      isBookable,
+      unbookableReason,
+    });
+  }
+
+  return dates;
+}
+
+/**
+ * Finds the first feasible bookable service date (Today if feasible, otherwise Tomorrow/Next open day).
+ */
+export function getNextFeasibleServiceDate(
+  currentTimeMs = Date.now(),
+  config: LunchSlotConfig = DEFAULT_LUNCH_SLOT_CONFIG,
+  prepDurationMinutes = 10
+): AvailableServiceDate {
+  const dates = getAvailableServiceDates(currentTimeMs, config, prepDurationMinutes, 5);
+  const firstBookable = dates.find(d => d.isBookable);
+  return firstBookable || dates[0];
+}
+
