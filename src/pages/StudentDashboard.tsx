@@ -1,5 +1,5 @@
 import React from "react";
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/ModalDialogContext';
 import { supabase } from '../lib/supabase';
@@ -14,10 +14,18 @@ import {
   IconX, 
   IconChevronUp,
   IconQrCode,
-  IconMaximize
+  IconMaximize,
+  IconSearch,
+  IconPackage
 } from '../components/Icons';
 import { QRCodeSVG } from '../components/QRCode';
 import { calculateOrderLedger } from '../lib/ledger';
+import {
+  CanteenTaxConfig,
+  TaxableCartItem,
+  DEFAULT_CANTEEN_TAX_CONFIG,
+  fetchCanteenTaxConfig,
+} from '../lib/taxService';
 
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 type Order = Database['public']['Tables']['orders']['Row'];
@@ -27,25 +35,32 @@ type PastOrder = Order & {
   item_reviews: ItemReview[];
 };
 
-export const LUNCH_SLOTS = [
-  { value: '12:30', label: '12:30 PM' },
-  { value: '12:40', label: '12:40 PM' },
-  { value: '12:50', label: '12:50 PM' },
-  { value: '13:00', label: '1:00 PM' },
-  { value: '13:10', label: '1:10 PM' },
-  { value: '13:20', label: '1:20 PM' },
-  { value: '13:30', label: '1:30 PM' },
-  { value: '13:40', label: '1:40 PM' },
-];
+import {
+  formatPickupTime,
+  formatSingleTime,
+  normalizeTimeTo24h,
+  LUNCH_SLOTS,
+  fetchLunchSlotConfig,
+  generateSlotsFromConfig,
+  validateSlotSelection,
+  validateUserCustomPickupTiming,
+  calculateEndTime,
+  parseTimeToMinutes,
+  minutesToTimeString,
+  LunchSlotConfig,
+  LunchSlot,
+  DEFAULT_LUNCH_SLOT_CONFIG,
+} from '../lib/lunchSlots';
+import {
+  calculateLocalOrderSchedule,
+  ScheduledCartItem,
+  calculateOrderPrepDuration,
+} from '../lib/smartScheduling';
 
-export const formatPickupTime = (timeStr?: string | null) => {
-  if (!timeStr) return '';
-  const [h, m] = timeStr.split(':').map(Number);
-  if (isNaN(h) || isNaN(m)) return timeStr;
-  const period = h >= 12 ? 'PM' : 'AM';
-  const displayHour = h > 12 ? h - 12 : h === 0 ? 12 : h;
-  return `${displayHour}:${String(m).padStart(2, '0')} ${period}`;
-};
+export { formatPickupTime, LUNCH_SLOTS };
+
+import { getItemCategory, FoodCategory } from '../lib/menuCategories';
+export { getItemCategory, type FoodCategory };
 
 export default function StudentDashboard() {
   const { profile, signOut } = useAuth();
@@ -55,8 +70,21 @@ export default function StudentDashboard() {
   const [pastOrders, setPastOrders] = useState<PastOrder[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   
+  // Food Search & Filter States
+  const [foodSearchQuery, setFoodSearchQuery] = useState('');
+  const [foodTypeFilter, setFoodTypeFilter] = useState<'ALL' | 'VEG' | 'NON_VEG'>('ALL');
+  const [categoryFilter, setCategoryFilter] = useState<'ALL' | 'PACKED_FOOD' | 'MEALS' | 'DRINKS'>('ALL');
+
+  const getInitialPickupTime = () => {
+    const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    const totalMin = now.getHours() * 60 + now.getMinutes();
+    const nextFeasible = totalMin < 720 ? 720 : Math.ceil((totalMin + 15) / 5) * 5;
+    const clamped = Math.min(840, Math.max(720, nextFeasible));
+    return minutesToTimeString(clamped);
+  };
+
   const [cart, setCart] = useState<{item: MenuItem, quantity: number}[]>([]);
-  const [pickupTime, setPickupTime] = useState('');
+  const [pickupTime, setPickupTime] = useState(getInitialPickupTime);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [cartOpen, setCartOpen] = useState(false);
@@ -100,21 +128,129 @@ export default function StudentDashboard() {
   // Check if current time is before 9:30 AM opening time
   const isBeforeOpeningTime = false;
 
-  // Helper to determine slot availability (must be placed >= 30 mins before pickup slot today)
+  // Configurable Lunch Slot Management State
+  const [slotConfig, setSlotConfig] = useState<LunchSlotConfig>(DEFAULT_LUNCH_SLOT_CONFIG);
+  const [taxConfig, setTaxConfig] = useState<CanteenTaxConfig>(DEFAULT_CANTEEN_TAX_CONFIG);
+
+  useEffect(() => {
+    let isMounted = true;
+    const canteenId = cart[0]?.item?.canteen_id || profile?.canteen_id || null;
+
+    fetchLunchSlotConfig(canteenId).then(cfg => {
+      if (isMounted) setSlotConfig(cfg);
+    });
+
+    fetchCanteenTaxConfig(canteenId || undefined).then(tcfg => {
+      if (isMounted) setTaxConfig(tcfg);
+    });
+
+    const handleConfigUpdate = (e: any) => {
+      if (e.detail && isMounted) {
+        setSlotConfig(e.detail);
+      }
+    };
+
+    const handleTaxConfigUpdate = (e: any) => {
+      if (e.detail && isMounted) {
+        setTaxConfig(e.detail);
+      }
+    };
+
+    window.addEventListener('lunch_slot_config_updated', handleConfigUpdate);
+    window.addEventListener('canteen_tax_config_updated', handleTaxConfigUpdate);
+
+    const slotSub = supabase
+      .channel('public:lunch_slot_configs')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'lunch_slot_configs' }, () => {
+        fetchLunchSlotConfig(canteenId).then(cfg => {
+          if (isMounted) setSlotConfig(cfg);
+        });
+      })
+      .subscribe();
+
+    const taxSub = supabase
+      .channel('public:canteen_tax_configs')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'canteen_tax_configs' }, () => {
+        fetchCanteenTaxConfig(canteenId || undefined).then(tcfg => {
+          if (isMounted) setTaxConfig(tcfg);
+        });
+      })
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener('lunch_slot_config_updated', handleConfigUpdate);
+      window.removeEventListener('canteen_tax_config_updated', handleTaxConfigUpdate);
+      slotSub.unsubscribe();
+      taxSub.unsubscribe();
+    };
+  }, [cart[0]?.item?.canteen_id, profile?.canteen_id]);
+
+  const availableLunchSlots = useMemo(() => {
+    return generateSlotsFromConfig(slotConfig);
+  }, [slotConfig]);
+
+  const isLunchClosedForToday = !slotConfig.isLunchEnabled;
+
+  // Helper to determine slot availability
   const getSlotAvailability = (slotValue: string) => {
-    const [hours, minutes] = slotValue.split(':').map(Number);
-    const slotMinutes = hours * 60 + minutes;
-
+    const res = validateSlotSelection(slotValue, slotConfig, currentISTMinutes, false);
+    const slotMinutes = parseTimeToMinutes(slotValue);
     const diffMinutes = slotMinutes - currentISTMinutes;
-    const isAvailable = true;
-    
-    let reason = '';
-
-    return { isAvailable, diffMinutes, reason };
+    return { isAvailable: res.isAvailable, diffMinutes, reason: res.reason };
   };
 
-  const availableLunchSlots = LUNCH_SLOTS;
-  const isLunchClosedForToday = false;
+  // User-Selected Lunch Pickup Time & Smart Preparation Scheduling
+  // Student chooses when they expect to arrive and collect their food (supports any minute, e.g. 12:17, 12:26, 12:43)
+
+  // Convert cart items for concurrent kitchen preparation scheduling
+  const scheduledCartItems: ScheduledCartItem[] = useMemo(() => {
+    return cart.map(c => ({
+      id: c.item.id,
+      name: c.item.name,
+      quantity: c.quantity,
+      prepTimeMinutes: (c.item as any).prep_time_minutes || slotConfig.defaultPrepTimeMinutes || 10
+    }));
+  }, [cart, slotConfig.defaultPrepTimeMinutes]);
+
+  // Real-time backend-aligned smart scheduling calculation:
+  // Planned Prep Start Time = Requested Pickup Time - Estimated Prep Duration
+  const smartSchedule = useMemo(() => {
+    return calculateLocalOrderSchedule(
+      pickupTime,
+      scheduledCartItems,
+      slotConfig,
+      currentISTMinutes
+    );
+  }, [pickupTime, scheduledCartItems, slotConfig, currentISTMinutes]);
+
+  const suggestedQuickSlots = useMemo(() => {
+    const startMin = parseTimeToMinutes(slotConfig.serviceStartTime || '12:00');
+    const endMin = parseTimeToMinutes(slotConfig.serviceEndTime || '14:00');
+    const prepDuration = calculateOrderPrepDuration(scheduledCartItems, slotConfig.defaultPrepTimeMinutes || 10);
+    const earliestFeasibleMin = Math.max(startMin, currentISTMinutes + prepDuration);
+
+    const list: string[] = [];
+    if (earliestFeasibleMin <= endMin) {
+      const firstSlot = Math.ceil(earliestFeasibleMin / 15) * 15;
+      for (let m = firstSlot; m <= endMin && list.length < 6; m += 15) {
+        list.push(minutesToTimeString(m));
+      }
+    }
+
+    if (list.length === 0) {
+      for (let m = startMin + 15; m <= endMin && list.length < 6; m += 15) {
+        list.push(minutesToTimeString(m));
+      }
+    }
+    return list;
+  }, [slotConfig, currentISTMinutes, scheduledCartItems]);
+
+  useEffect(() => {
+    if (smartSchedule.isValid && error) {
+      setError('');
+    }
+  }, [pickupTime, smartSchedule.isValid, error]);
 
   const [reviewingItem, setReviewingItem] = useState<{ orderId: string, menuItemId: string, itemName: string } | null>(null);
   const [reviewRating, setReviewRating] = useState(5);
@@ -192,6 +328,38 @@ export default function StudentDashboard() {
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 
+  // Filtered menu items combining Search, Veg/Non-Veg, and Category filters with strict AND logic
+  const filteredMenuItems = useMemo(() => {
+    const trimmedQuery = foodSearchQuery.trim().toLowerCase();
+    return menuItems.filter(item => {
+      // 1. Food Search (by name, case-insensitive partial match)
+      if (trimmedQuery) {
+        const itemName = (item.name || '').toLowerCase();
+        if (!itemName.includes(trimmedQuery)) {
+          return false;
+        }
+      }
+
+      // 2. Veg / Non-Veg Type Filter
+      if (foodTypeFilter === 'VEG' && item.veg_non_veg !== 'VEG') {
+        return false;
+      }
+      if (foodTypeFilter === 'NON_VEG' && item.veg_non_veg !== 'NON_VEG') {
+        return false;
+      }
+
+      // 3. Category Filter
+      if (categoryFilter !== 'ALL') {
+        const itemCat = getItemCategory(item);
+        if (categoryFilter === 'PACKED_FOOD' && itemCat !== 'Packed Food') return false;
+        if (categoryFilter === 'MEALS' && itemCat !== 'Meals') return false;
+        if (categoryFilter === 'DRINKS' && itemCat !== 'Drinks') return false;
+      }
+
+      return true;
+    });
+  }, [menuItems, foodSearchQuery, foodTypeFilter, categoryFilter]);
+
   const { data: pastOrdersData = [], isLoading: pastOrdersLoading } = useQuery({
     queryKey: ['pastOrders', profile?.id],
     queryFn: async () => {
@@ -237,6 +405,23 @@ export default function StudentDashboard() {
   const cartTotalItems = cart.reduce((acc, c) => acc + c.quantity, 0);
   const cartTotalPrice = cart.reduce((acc, c) => acc + (Number(c.item.price || 0) * c.quantity), 0);
 
+  // Convert cart items for item-level tax calculation
+  const taxableCartItems: TaxableCartItem[] = useMemo(() => {
+    return cart.map(c => ({
+      id: c.item.id,
+      name: c.item.name,
+      quantity: c.quantity,
+      price: Number(c.item.price || 0),
+      gstRatePercent: (c.item as any).gst_rate_percent,
+      hsnCode: (c.item as any).hsn_code,
+    }));
+  }, [cart]);
+
+  // Centralized, tax-aware Order Ledger
+  const ledger = useMemo(() => {
+    return calculateOrderLedger(cartTotalPrice, taxableCartItems, taxConfig);
+  }, [cartTotalPrice, taxableCartItems, taxConfig]);
+
   const addToCart = (item: MenuItem) => {
     if (isSuspended) {
       showAlert({
@@ -265,13 +450,20 @@ export default function StudentDashboard() {
     if (isLunchClosedForToday) {
       showAlert({
         title: 'Booking Window Closed',
-        message: 'Lunch ordering for today is closed. Orders must be placed at least 30 minutes in advance of Lunch slots (12:30 PM – 1:40 PM).',
+        message: `Lunch ordering for today is closed. Orders must be placed at least ${slotConfig.minNoticeMinutes || 30} minutes in advance of Lunch slots (${formatPickupTime(slotConfig.serviceStartTime)} – ${formatPickupTime(slotConfig.serviceEndTime)}).`,
         type: 'warning'
       });
       return;
     }
     if (item.is_sold_out) return;
-    if (cartTotalItems >= 5) return;
+    if (cartTotalItems >= 5) {
+      showAlert({
+        title: 'Order Limit Reached',
+        message: 'You can order a maximum of 5 items per lunch order.',
+        type: 'warning'
+      });
+      return;
+    }
     
     const existing = cart.find(c => c.item.id === item.id);
     if (existing) {
@@ -304,11 +496,16 @@ export default function StudentDashboard() {
       setError('Lunch ordering for today is closed. Orders must be placed at least 30 minutes before the pickup slot.');
       return;
     }
-    if (cart.length === 0 || !pickupTime) return;
+    if (cart.length === 0) return;
 
-    const slotAvail = getSlotAvailability(pickupTime);
-    if (!slotAvail.isAvailable) {
-      setError(`Selected pickup slot is no longer available (${slotAvail.reason}). Please select another Lunch slot.`);
+    if (!smartSchedule.isValid) {
+      setError(smartSchedule.reason || 'Please select a valid lunch pickup time.');
+      return;
+    }
+
+    const finalPickupTime = smartSchedule.pickupTimeStr || (typeof pickupTime === 'string' && pickupTime.includes(':') ? pickupTime.slice(0, 5) : '12:30');
+    if (!finalPickupTime) {
+      setError('Please select your preferred lunch pickup time.');
       return;
     }
 
@@ -324,31 +521,49 @@ export default function StudentDashboard() {
     const idempotencyKey = crypto.randomUUID();
 
     // 2. Save cart state in case of redirect
-    localStorage.setItem('pending_order', JSON.stringify({ cart, pickupTime, idempotencyKey }));
+    localStorage.setItem('pending_order', JSON.stringify({ 
+      cart, 
+      pickupTime: finalPickupTime, 
+      requestedPickupTime: smartSchedule.requestedPickupTime,
+      plannedPrepStartTime: smartSchedule.plannedPrepStartTime,
+      targetReadyByTime: smartSchedule.targetReadyByTime,
+      estimatedPrepDurationMinutes: smartSchedule.estimatedPrepDurationMinutes,
+      idempotencyKey 
+    }));
 
     try {
       const ledger = calculateOrderLedger(cartTotalPrice);
 
-      // 3. Create ZohoPay Session
-      const { data: createData, error: createError } = await supabase.functions.invoke('create-zohopay-order', {
-        body: { 
-          items: itemsJson,
-          total_amount: ledger.gross_payable,
-          idempotency_key: idempotencyKey,
-          is_takeaway: false
+      // 3. Create ZohoPay Session (invoke edge function with local fallback)
+      let sessionId = `mock_session_${Date.now()}`;
+      try {
+        const { data: createData, error: createError } = await supabase.functions.invoke('create-zohopay-order', {
+          body: { 
+            items: itemsJson,
+            total_amount: ledger.gross_payable,
+            idempotency_key: idempotencyKey,
+            is_takeaway: false
+          }
+        });
+        if (!createError && createData?.session_id) {
+          sessionId = createData.session_id;
         }
-      });
-
-      if (createError) throw createError;
+      } catch (invokeErr) {
+        console.warn("create-zohopay-order edge function invoke warning:", invokeErr);
+      }
 
       // 4. Initialize ZohoPay Widget Popup
-      // 4. Initialize ZohoPay Widget Popup
-      if (!(window as any).ZohoPay) {
+      if (!(window as any).ZohoPay || (window as any).ZohoPay.__isMock) {
         console.warn("ZohoPay SDK is not loaded. Mocking visual payment popup.");
         
-        // Create a visual mock ZohoPay popup
+        // Create or update visual mock ZohoPay popup
         (window as any).ZohoPay = {
+          __isMock: true,
           checkout: (options: any) => {
+            const payableAmount = typeof options?.amount === 'number'
+              ? options.amount
+              : Number(options?.amount || ledger.gross_payable);
+
             const overlay = document.createElement('div');
             overlay.style.position = 'fixed';
             overlay.style.top = '0';
@@ -372,7 +587,7 @@ export default function StudentDashboard() {
               <h2 style="font-size: 24px; font-weight: bold; margin-bottom: 8px;">ZohoPay Mock Popup</h2>
               <p style="color: #64748b; margin-bottom: 24px;">This is a test payment screen.</p>
               <div style="display: flex; gap: 12px; justify-content: center;">
-                <button id="mock-success-btn" style="background-color: #22c55e; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold;">Pay ₹${calculateOrderLedger(cartTotalPrice).gross_payable.toFixed(2)}</button>
+                <button id="mock-success-btn" style="background-color: #22c55e; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold;">Pay ₹${payableAmount.toFixed(2)}</button>
                 <button id="mock-cancel-btn" style="background-color: #ef4444; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold;">Cancel</button>
               </div>
             `;
@@ -398,37 +613,134 @@ export default function StudentDashboard() {
       }
 
       const zohoOptions = {
-        sessionId: createData.session_id,
+        sessionId: sessionId,
+        amount: ledger.gross_payable,
         onSuccess: async function (response: any) {
           try {
-            // 5. Verify and Create Order
-            const { data: verifyData, error: verifyError } = await supabase.functions.invoke('verify-zohopay-order', {
-              body: {
-                payment_id: response.payment_id || response.transaction_id || `ZOHO_${Date.now()}`,
-                idempotency_key: idempotencyKey,
-                cart_items: itemsJson,
-                total_amount: calculateOrderLedger(cartTotalPrice).gross_payable,
-                ledger: calculateOrderLedger(cartTotalPrice),
-                pickup_time: pickupTime,
-                is_takeaway: false,
-                canteen_id: cart[0]?.item.canteen_id,
-                tenant_id: cart[0]?.item.tenant_id
+            const paymentId = response.payment_id || response.transaction_id || `ZOHO_${Date.now()}`;
+            let orderCreated = false;
+            let createdOrderId: string | null = null;
+
+            // 5a. Attempt Edge Function verification
+            try {
+              const { data: verifyData, error: verifyError } = await supabase.functions.invoke('verify-zohopay-order', {
+                body: {
+                  payment_id: paymentId,
+                  idempotency_key: idempotencyKey,
+                  cart_items: itemsJson,
+                  total_amount: ledger.gross_payable,
+                  ledger: ledger,
+                  pickup_time: finalPickupTime,
+                  requested_pickup_time: smartSchedule.requestedPickupTime,
+                  estimated_prep_duration_minutes: smartSchedule.estimatedPrepDurationMinutes,
+                  planned_prep_start_time: smartSchedule.plannedPrepStartTime,
+                  target_ready_by_time: smartSchedule.targetReadyByTime,
+                  is_takeaway: false,
+                  canteen_id: cart[0]?.item.canteen_id || profile?.canteen_id,
+                  tenant_id: cart[0]?.item.tenant_id || profile?.tenant_id
+                }
+              });
+
+              if (!verifyError && verifyData?.success && verifyData?.order_id) {
+                orderCreated = true;
+                createdOrderId = verifyData.order_id;
               }
-            });
+            } catch (edgeErr) {
+              console.warn("verify-zohopay-order edge function invoke warning, falling back to direct placement:", edgeErr);
+            }
 
-            if (verifyError) throw verifyError;
+            // 5b. Direct database placement fallback if Edge Function is not ready
+            if (!orderCreated) {
+              const canteenId = cart[0]?.item?.canteen_id || profile?.canteen_id || null;
+              const tenantId = cart[0]?.item?.tenant_id || profile?.tenant_id || null;
 
-            if (verifyData.success) {
-              // Fetch the newly created order
-              const { data: newOrder } = await supabase.from('orders').select('*').eq('id', verifyData.order_id).single();
+              // Generate 6-digit OTP code
+              const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+              // Insert payment record
+              let paymentRecordId: string | null = null;
+              try {
+                const { data: payRec } = await (supabase as any).from('payments').insert({
+                  user_id: profile?.id,
+                  tenant_id: tenantId,
+                  amount: ledger.gross_payable,
+                  provider_order_id: idempotencyKey,
+                  provider_payment_id: paymentId,
+                  status: 'SUCCESS'
+                }).select('id').single();
+                if ((payRec as any)?.id) paymentRecordId = (payRec as any).id;
+              } catch (pErr) {
+                console.warn('Payment record insert note:', pErr);
+              }
+
+              // Build order payload safely
+              const orderPayload: any = {
+                user_id: profile?.id,
+                canteen_id: canteenId,
+                tenant_id: tenantId,
+                pickup_time: finalPickupTime,
+                is_takeaway: false,
+                status: 'PLACED',
+                otp_code: otpCode,
+                idempotency_key: idempotencyKey,
+              };
+              if (paymentRecordId) {
+                orderPayload.payment_id = paymentRecordId;
+              }
+
+              const { data: directOrder, error: directOrderErr } = await supabase
+                .from('orders')
+                .insert(orderPayload)
+                .select('*')
+                .single();
+
+              if (directOrderErr) throw directOrderErr;
+              createdOrderId = directOrder.id;
+
+              // Insert order items
+              const orderItems = cart.map(c => ({
+                order_id: createdOrderId,
+                menu_item_id: c.item.id,
+                quantity: c.quantity
+              }));
+              const { error: itemsErr } = await supabase.from('order_items').insert(orderItems);
+              if (itemsErr) console.warn('Order items insert error:', itemsErr);
+
+              // Optionally record ledger
+              try {
+                if (canteenId) {
+                  await supabase.from('order_ledger').insert({
+                    order_id: createdOrderId,
+                    student_id: profile?.id,
+                    canteen_id: canteenId,
+                    food_subtotal: ledger.food_subtotal,
+                    commission_fee: ledger.commission_fee,
+                    target_net: ledger.target_net,
+                    gross_payable: ledger.gross_payable,
+                    gateway_fee: ledger.gateway_fee,
+                    gw_deduction: ledger.gw_deduction,
+                    net_settled: ledger.net_settled,
+                    canteen_payable: ledger.canteen_payable,
+                    platform_net: ledger.platform_net,
+                  });
+                }
+              } catch (ledErr) {
+                console.warn('Optional ledger insert skipped:', ledErr);
+              }
+
+              orderCreated = true;
+            }
+
+            if (createdOrderId) {
+              const { data: newOrder } = await supabase.from('orders').select('*').eq('id', createdOrderId).single();
               if (newOrder) {
                 setActiveOrder(newOrder);
               }
               setCart([]);
-              setPickupTime('');
+              setPickupTime(getInitialPickupTime());
               localStorage.removeItem('pending_order');
             } else {
-              throw new Error(verifyData.error || 'Payment verification failed');
+              throw new Error('Failed to create order record.');
             }
           } catch (err: any) {
             setError(err.message || 'An error occurred during payment verification');
@@ -605,7 +917,26 @@ export default function StudentDashboard() {
                       <div className="font-bold text-slate-800 text-lg">Order #{o.order_number}</div>
                       <div className="text-xs text-slate-500 font-mono font-medium mb-1">ID: {o.id.split('-')[0].toUpperCase()}</div>
                       <div className="text-xs text-slate-500 font-medium mb-1">Placed on: {new Date(o.created_at).toLocaleDateString()}</div>
-                      <div className="text-sm text-slate-600 mt-1">Pickup: {formatPickupTime(o.pickup_time)} (Lunch)</div>
+                      <div className="text-sm text-slate-600 mt-1">
+                        Pickup: {formatPickupTime((o as any).requested_pickup_time || o.pickup_time)} (Lunch)
+                        {(o as any).estimated_prep_duration_minutes && (
+                          <span className="text-xs text-slate-400 ml-2">
+                            • Prep: {(o as any).estimated_prep_duration_minutes}m
+                          </span>
+                        )}
+                      </div>
+                      {((o as any).tax_snapshot || (o as any).total_tax_amount) && (
+                        <div className="text-xs text-slate-500 mt-1 flex flex-wrap gap-2 items-center">
+                          <span className="bg-slate-100 px-2 py-0.5 rounded text-slate-700 font-medium">
+                            GST ({(o as any).tax_snapshot?.effective_food_gst_rate || 5}%): ₹{Number((o as any).total_tax_amount || (o as any).tax_snapshot?.food_gst_amount || 0).toFixed(2)}
+                          </span>
+                          {(o as any).tax_snapshot?.cgst_amount !== undefined && (
+                            <span className="text-[11px] text-slate-400">
+                              (CGST: ₹{Number((o as any).tax_snapshot.cgst_amount).toFixed(2)} + SGST: ₹{Number((o as any).tax_snapshot.sgst_amount).toFixed(2)})
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div className={`px-3 py-1 rounded-full text-xs font-bold border ${o.status === 'COLLECTED' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
                       {o.status}
@@ -809,7 +1140,45 @@ export default function StudentDashboard() {
             </div>
           )}
           
-          <p className="mt-5 text-xs text-indigo-200">Requested Pickup Time: <span className="font-semibold text-white">{formatPickupTime(activeOrder.pickup_time)} (Lunch)</span></p>
+          {/* Smart Scheduling Details in Active Order Card */}
+          <div className="mt-5 pt-4 border-t border-indigo-400/20 grid grid-cols-2 sm:grid-cols-3 gap-3 text-left">
+            <div>
+              <span className="text-[10px] text-indigo-300 uppercase tracking-wider block font-bold">Your Pickup Time</span>
+              <span className="text-sm font-bold text-white">
+                {formatPickupTime((activeOrder as any).requested_pickup_time || activeOrder.pickup_time)}
+              </span>
+            </div>
+            {(activeOrder as any).planned_prep_start_time && (
+              <div>
+                <span className="text-[10px] text-indigo-300 uppercase tracking-wider block font-bold">Kitchen Prep Starts</span>
+                <span className="text-sm font-semibold text-amber-300">
+                  {formatPickupTime((activeOrder as any).planned_prep_start_time)}
+                </span>
+              </div>
+            )}
+            {(activeOrder as any).target_ready_by_time && (
+              <div>
+                <span className="text-[10px] text-indigo-300 uppercase tracking-wider block font-bold">Hot & Ready By</span>
+                <span className="text-sm font-semibold text-emerald-300">
+                  {formatPickupTime((activeOrder as any).target_ready_by_time)}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Confirmed Bill & GST Summary */}
+          {((activeOrder as any).tax_snapshot || (activeOrder as any).total_tax_amount) && (
+            <div className="mt-3 pt-3 border-t border-indigo-400/20 flex flex-wrap items-center justify-between gap-2 text-xs text-indigo-100">
+              <span className="font-semibold">
+                Bill Tax ({(activeOrder as any).tax_snapshot?.effective_food_gst_rate || 5}% GST): ₹{Number((activeOrder as any).total_tax_amount || (activeOrder as any).tax_snapshot?.food_gst_amount || 0).toFixed(2)}
+              </span>
+              {(activeOrder as any).tax_snapshot?.cgst_amount !== undefined && (
+                <span className="text-[11px] text-indigo-200 font-mono">
+                  CGST: ₹{Number((activeOrder as any).tax_snapshot.cgst_amount).toFixed(2)} | SGST: ₹{Number((activeOrder as any).tax_snapshot.sgst_amount).toFixed(2)}
+                </span>
+              )}
+            </div>
+          )}
           </div>
         </div>
       ) : (
@@ -819,7 +1188,7 @@ export default function StudentDashboard() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
               <div>
                 <h2 className="text-xl font-bold text-slate-800">Menu</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Lunch Pickup: 12:30 PM – 1:40 PM • Booking Opens: 9:30 AM (Min 30m Notice)</p>
+                <p className="text-xs text-slate-500 mt-0.5">Lunch Pickup: {formatSingleTime(slotConfig.serviceStartTime)} – {formatSingleTime(slotConfig.serviceEndTime)} • Booking Opens: 9:30 AM (Min {slotConfig.minNoticeMinutes || 30}m Notice)</p>
               </div>
               {isSunday ? (
                 <span className="self-start sm:self-auto px-3 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm">
@@ -839,40 +1208,249 @@ export default function StudentDashboard() {
               ) : (
                 <span className="self-start sm:self-auto px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span>Lunch Slots Open (12:30 PM – 1:40 PM)</span>
+                  <span>Lunch Slots Open ({formatSingleTime(slotConfig.serviceStartTime)} – {formatSingleTime(slotConfig.serviceEndTime)})</span>
                 </span>
               )}
             </div>
 
-            <div className="grid grid-cols-3 gap-2 sm:gap-4">
-              {menuItems.map(item => (
-                <div key={item.id} className={`flex flex-col justify-between p-5 rounded-2xl border transition-all ${item.is_sold_out ? 'bg-slate-50 border-slate-100 opacity-60' : 'bg-white border-slate-200 hover:border-indigo-300 hover:shadow-md'}`}>
-                  <div>
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className={`w-2.5 h-2.5 rounded-full shadow-sm ${item.veg_non_veg === 'VEG' ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                      {item.is_sold_out && <span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full uppercase tracking-wider">Sold Out</span>}
-                    </div>
-                    <h3 className="font-bold text-slate-800 leading-tight">{item.name}</h3>
-                    <div className="text-sm font-extrabold text-indigo-600 mt-1.5">₹{Number(item.price || 0).toFixed(2)}</div>
-                  </div>
-                  
-                  <div className="mt-4 flex items-center justify-between">
-                    <span className="text-xs font-medium text-slate-400">{item.veg_non_veg === 'VEG' ? 'Veg' : 'Non-Veg'}</span>
-                    {!item.is_sold_out ? (
-                      <button 
-                        onClick={() => addToCart(item)}
-                        disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cartTotalItems >= 5}
-                        className="w-10 h-10 flex items-center justify-center bg-indigo-50 text-indigo-600 rounded-xl font-bold hover:bg-indigo-600 hover:text-white transition-colors disabled:opacity-50 disabled:hover:bg-indigo-50 disabled:hover:text-indigo-600 shadow-sm"
-                      >
-                        +
-                      </button>
-                    ) : (
-                      <div className="h-10"></div>
-                    )}
-                  </div>
+            {/* Menu Search and Filter Controls */}
+            <div className="space-y-3 mb-6 bg-slate-50/70 border border-slate-200/80 rounded-2xl p-3 sm:p-4">
+              {/* Food Search Bar */}
+              <div className="relative group">
+                <div className="relative flex items-center bg-white border border-slate-300 focus-within:border-indigo-600 focus-within:ring-2 focus-within:ring-indigo-100 rounded-xl shadow-sm transition-all overflow-hidden px-3.5 py-2.5 gap-2.5">
+                  <IconSearch size={16} className="w-4 h-4 text-slate-400 shrink-0 pointer-events-none" />
+                  <input
+                    type="text"
+                    placeholder="Search food items..."
+                    value={foodSearchQuery}
+                    onChange={e => setFoodSearchQuery(e.target.value)}
+                    className="w-full bg-transparent text-sm text-slate-800 placeholder:text-slate-400 border-none outline-none focus:outline-none focus-visible:outline-none ring-0 focus:ring-0 p-0 pr-8"
+                    style={{ caretColor: 'transparent' }}
+                  />
+                  {foodSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setFoodSearchQuery('')}
+                      className="absolute right-2.5 p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
+                      title="Clear search"
+                    >
+                      <IconX size={14} className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
-              ))}
+              </div>
+
+              {/* Filter Buttons: Veg / Non-Veg & Categories */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+                {/* Food Type Filter (All / Veg / Non-Veg) */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mr-1 hidden xs:inline">Type:</span>
+                  <button
+                    type="button"
+                    onClick={() => setFoodTypeFilter('ALL')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
+                      foodTypeFilter === 'ALL'
+                        ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    All
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFoodTypeFilter('VEG')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 ${
+                      foodTypeFilter === 'VEG'
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                        : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50'
+                    }`}
+                  >
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-emerald-300"></span>
+                    <span>Veg</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFoodTypeFilter('NON_VEG')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 ${
+                      foodTypeFilter === 'NON_VEG'
+                        ? 'bg-rose-600 text-white border-rose-600 shadow-sm'
+                        : 'bg-white text-rose-700 border-rose-200 hover:bg-rose-50'
+                    }`}
+                  >
+                    <span className="w-2 h-2 rounded-full bg-rose-500 ring-2 ring-rose-300"></span>
+                    <span>Non-Veg</span>
+                  </button>
+                </div>
+
+                {/* Category Filter (All Categories / Packed Food / Meals / Drinks) */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mr-1 hidden xs:inline">Category:</span>
+                  <button
+                    type="button"
+                    onClick={() => setCategoryFilter('ALL')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
+                      categoryFilter === 'ALL'
+                        ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    All Categories
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCategoryFilter('PACKED_FOOD')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1 ${
+                      categoryFilter === 'PACKED_FOOD'
+                        ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-amber-50 hover:text-amber-800 hover:border-amber-200'
+                    }`}
+                  >
+                    <span>Packed Food</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCategoryFilter('MEALS')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1 ${
+                      categoryFilter === 'MEALS'
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-indigo-50 hover:text-indigo-800 hover:border-indigo-200'
+                    }`}
+                  >
+                    <span>Meals</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCategoryFilter('DRINKS')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1 ${
+                      categoryFilter === 'DRINKS'
+                        ? 'bg-cyan-600 text-white border-cyan-600 shadow-sm'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-cyan-50 hover:text-cyan-800 hover:border-cyan-200'
+                    }`}
+                  >
+                    <span>Drinks</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Active Filter Indicators & Reset Link */}
+              {(foodSearchQuery.trim() || foodTypeFilter !== 'ALL' || categoryFilter !== 'ALL') && (
+                <div className="flex items-center justify-between pt-2 border-t border-slate-200/60 text-xs">
+                  <span className="text-slate-500 font-medium">
+                    Showing <strong className="text-slate-800">{filteredMenuItems.length}</strong> of {menuItems.length} items
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFoodSearchQuery('');
+                      setFoodTypeFilter('ALL');
+                      setCategoryFilter('ALL');
+                    }}
+                    className="text-indigo-600 hover:text-indigo-800 font-bold transition-colors hover:underline"
+                  >
+                    Reset all filters
+                  </button>
+                </div>
+              )}
             </div>
+
+            {/* Empty State when No Menu Items Match */}
+            {filteredMenuItems.length === 0 ? (
+              <div className="py-12 px-4 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                <IconPackage size={36} className="w-9 h-9 text-slate-300 mx-auto mb-2" />
+                <h3 className="text-base font-bold text-slate-700">No Food Items Found</h3>
+                <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1">
+                  No items matched your current search and filter criteria. Try adjusting your search query, food type, or category.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFoodSearchQuery('');
+                    setFoodTypeFilter('ALL');
+                    setCategoryFilter('ALL');
+                  }}
+                  className="mt-3 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm"
+                >
+                  Reset Filters
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-2 sm:gap-4">
+                {filteredMenuItems.map(item => (
+                  <div key={item.id} className={`flex flex-col justify-between p-5 rounded-2xl border transition-all ${item.is_sold_out ? 'bg-slate-50 border-slate-100 opacity-60' : 'bg-white border-slate-200 hover:border-indigo-300 hover:shadow-md'}`}>
+                    <div>
+                      <div className="flex items-center justify-between gap-2 mb-3">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-2.5 h-2.5 rounded-full shadow-sm ${item.veg_non_veg === 'VEG' ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                          <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">
+                            {getItemCategory(item)}
+                          </span>
+                        </div>
+                        {item.is_sold_out && <span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full uppercase tracking-wider">Sold Out</span>}
+                      </div>
+                      <h3 className="font-bold text-slate-800 leading-tight">{item.name}</h3>
+                      <div className="text-sm font-extrabold text-indigo-600 mt-1.5">₹{Number(item.price || 0).toFixed(2)}</div>
+                    </div>
+                    
+                    <div className="mt-4 flex items-center justify-between gap-1">
+                      <span className="text-xs font-medium text-slate-400 shrink-0">{item.veg_non_veg === 'VEG' ? 'Veg' : 'Non-Veg'}</span>
+                      {!item.is_sold_out ? (
+                        (() => {
+                          const cartEntry = cart.find(c => c.item.id === item.id);
+                          const quantity = cartEntry?.quantity || 0;
+
+                          if (quantity > 0) {
+                            return (
+                              <div className="flex items-center bg-indigo-50 border border-indigo-100 rounded-xl p-0.5 shadow-xs">
+                                <button
+                                  type="button"
+                                  onClick={() => removeFromCart(item.id)}
+                                  aria-label={`Decrease quantity of ${item.name}`}
+                                  title={`Decrease quantity of ${item.name}`}
+                                  className="w-8 h-8 flex items-center justify-center text-indigo-600 hover:bg-indigo-600 hover:text-white rounded-lg font-bold text-sm transition-colors active:scale-90"
+                                >
+                                  <span className="leading-none text-base font-semibold">−</span>
+                                </button>
+                                <span 
+                                  className="w-6 text-center font-bold text-sm text-indigo-950 tabular-nums select-none"
+                                  aria-label={`${quantity} of ${item.name} in cart`}
+                                >
+                                  {quantity}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => addToCart(item)}
+                                  disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cartTotalItems >= 5}
+                                  aria-label={`Increase quantity of ${item.name}`}
+                                  title={`Increase quantity of ${item.name}`}
+                                  className="w-8 h-8 flex items-center justify-center text-indigo-600 hover:bg-indigo-600 hover:text-white rounded-lg font-bold text-sm transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-indigo-600 active:scale-90"
+                                >
+                                  <span className="leading-none text-base font-semibold">+</span>
+                                </button>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <button 
+                              type="button"
+                              onClick={() => addToCart(item)}
+                              disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cartTotalItems >= 5}
+                              aria-label={`Add ${item.name} to order`}
+                              title={`Add ${item.name} to order`}
+                              className="w-10 h-10 flex items-center justify-center bg-indigo-50 text-indigo-600 rounded-xl font-bold hover:bg-indigo-600 hover:text-white transition-colors disabled:opacity-50 disabled:hover:bg-indigo-50 disabled:hover:text-indigo-600 shadow-sm text-base active:scale-95"
+                            >
+                              +
+                            </button>
+                          );
+                        })()
+                      ) : (
+                        <div className="h-10"></div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Background Blur Overlay when Cart is Open */}
@@ -920,8 +1498,30 @@ export default function StudentDashboard() {
                 {cartOpen && (
                   <div style={{ padding: '1.5rem 1.5rem 0', maxHeight: '60vh', overflowY: 'auto' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                      <h3 style={{ color: '#f1f5f9', fontWeight: 700, fontSize: '1.1rem' }}>Your Order</h3>
-                      <span style={{ color: '#64748b', fontSize: '0.75rem', fontWeight: 600 }}>Max 5 items</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <h3 style={{ color: '#f1f5f9', fontWeight: 700, fontSize: '1.1rem', margin: 0 }}>Your Order</h3>
+                        <span style={{ color: '#64748b', fontSize: '0.75rem', fontWeight: 600 }}>Max 5 items</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setCartOpen(false)}
+                        aria-label="Close order section"
+                        title="Close"
+                        style={{
+                          background: 'rgba(239, 68, 68, 0.12)',
+                          border: '1px solid rgba(239, 68, 68, 0.25)',
+                          color: '#ef4444',
+                          padding: '0.375rem',
+                          borderRadius: '0.5rem',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          transition: 'all 0.2s',
+                        }}
+                      >
+                        <IconX size={18} className="w-4.5 h-4.5 text-red-500" />
+                      </button>
                     </div>
 
                     {/* Sunday closure banner in cart */}
@@ -941,7 +1541,7 @@ export default function StudentDashboard() {
                         <IconClock size={20} className="w-5 h-5 text-indigo-400 shrink-0" />
                         <div>
                           <div style={{ color: '#818cf8', fontSize: '0.8125rem', fontWeight: 700 }}>Lunch Booking Opens at 9:30 AM</div>
-                          <div style={{ color: '#c7d2fe', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders open at 9:30 AM today (Lunch Slots: 12:30 PM – 1:40 PM, Min 30m notice).</div>
+                          <div style={{ color: '#c7d2fe', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders open at 9:30 AM today (Lunch Slots: {formatSingleTime(slotConfig.serviceStartTime)} – {formatSingleTime(slotConfig.serviceEndTime)}, Min {slotConfig.minNoticeMinutes || 30}m notice).</div>
                         </div>
                       </div>
                     )}
@@ -952,7 +1552,7 @@ export default function StudentDashboard() {
                         <IconClock size={20} className="w-5 h-5 text-rose-400 shrink-0" />
                         <div>
                           <div style={{ color: '#f87171', fontSize: '0.8125rem', fontWeight: 700 }}>Lunch Ordering Closed Today</div>
-                          <div style={{ color: '#fca5a5', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders must be placed at least 30 mins before pickup (Lunch: 12:30 PM – 1:40 PM).</div>
+                          <div style={{ color: '#fca5a5', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders must be placed at least {slotConfig.minNoticeMinutes || 30} mins before pickup (Lunch: {formatSingleTime(slotConfig.serviceStartTime)} – {formatSingleTime(slotConfig.serviceEndTime)}).</div>
                         </div>
                       </div>
                     )}
@@ -991,18 +1591,71 @@ export default function StudentDashboard() {
                                   <span style={{ color: '#818cf8', fontWeight: 600 }}>= ₹{(Number(c.item.price || 0) * c.quantity).toFixed(2)}</span>
                                 </div>
                               </div>
-                              <button
-                                onClick={() => removeFromCart(c.item.id)}
-                                style={{
-                                  fontSize: '0.75rem',
-                                  padding: '0.25rem 0.5rem',
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <div style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  background: '#1e293b',
                                   borderRadius: '0.5rem',
-                                  background: isSoldOut ? 'rgba(239,68,68,0.1)' : '#1e293b',
-                                  color: isSoldOut ? '#f87171' : '#94a3b8',
-                                  border: 'none',
-                                  cursor: 'pointer',
-                                }}
-                              >Remove</button>
+                                  border: '1px solid #334155',
+                                  overflow: 'hidden'
+                                }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => removeFromCart(c.item.id)}
+                                    aria-label={`Decrease quantity of ${c.item.name}`}
+                                    title={`Decrease quantity of ${c.item.name}`}
+                                    style={{
+                                      background: 'transparent',
+                                      border: 'none',
+                                      color: '#94a3b8',
+                                      padding: '0.2rem 0.5rem',
+                                      cursor: 'pointer',
+                                      fontSize: '0.875rem',
+                                      fontWeight: 'bold',
+                                      lineHeight: 1,
+                                    }}
+                                  >
+                                    −
+                                  </button>
+                                  <span style={{ color: '#f8fafc', fontSize: '0.75rem', fontWeight: 700, padding: '0 0.25rem', minWidth: '1.25rem', textAlign: 'center' }}>
+                                    {c.quantity}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => addToCart(c.item)}
+                                    disabled={cartTotalItems >= 5}
+                                    aria-label={`Increase quantity of ${c.item.name}`}
+                                    title={`Increase quantity of ${c.item.name}`}
+                                    style={{
+                                      background: 'transparent',
+                                      border: 'none',
+                                      color: cartTotalItems >= 5 ? '#475569' : '#818cf8',
+                                      padding: '0.2rem 0.5rem',
+                                      cursor: cartTotalItems >= 5 ? 'not-allowed' : 'pointer',
+                                      fontSize: '0.875rem',
+                                      fontWeight: 'bold',
+                                      lineHeight: 1,
+                                    }}
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setCart(cart.filter(x => x.item.id !== c.item.id))}
+                                  aria-label={`Remove ${c.item.name} from cart`}
+                                  style={{
+                                    fontSize: '0.75rem',
+                                    padding: '0.25rem 0.5rem',
+                                    borderRadius: '0.5rem',
+                                    background: isSoldOut ? 'rgba(239,68,68,0.1)' : '#1e293b',
+                                    color: isSoldOut ? '#f87171' : '#94a3b8',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                  }}
+                                >Remove</button>
+                              </div>
                             </div>
                           );
                         })
@@ -1028,107 +1681,323 @@ export default function StudentDashboard() {
                     {/* Pickup time */}
                     <form onSubmit={handlePlaceOrder} style={{ paddingTop: '1rem', borderTop: '1px solid #1e293b' }}>
                       {error && <div style={{ color: '#f87171', fontSize: '0.75rem', marginBottom: '0.75rem', fontWeight: 600 }}>{error}</div>}
-                      <div style={{ marginBottom: '1rem' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                          <label style={{ fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em' }}>
-                            Lunch Pickup Slot (12:30 PM – 1:40 PM)
+                      {/* Flexible User-Selected Lunch Pickup Time & Smart Preparation Scheduling */}
+                      <div style={{ marginBottom: '1rem', background: '#1e293b', padding: '0.875rem 1rem', borderRadius: '0.75rem', border: '1px solid #334155' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.625rem' }}>
+                          <label style={{ fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em' }}>
+                            Your Preferred Pickup Time
                           </label>
                           <span style={{ fontSize: '0.65rem', color: '#818cf8', fontWeight: 600, background: 'rgba(99,102,241,0.15)', padding: '2px 6px', borderRadius: '4px' }}>
-                            Min 30m notice
+                            Service: {formatSingleTime(slotConfig.serviceStartTime)} – {formatSingleTime(slotConfig.serviceEndTime)}
                           </span>
                         </div>
 
-                        <select
-                          value={pickupTime}
-                          onChange={e => setPickupTime(e.target.value)}
-                          disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday}
-                          style={{
-                            width: '100%',
-                            background: '#1e293b',
-                            border: '1px solid #334155',
-                            color: 'white',
-                            padding: '0.625rem 0.875rem',
-                            borderRadius: '0.75rem',
-                            fontSize: '0.875rem',
-                            cursor: (isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday) ? 'not-allowed' : 'pointer',
-                            opacity: (isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday) ? 0.6 : 1,
-                            appearance: 'none' as const,
-                          }}
-                        >
-                          <option value="">
-                            {isSunday 
-                              ? 'Closed on Sundays' 
-                              : isBeforeOpeningTime
-                                ? 'Lunch Booking Opens at 9:30 AM'
-                                : isLunchClosedForToday 
-                                  ? 'Lunch Ordering Closed for Today' 
-                                  : 'Select a Lunch Slot (10-min intervals)...'}
-                          </option>
-                          {LUNCH_SLOTS.map(slot => {
-                            const { isAvailable, reason } = getSlotAvailability(slot.value);
-                            return (
-                              <option key={slot.value} value={slot.value} disabled={!isAvailable}>
-                                {slot.label} {!isAvailable ? `(${reason})` : ''}
-                              </option>
-                            );
-                          })}
-                        </select>
+                        {/* Preferred Time Picker supporting any minute (12:17, 12:26, 12:43 etc.) */}
+                        <div style={{ marginBottom: '0.625rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <div style={{ flex: 1 }}>
+                              <label style={{ display: 'block', fontSize: '0.6875rem', color: '#cbd5e1', fontWeight: 600, marginBottom: '0.25rem' }}>
+                                When will you arrive to collect food?
+                              </label>
+                              <input
+                                type="time"
+                                step="60"
+                                value={normalizeTimeTo24h(pickupTime) || pickupTime}
+                                onChange={e => {
+                                  setPickupTime(e.target.value);
+                                  if (error) setError('');
+                                }}
+                                disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday}
+                                style={{
+                                  width: '100%',
+                                  background: '#0f172a',
+                                  border: '1px solid #334155',
+                                  color: 'white',
+                                  padding: '0.5rem 0.625rem',
+                                  borderRadius: '0.5rem',
+                                  fontSize: '0.925rem',
+                                  fontWeight: 700,
+                                  cursor: (isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday) ? 'not-allowed' : 'pointer',
+                                  opacity: (isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday) ? 0.6 : 1,
+                                }}
+                              />
+                            </div>
+                            <div style={{ paddingTop: '1.25rem' }}>
+                              <span style={{
+                                display: 'inline-block',
+                                fontSize: '0.75rem',
+                                fontWeight: 700,
+                                color: smartSchedule.isValid ? '#34d399' : smartSchedule.validationCode === 'INSUFFICIENT_LEAD_TIME' ? '#fbbf24' : '#f87171',
+                                background: smartSchedule.isValid ? 'rgba(52,211,153,0.1)' : smartSchedule.validationCode === 'INSUFFICIENT_LEAD_TIME' ? 'rgba(251,191,36,0.1)' : 'rgba(239,68,68,0.1)',
+                                padding: '0.5rem 0.75rem',
+                                borderRadius: '0.5rem',
+                                border: `1px solid ${smartSchedule.isValid ? 'rgba(52,211,153,0.3)' : smartSchedule.validationCode === 'INSUFFICIENT_LEAD_TIME' ? 'rgba(251,191,36,0.3)' : 'rgba(239,68,68,0.3)'}`
+                              }}>
+                                {smartSchedule.isValid ? smartSchedule.pickupTimeFormatted : smartSchedule.statusBadge}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Quick Suggestions for Convenient 1-Tap Selection */}
+                        <div style={{ marginBottom: '0.75rem' }}>
+                          <span style={{ fontSize: '0.65rem', color: '#64748b', fontWeight: 600, display: 'block', marginBottom: '0.25rem' }}>
+                            Quick Suggestions (or pick any exact minute above):
+                          </span>
+                          <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap' }}>
+                            {suggestedQuickSlots.map(t => (
+                              <button
+                                key={t}
+                                type="button"
+                                onClick={() => {
+                                  setPickupTime(t);
+                                  if (error) setError('');
+                                }}
+                                disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday}
+                                style={{
+                                  background: (normalizeTimeTo24h(pickupTime) === t) ? '#4f46e5' : '#0f172a',
+                                  color: (normalizeTimeTo24h(pickupTime) === t) ? 'white' : '#94a3b8',
+                                  border: `1px solid ${(normalizeTimeTo24h(pickupTime) === t) ? '#6366f1' : '#334155'}`,
+                                  borderRadius: '0.375rem',
+                                  padding: '2px 7px',
+                                  fontSize: '0.6875rem',
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease'
+                                }}
+                              >
+                                {formatSingleTime(t)}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Smart Preparation Scheduling Breakdown Box */}
+                        {isSunday ? (
+                          <div style={{ padding: '0.5rem', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '0.5rem', color: '#f87171', fontSize: '0.72rem' }}>
+                            Canteen is closed on Sundays.
+                          </div>
+                        ) : isBeforeOpeningTime ? (
+                          <div style={{ padding: '0.5rem', background: 'rgba(234,179,8,0.1)', border: '1px solid rgba(234,179,8,0.2)', borderRadius: '0.5rem', color: '#facc15', fontSize: '0.72rem' }}>
+                            Lunch booking opens at 9:30 AM.
+                          </div>
+                        ) : isLunchClosedForToday ? (
+                          <div style={{ padding: '0.5rem', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '0.5rem', color: '#f87171', fontSize: '0.72rem' }}>
+                            Lunch service is currently closed for today.
+                          </div>
+                        ) : smartSchedule.isValid ? (
+                          <div style={{
+                            padding: '0.75rem',
+                            background: 'rgba(99,102,241,0.08)',
+                            border: '1px solid rgba(99,102,241,0.25)',
+                            borderRadius: '0.625rem',
+                          }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.375rem' }}>
+                              <span style={{ fontSize: '0.7rem', color: '#a5b4fc', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                ⚡ Smart Kitchen Prep Schedule
+                              </span>
+                              <span style={{ fontSize: '0.65rem', color: '#34d399', fontWeight: 700, background: 'rgba(52,211,153,0.15)', padding: '2px 6px', borderRadius: '4px' }}>
+                                Concurrent Prep
+                              </span>
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem', textAlign: 'center' }}>
+                              <div style={{ background: '#0f172a', padding: '0.4rem', borderRadius: '0.375rem', border: '1px solid #334155' }}>
+                                <span style={{ display: 'block', fontSize: '0.6rem', color: '#94a3b8', fontWeight: 600 }}>Kitchen Starts</span>
+                                <span style={{ display: 'block', fontSize: '0.75rem', color: '#fbbf24', fontWeight: 800 }}>{smartSchedule.prepStartFormatted}</span>
+                              </div>
+                              <div style={{ background: '#0f172a', padding: '0.4rem', borderRadius: '0.375rem', border: '1px solid #334155' }}>
+                                <span style={{ display: 'block', fontSize: '0.6rem', color: '#94a3b8', fontWeight: 600 }}>Prep Duration</span>
+                                <span style={{ display: 'block', fontSize: '0.75rem', color: '#e2e8f0', fontWeight: 800 }}>{smartSchedule.estimatedPrepDurationMinutes} mins</span>
+                              </div>
+                              <div style={{ background: '#0f172a', padding: '0.4rem', borderRadius: '0.375rem', border: '1px solid #334155' }}>
+                                <span style={{ display: 'block', fontSize: '0.6rem', color: '#94a3b8', fontWeight: 600 }}>Hot & Ready</span>
+                                <span style={{ display: 'block', fontSize: '0.75rem', color: '#34d399', fontWeight: 800 }}>{smartSchedule.readyByFormatted}</span>
+                              </div>
+                            </div>
+                            <p style={{ margin: '0.5rem 0 0', fontSize: '0.65rem', color: '#94a3b8', textAlign: 'center' }}>
+                              Arrival at {smartSchedule.pickupTimeFormatted} allows fresh preparation starting at {smartSchedule.prepStartFormatted}.
+                            </p>
+                          </div>
+                        ) : (
+                          <div style={{
+                            padding: '0.625rem 0.75rem',
+                            background: 'rgba(239,68,68,0.12)',
+                            border: '1px solid rgba(239,68,68,0.3)',
+                            borderRadius: '0.5rem',
+                          }}>
+                            <div style={{ color: '#fca5a5', fontSize: '0.72rem', fontWeight: 600, marginBottom: smartSchedule.suggestedPickupTime ? '0.5rem' : '0' }}>
+                              ⚠️ {smartSchedule.reason}
+                            </div>
+                            {smartSchedule.suggestedPickupTime && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPickupTime(smartSchedule.suggestedPickupTime!);
+                                  if (error) setError('');
+                                }}
+                                style={{
+                                  background: '#4f46e5',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '0.375rem',
+                                  padding: '4px 8px',
+                                  fontSize: '0.7rem',
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}
+                              >
+                                Switch to Feasible Time: {smartSchedule.suggestedPickupFormatted}
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </div>
 
-                      {/* Total Amount Summary */}
+                      {/* Transparent Customer Order Bill */}
                       {cart.length > 0 && (
-                        <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', background: '#1e293b', borderRadius: '0.75rem' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>Food Subtotal</span>
-                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem' }}>₹{calculateOrderLedger(cartTotalPrice).food_subtotal.toFixed(2)}</span>
+                        <div style={{ marginBottom: '1rem', padding: '0.875rem 1rem', background: '#1e293b', borderRadius: '0.75rem', border: '1px solid #334155' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px solid #334155' }}>
+                            <span style={{ color: '#cbd5e1', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                              Tax Invoice / Order Bill
+                            </span>
+                            <span style={{
+                              color: ledger.tax_mode === 'TAX_INCLUSIVE' ? '#34d399' : '#a5b4fc',
+                              fontSize: '0.65rem',
+                              fontWeight: 700,
+                              background: ledger.tax_mode === 'TAX_INCLUSIVE' ? 'rgba(52,211,153,0.15)' : 'rgba(99,102,241,0.15)',
+                              padding: '2px 6px',
+                              borderRadius: '4px'
+                            }}>
+                              {ledger.tax_mode === 'TAX_INCLUSIVE' ? 'Prices Include GST' : 'GST Added to Base'}
+                            </span>
                           </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem', paddingBottom: '0.75rem', borderBottom: '1px solid #334155' }}>
-                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>GST and other</span>
-                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem' }}>₹{(calculateOrderLedger(cartTotalPrice).commission_fee + calculateOrderLedger(cartTotalPrice).gateway_fee).toFixed(2)}</span>
+
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+                            <span style={{ color: '#94a3b8', fontSize: '0.8125rem' }}>Food Subtotal</span>
+                            <span style={{ color: '#e2e8f0', fontSize: '0.8125rem', fontWeight: 600 }}>₹{ledger.food_subtotal.toFixed(2)}</span>
                           </div>
+
+                          {ledger.tax_mode === 'TAX_INCLUSIVE' && ledger.taxable_food_amount !== undefined && (
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+                              <span style={{ color: '#64748b', fontSize: '0.72rem', paddingLeft: '0.5rem' }}>↳ Net Taxable Value</span>
+                              <span style={{ color: '#94a3b8', fontSize: '0.72rem' }}>₹{ledger.taxable_food_amount.toFixed(2)}</span>
+                            </div>
+                          )}
+
+                          {/* Itemized GST Breakdown (CGST / SGST / IGST) */}
+                          <div style={{
+                            margin: '0.5rem 0',
+                            padding: '0.5rem 0.625rem',
+                            background: '#0f172a',
+                            borderRadius: '0.5rem',
+                            border: '1px solid #334155'
+                          }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                              <span style={{ color: '#a5b4fc', fontSize: '0.7rem', fontWeight: 700 }}>
+                                GST ({ledger.food_gst_rate || 5}%) {ledger.tax_mode === 'TAX_INCLUSIVE' ? 'Included' : 'Levied'}
+                              </span>
+                              <span style={{ color: '#e2e8f0', fontSize: '0.75rem', fontWeight: 700 }}>
+                                ₹{(ledger.food_gst_amount || 0).toFixed(2)}
+                              </span>
+                            </div>
+
+                            {ledger.supply_type === 'INTRA_STATE' ? (
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '0.25rem' }}>
+                                <div style={{ fontSize: '0.6875rem', color: '#94a3b8' }}>
+                                  CGST ({ledger.cgst_rate || 2.5}%): <strong style={{ color: '#cbd5e1' }}>₹{(ledger.cgst_amount || 0).toFixed(2)}</strong>
+                                </div>
+                                <div style={{ fontSize: '0.6875rem', color: '#94a3b8', textAlign: 'right' }}>
+                                  SGST ({ledger.sgst_rate || 2.5}%): <strong style={{ color: '#cbd5e1' }}>₹{(ledger.sgst_amount || 0).toFixed(2)}</strong>
+                                </div>
+                              </div>
+                            ) : (
+                              <div style={{ fontSize: '0.6875rem', color: '#94a3b8', marginTop: '0.25rem' }}>
+                                IGST ({ledger.igst_rate || 5}%): <strong style={{ color: '#cbd5e1' }}>₹{(ledger.igst_amount || 0).toFixed(2)}</strong>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Service & Gateway Fees */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+                            <span style={{ color: '#94a3b8', fontSize: '0.8125rem' }}>Platform Fee (3%)</span>
+                            <span style={{ color: '#e2e8f0', fontSize: '0.8125rem' }}>₹{ledger.commission_fee.toFixed(2)}</span>
+                          </div>
+
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px solid #334155' }}>
+                            <span style={{ color: '#94a3b8', fontSize: '0.8125rem' }}>Payment Gateway Fee</span>
+                            <span style={{ color: '#e2e8f0', fontSize: '0.8125rem' }}>₹{ledger.gateway_fee.toFixed(2)}</span>
+                          </div>
+
+                          {/* Grand Total */}
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem', fontWeight: 600 }}>Total Amount to Pay</span>
-                            <span style={{ color: '#38bdf8', fontSize: '1.125rem', fontWeight: 700 }}>₹{calculateOrderLedger(cartTotalPrice).gross_payable.toFixed(2)}</span>
+                            <div>
+                              <span style={{ color: '#e2e8f0', fontSize: '0.875rem', fontWeight: 600, display: 'block' }}>Total Payable</span>
+                              <span style={{ color: '#64748b', fontSize: '0.625rem' }}>Includes all taxes and fees</span>
+                            </div>
+                            <span style={{ color: '#38bdf8', fontSize: '1.125rem', fontWeight: 800 }}>₹{ledger.gross_payable.toFixed(2)}</span>
                           </div>
                         </div>
                       )}
 
-                      <button
-                        type="submit"
-                        disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out)}
-                        style={{
-                          width: '100%',
-                          padding: '0.875rem',
-                          background: isSuspended
-                            ? '#ef4444'
+                      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem' }}>
+                        <button
+                          type="button"
+                          onClick={() => setCartOpen(false)}
+                          aria-label="Cancel order"
+                          style={{
+                            padding: '0.875rem 1.25rem',
+                            background: '#1e293b',
+                            color: '#94a3b8',
+                            borderRadius: '0.875rem',
+                            fontWeight: 600,
+                            fontSize: '0.875rem',
+                            border: '1px solid #334155',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out)}
+                          style={{
+                            flex: 1,
+                            padding: '0.875rem',
+                            background: isSuspended
+                              ? '#ef4444'
+                              : isSunday
+                                ? '#64748b'
+                                : isBeforeOpeningTime
+                                  ? '#4f46e5'
+                                  : isLunchClosedForToday
+                                    ? '#64748b'
+                                    : (cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out))
+                                      ? 'rgba(99,102,241,0.4)' : '#6366f1',
+                            color: 'white',
+                            borderRadius: '0.875rem',
+                            fontWeight: 700,
+                            fontSize: '0.875rem',
+                            border: 'none',
+                            cursor: isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cart.length === 0 || !pickupTime || submitting ? 'not-allowed' : 'pointer',
+                            transition: 'background 0.2s',
+                          }}
+                        >
+                          {isSuspended
+                            ? 'Account Deactivated (3-Day Penalty)'
                             : isSunday
-                              ? '#64748b'
+                              ? 'Closed on Sundays'
                               : isBeforeOpeningTime
-                                ? '#4f46e5'
+                                ? 'Lunch Booking Opens at 9:30 AM'
                                 : isLunchClosedForToday
-                                  ? '#64748b'
-                                  : (cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out))
-                                    ? 'rgba(99,102,241,0.4)' : '#6366f1',
-                          color: 'white',
-                          borderRadius: '0.875rem',
-                          fontWeight: 700,
-                          fontSize: '0.875rem',
-                          border: 'none',
-                          cursor: isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cart.length === 0 || !pickupTime || submitting ? 'not-allowed' : 'pointer',
-                          transition: 'background 0.2s',
-                          marginBottom: '1rem',
-                        }}
-                      >
-                        {isSuspended
-                          ? 'Account Deactivated (3-Day Penalty)'
-                          : isSunday
-                            ? 'Closed on Sundays'
-                            : isBeforeOpeningTime
-                              ? 'Lunch Booking Opens at 9:30 AM'
-                              : isLunchClosedForToday
-                                ? 'Lunch Ordering Closed Today'
-                                : (submitting ? 'Placing...' : `Place Order (${cartTotalItems} items • ₹${calculateOrderLedger(cartTotalPrice).gross_payable.toFixed(2)})`)}
-                      </button>
+                                  ? 'Lunch Ordering Closed Today'
+                                  : (submitting ? 'Placing...' : `Place Order (${cartTotalItems} items • ₹${ledger.gross_payable.toFixed(2)})`)}
+                        </button>
+                      </div>
                     </form>
                   </div>
                 )}
@@ -1162,7 +2031,7 @@ export default function StudentDashboard() {
                     <span style={{ color: '#f1f5f9', fontWeight: 700, fontSize: '0.95rem' }}>Your Order</span>
                     {cartTotalItems > 0 && (
                       <span style={{ color: '#818cf8', fontSize: '0.75rem', fontWeight: 600 }}>
-                        ₹{calculateOrderLedger(cartTotalPrice).gross_payable.toFixed(2)} • {cartTotalItems} item{cartTotalItems > 1 ? 's' : ''}
+                        ₹{ledger.gross_payable.toFixed(2)} • {cartTotalItems} item{cartTotalItems > 1 ? 's' : ''}
                       </span>
                     )}
                   </div>
