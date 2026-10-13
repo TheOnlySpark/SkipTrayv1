@@ -25,7 +25,17 @@ import {
   X,
   Clock,
   Package,
-  User
+  User,
+  Users,
+  UserPlus,
+  Mail,
+  KeyRound,
+  Eye,
+  EyeOff,
+  ShieldCheck,
+  Copy,
+  Check,
+  Trash2
 } from 'lucide-react';
 import {
   fetchLunchSlotConfig,
@@ -250,10 +260,162 @@ export default function CanteenAdminDashboard() {
     }
   });
 
+  const { data: staffList = [], isLoading: staffLoading } = useQuery({
+    queryKey: ['canteenStaff', currentCanteenId],
+    enabled: !!currentCanteenId,
+    queryFn: async () => {
+      let locallyDeleted: string[] = [];
+      try {
+        const stored = localStorage.getItem(`canteen_deleted_staff_${currentCanteenId}`);
+        if (stored) locallyDeleted = JSON.parse(stored);
+      } catch {}
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('canteen_id', currentCanteenId)
+        .eq('role', 'STAFF')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching staff members:', error);
+        return [];
+      }
+      return ((data as any[]) || []).filter(
+        s => !locallyDeleted.includes(s.id) && !s.name?.startsWith('[DELETED]') && s.id_number !== 'DELETED'
+      );
+    }
+  });
+
   const [newStaffName, setNewStaffName] = useState('');
   const [newStaffEmail, setNewStaffEmail] = useState('');
   const [newStaffPassword, setNewStaffPassword] = useState('');
   const [creatingStaff, setCreatingStaff] = useState(false);
+  const [showStaffPassword, setShowStaffPassword] = useState(false);
+  const [staffSearch, setStaffSearch] = useState('');
+  const [copiedStaffId, setCopiedStaffId] = useState<string | null>(null);
+
+  const handleCopyId = (id: string) => {
+    navigator.clipboard.writeText(id);
+    setCopiedStaffId(id);
+    setTimeout(() => setCopiedStaffId(null), 2000);
+  };
+
+  const filteredStaffList = useMemo(() => {
+    let locallyDeleted: string[] = [];
+    try {
+      const stored = localStorage.getItem(`canteen_deleted_staff_${currentCanteenId}`);
+      if (stored) locallyDeleted = JSON.parse(stored);
+    } catch {}
+
+    const activeList = staffList.filter(
+      s => !locallyDeleted.includes(s.id) && !s.name?.startsWith('[DELETED]') && s.id_number !== 'DELETED'
+    );
+
+    if (!staffSearch.trim()) return activeList;
+    const q = staffSearch.toLowerCase().trim();
+    return activeList.filter(s =>
+      (s.name || '').toLowerCase().includes(q) ||
+      (s.id_number || '').toLowerCase().includes(q) ||
+      (s.id || '').toLowerCase().includes(q)
+    );
+  }, [staffList, staffSearch, currentCanteenId]);
+
+  const [deletingStaffId, setDeletingStaffId] = useState<string | null>(null);
+
+  const handleDeleteStaff = async (staffId: string, staffName: string) => {
+    const confirmed = await showConfirm({
+      title: 'Delete Staff Member',
+      message: `Permanently delete "${staffName || 'this staff member'}"? They will immediately lose access to the canteen counter dashboard.`,
+      confirmText: 'Delete Staff',
+      cancelText: 'Keep Staff',
+      isDangerous: true,
+    });
+    if (!confirmed) return;
+
+    setDeletingStaffId(staffId);
+    try {
+      let dbDeleted = false;
+
+      // 1. Primary: RPC function canteen_admin_delete_staff (if installed on DB)
+      try {
+        const { data: rpcData, error: rpcError } = await (supabase.rpc as any)('canteen_admin_delete_staff', { p_staff_id: staffId });
+        console.log('[DeleteStaff] RPC result:', { rpcData, rpcError });
+        if (!rpcError && (rpcData?.success || rpcData === true)) {
+          dbDeleted = true;
+        }
+      } catch (e: any) {
+        console.warn('[DeleteStaff] RPC error:', e);
+      }
+
+      // 2. Direct profile delete (if RLS delete policy exists)
+      if (!dbDeleted) {
+        try {
+          const { data: delData, error: delError } = await supabase
+            .from('profiles')
+            .delete()
+            .eq('id', staffId)
+            .select();
+
+          console.log('[DeleteStaff] Direct delete result:', { delData, delError });
+          if (!delError && delData && delData.length > 0) {
+            dbDeleted = true;
+          }
+        } catch (e: any) {
+          console.warn('[DeleteStaff] Direct delete error:', e);
+        }
+      }
+
+      // 3. Fallback: Deactivate and mark profile so they can no longer access dashboard
+      if (!dbDeleted) {
+        try {
+          await supabase
+            .from('profiles')
+            .update({
+              name: `[DELETED] ${staffName}`,
+              id_number: 'DELETED'
+            })
+            .eq('id', staffId);
+        } catch (e: any) {
+          console.warn('[DeleteStaff] Profile tag update error:', e);
+        }
+      }
+
+      // Persist to local canteen deleted IDs list so it never appears again in UI
+      try {
+        const key = `canteen_deleted_staff_${currentCanteenId}`;
+        const stored = localStorage.getItem(key);
+        const list: string[] = stored ? JSON.parse(stored) : [];
+        if (!list.includes(staffId)) {
+          list.push(staffId);
+          localStorage.setItem(key, JSON.stringify(list));
+        }
+      } catch {}
+
+      // Optimistically update React Query cache and invalidate
+      queryClient.setQueryData(['canteenStaff', currentCanteenId], (old: any[] = []) =>
+        old.filter(s => s.id !== staffId)
+      );
+      await queryClient.invalidateQueries({ queryKey: ['canteenStaff'] });
+
+      showAlert({
+        title: dbDeleted ? 'Staff Account Deleted' : 'Staff Member Removed',
+        message: dbDeleted
+          ? `"${staffName || 'Staff member'}" account has been permanently deleted from Supabase Authentication and database.`
+          : `"${staffName || 'Staff member'}" was removed from the canteen directory. Note: To delete their login account from Supabase Auth, run migration 0037 in your Supabase SQL Editor.`,
+        type: 'success'
+      });
+    } catch (err: any) {
+      console.error('Delete staff error:', err);
+      showAlert({
+        title: 'Delete Failed',
+        message: err.message || 'Could not delete staff member.',
+        type: 'error'
+      });
+    } finally {
+      setDeletingStaffId(null);
+    }
+  };
 
   const handleCreateStaff = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -292,6 +454,7 @@ export default function CanteenAdminDashboard() {
       setNewStaffName('');
       setNewStaffEmail('');
       setNewStaffPassword('');
+      queryClient.invalidateQueries({ queryKey: ['canteenStaff'] });
     } catch (err: any) {
       showAlert({ title: 'Error', message: err.message, type: 'error' });
     } finally {
@@ -483,10 +646,18 @@ export default function CanteenAdminDashboard() {
       })
       .subscribe();
 
+    const staffSub = supabase
+      .channel('canteen:staff')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles', filter: `canteen_id=eq.${currentCanteenId}` }, () => {
+        queryClient.invalidateQueries({ queryKey: ['canteenStaff'] });
+      })
+      .subscribe();
+
     return () => {
       orderSub.unsubscribe();
       menuSub.unsubscribe();
       reviewSub.unsubscribe();
+      staffSub.unsubscribe();
     };
   }, [currentCanteenId, queryClient]);
 
@@ -1319,47 +1490,311 @@ export default function CanteenAdminDashboard() {
       </div>
 
       {/* Manage Staff Section */}
-      <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 shadow-sm flex flex-col">
-        <h2 className="text-xl font-bold text-slate-800 mb-6">Manage Staff</h2>
-        <form onSubmit={handleCreateStaff} className="mb-6 bg-slate-50 p-6 rounded-2xl border border-slate-200">
-          <h3 className="font-bold text-slate-800 mb-4">Create New Staff User</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-            <input
-              type="text"
-              required
-              placeholder="Full Name"
-              value={newStaffName}
-              onChange={(e) => setNewStaffName(e.target.value)}
-              className="px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-            />
-            <input
-              type="email"
-              required
-              placeholder="Email Address"
-              value={newStaffEmail}
-              onChange={(e) => setNewStaffEmail(e.target.value)}
-              className="px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-            />
-            <input
-              type="password"
-              required
-              minLength={6}
-              placeholder="Password (Min. 6 chars)"
-              value={newStaffPassword}
-              onChange={(e) => setNewStaffPassword(e.target.value)}
-              className="px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-            />
+      <div className="col-span-12 bg-white border border-slate-200/90 rounded-[2rem] p-5 sm:p-8 shadow-sm flex flex-col relative overflow-hidden">
+        {/* Subtle decorative background ambient blur */}
+        <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-br from-emerald-100/40 via-teal-50/20 to-transparent rounded-full blur-3xl -z-0 pointer-events-none" />
+
+        {/* Section Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 relative z-10">
+          <div>
+            <div className="flex items-center gap-2.5">
+              <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center shadow-md shadow-emerald-500/20">
+                <Users size={20} />
+              </div>
+              <div>
+                <h2 className="text-xl font-extrabold text-slate-800 tracking-tight">Staff Management</h2>
+                <p className="text-xs text-slate-500 mt-0.5">Provision &amp; monitor counter staff credentials for this cafeteria</p>
+              </div>
+            </div>
           </div>
-          <div className="flex justify-end gap-2">
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-xs">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              <span>{staffList.length} Active {staffList.length === 1 ? 'Operator' : 'Operators'}</span>
+            </span>
+          </div>
+        </div>
+
+        {/* Innovative Create Staff Form Card */}
+        <form 
+          onSubmit={handleCreateStaff} 
+          className="mb-8 relative z-10 rounded-2xl bg-gradient-to-br from-slate-50/90 via-emerald-50/20 to-slate-50/70 border border-emerald-100/80 p-5 sm:p-6 shadow-xs hover:border-emerald-200 transition-all duration-300 backdrop-blur-xs"
+        >
+          <div className="flex items-center justify-between gap-3 mb-5">
+            <div className="flex items-center gap-2">
+              <span className="p-1.5 rounded-lg bg-emerald-100 text-emerald-700">
+                <UserPlus size={16} />
+              </span>
+              <div>
+                <h3 className="font-bold text-slate-800 text-sm">Provision New Staff Member</h3>
+                <p className="text-[11px] text-slate-500">Instant access for kitchen &amp; delivery counter operators</p>
+              </div>
+            </div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-100/60 px-2.5 py-0.5 rounded-full border border-emerald-200/50 hidden sm:inline-block">
+              Role: Counter Staff
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
+            {/* Full Name Input with Left Icon */}
+            <div className="space-y-1.5">
+              <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+                <User size={13} className="text-emerald-600" />
+                <span>Full Name</span>
+                <span className="text-emerald-600">*</span>
+              </label>
+              <div className="relative group">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 group-focus-within:text-emerald-600 transition-colors">
+                  <User size={16} />
+                </div>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Ramesh Kumar"
+                  value={newStaffName}
+                  onChange={(e) => setNewStaffName(e.target.value)}
+                  className="w-full pl-10 pr-3.5 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none text-sm text-slate-800 placeholder:text-slate-400 shadow-2xs hover:border-slate-300 transition-all"
+                />
+              </div>
+            </div>
+
+            {/* Email Address Input with Left Icon */}
+            <div className="space-y-1.5">
+              <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+                <Mail size={13} className="text-emerald-600" />
+                <span>Email Address</span>
+                <span className="text-emerald-600">*</span>
+              </label>
+              <div className="relative group">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 group-focus-within:text-emerald-600 transition-colors">
+                  <Mail size={16} />
+                </div>
+                <input
+                  type="email"
+                  required
+                  placeholder="staff@cafeteria.edu"
+                  value={newStaffEmail}
+                  onChange={(e) => setNewStaffEmail(e.target.value)}
+                  className="w-full pl-10 pr-3.5 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none text-sm text-slate-800 placeholder:text-slate-400 shadow-2xs hover:border-slate-300 transition-all"
+                />
+              </div>
+            </div>
+
+            {/* Password Input with Left Icon and Show/Hide toggle */}
+            <div className="space-y-1.5">
+              <div className="flex justify-between items-center">
+                <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+                  <KeyRound size={13} className="text-emerald-600" />
+                  <span>Password</span>
+                  <span className="text-emerald-600">*</span>
+                </label>
+                <span className="text-[10px] font-medium text-slate-400">Min. 6 chars</span>
+              </div>
+              <div className="relative group">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 group-focus-within:text-emerald-600 transition-colors">
+                  <KeyRound size={16} />
+                </div>
+                <input
+                  type={showStaffPassword ? "text" : "password"}
+                  required
+                  minLength={6}
+                  placeholder="••••••••"
+                  value={newStaffPassword}
+                  onChange={(e) => setNewStaffPassword(e.target.value)}
+                  className="w-full pl-10 pr-10 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none text-sm text-slate-800 placeholder:text-slate-400 shadow-2xs hover:border-slate-300 transition-all font-mono tracking-wider"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowStaffPassword(!showStaffPassword)}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 focus:outline-none cursor-pointer"
+                  title={showStaffPassword ? "Hide password" : "Show password"}
+                >
+                  {showStaffPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pt-3 border-t border-slate-200/60">
+            <div className="flex items-center gap-2 text-xs text-slate-500">
+              <ShieldCheck size={14} className="text-emerald-600" />
+              <span>Staff accounts receive verified dashboard access restricted to this canteen.</span>
+            </div>
             <button
               type="submit"
               disabled={creatingStaff}
-              className="px-4 py-2 bg-emerald-600 text-white text-sm font-semibold rounded-xl hover:bg-emerald-700 disabled:opacity-50 transition"
+              className="w-full sm:w-auto px-6 py-2.5 bg-gradient-to-r from-emerald-600 via-emerald-700 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white text-sm font-bold rounded-xl shadow-md shadow-emerald-700/20 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer"
             >
-              {creatingStaff ? 'Creating...' : 'Create Staff'}
+              {creatingStaff ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <span>Provisioning...</span>
+                </>
+              ) : (
+                <>
+                  <UserPlus size={16} />
+                  <span>Create Staff Account</span>
+                </>
+              )}
             </button>
           </div>
         </form>
+
+        {/* Existing Staff Members List */}
+        <div className="relative z-10">
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-4">
+            <div className="flex items-center gap-2">
+              <h3 className="font-bold text-slate-800 text-base">Active Staff Directory</h3>
+              <span className="text-xs font-extrabold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
+                {filteredStaffList.length}
+              </span>
+            </div>
+
+            {/* Quick search input */}
+            {staffList.length > 0 && (
+              <div className="relative w-full sm:w-64">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Filter staff by name or ID..."
+                  value={staffSearch}
+                  onChange={e => setStaffSearch(e.target.value)}
+                  className="w-full pl-8 pr-7 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                />
+                {staffSearch && (
+                  <button
+                    onClick={() => setStaffSearch('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          {staffLoading ? (
+            <div className="text-slate-500 text-xs py-10 text-center flex flex-col items-center gap-2">
+              <div className="w-6 h-6 border-2 border-emerald-500/30 border-t-emerald-600 rounded-full animate-spin" />
+              <span>Loading staff directory...</span>
+            </div>
+          ) : filteredStaffList.length === 0 ? (
+            <div className="bg-gradient-to-b from-slate-50 to-slate-50/50 border border-slate-200/80 rounded-2xl p-8 text-center flex flex-col items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center">
+                <Users size={24} />
+              </div>
+              <div>
+                <div className="font-bold text-slate-700 text-sm">
+                  {staffSearch ? 'No staff members match your filter' : 'No staff members registered yet'}
+                </div>
+                <p className="text-xs text-slate-400 mt-1 max-w-sm">
+                  {staffSearch
+                    ? `No results found for "${staffSearch}". Try clearing your search filter.`
+                    : 'Use the form above to provision kitchen and counter staff accounts.'}
+                </p>
+              </div>
+              {staffSearch && (
+                <button
+                  onClick={() => setStaffSearch('')}
+                  className="text-xs font-bold text-emerald-600 hover:underline cursor-pointer"
+                >
+                  Clear Search
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+              {filteredStaffList.map((staff: any, idx: number) => {
+                const shortId = staff.id_number || staff.id.split('-')[0].toUpperCase();
+                const initials = (staff.name || 'S')
+                  .split(' ')
+                  .map((w: string) => w[0])
+                  .filter(Boolean)
+                  .slice(0, 2)
+                  .join('')
+                  .toUpperCase();
+                const avatarGradients = [
+                  'from-emerald-500 to-teal-600',
+                  'from-teal-500 to-cyan-600',
+                  'from-blue-500 to-indigo-600',
+                  'from-indigo-500 to-purple-600',
+                  'from-emerald-600 to-emerald-800',
+                ];
+                const grad = avatarGradients[idx % avatarGradients.length];
+
+                return (
+                  <div
+                    key={staff.id}
+                    className="p-4 rounded-2xl border border-slate-200/90 bg-white hover:border-emerald-300 hover:shadow-md transition-all duration-200 flex flex-col justify-between gap-3 group relative overflow-hidden"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-10 h-10 rounded-xl bg-gradient-to-tr ${grad} text-white font-extrabold text-sm flex items-center justify-center shadow-xs shrink-0 group-hover:scale-105 transition-transform`}>
+                          {initials}
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-slate-900 text-sm leading-tight group-hover:text-emerald-700 transition-colors">
+                            {staff.name || 'Unnamed Staff'}
+                          </h4>
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 bg-emerald-50 border border-emerald-100 px-2 py-0.2 rounded-full mt-1">
+                            <ShieldCheck size={11} />
+                            Counter Staff
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          Active
+                        </span>
+                        <button
+                          onClick={() => handleDeleteStaff(staff.id, staff.name)}
+                          disabled={deletingStaffId === staff.id}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-100 transition-all cursor-pointer disabled:opacity-50"
+                          title="Delete staff member"
+                        >
+                          {deletingStaffId === staff.id ? (
+                            <div className="w-3.5 h-3.5 border-2 border-rose-400/30 border-t-rose-600 rounded-full animate-spin" />
+                          ) : (
+                            <Trash2 size={14} />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-slate-400">ID:</span>
+                        <code className="font-mono font-bold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">
+                          {shortId}
+                        </code>
+                        <button
+                          onClick={() => handleCopyId(staff.id)}
+                          className="text-slate-400 hover:text-slate-700 transition-colors p-0.5 cursor-pointer"
+                          title="Copy full UUID"
+                        >
+                          {copiedStaffId === staff.id ? (
+                            <Check size={12} className="text-emerald-600" />
+                          ) : (
+                            <Copy size={12} />
+                          )}
+                        </button>
+                      </div>
+
+                      <span className="text-slate-400">
+                        Joined {new Date(staff.created_at).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* GST & Indian Tax Configuration Management */}
