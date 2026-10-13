@@ -31,7 +31,7 @@ export const DEFAULT_LUNCH_SLOT_CONFIG: LunchSlotConfig = {
   serviceStartTime: '12:00',
   serviceEndTime: '14:00',
   slotDurationMinutes: 15,
-  minNoticeMinutes: 30,
+  minNoticeMinutes: 15,
   isLunchEnabled: true,
   disabledSlots: [],
   slotCapacities: {},
@@ -41,58 +41,101 @@ export const DEFAULT_LUNCH_SLOT_CONFIG: LunchSlotConfig = {
 };
 
 /**
- * Format a single 24-hr time string ('12:30', '13:00') into 12-hr format ('12:30 PM', '1:00 PM').
+ * Checks whether a given string is a valid time representation (either 24h '14:00', 12h '2:00 PM', or ISO timestamp).
+ */
+export const isValidTimeString = (timeStr?: string | null): boolean => {
+  if (!timeStr || typeof timeStr !== 'string') return false;
+  let trimmed = timeStr.trim().toUpperCase();
+  if (trimmed.includes('T')) {
+    trimmed = trimmed.split('T')[1].trim();
+  }
+  trimmed = trimmed.replace(/([+-]\d{2}:\d{2}|Z)$/, '').trim();
+  const match = trimmed.match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?$/);
+  if (!match) return false;
+  const h = parseInt(match[1], 10);
+  const m = parseInt(match[2], 10);
+  const meridiem = match[3];
+
+  if (isNaN(h) || isNaN(m) || m < 0 || m > 59) return false;
+  if (meridiem) {
+    return h >= 1 && h <= 12;
+  }
+  return h >= 0 && h <= 23;
+};
+
+/**
+ * Helper to parse "HH:MM" (24h), "h:mm AM/PM" (12h), or ISO strings into total minutes from 00:00 midnight.
+ * Returns NaN if input is invalid.
+ */
+export const parseTimeToMinutes = (timeStr?: string | null): number => {
+  if (!timeStr || typeof timeStr !== 'string') return NaN;
+  let trimmed = timeStr.trim().toUpperCase();
+  if (trimmed.includes('T')) {
+    trimmed = trimmed.split('T')[1].trim();
+  }
+  trimmed = trimmed.replace(/([+-]\d{2}:\d{2}|Z)$/, '').trim();
+  const match = trimmed.match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?$/);
+  if (!match) return NaN;
+  let h = parseInt(match[1], 10);
+  const m = parseInt(match[2], 10);
+  const meridiem = match[3];
+
+  if (isNaN(h) || isNaN(m) || m < 0 || m > 59) return NaN;
+  if (meridiem) {
+    if (h < 1 || h > 12) return NaN;
+    if (meridiem === 'PM' && h < 12) h += 12;
+    if (meridiem === 'AM' && h === 12) h = 0;
+  } else {
+    if (h < 0 || h > 23) return NaN;
+  }
+  return h * 60 + m;
+};
+
+/**
+ * Helper to convert minutes from midnight (0-1439) into 24-hr "HH:mm".
+ */
+export const minutesToTimeString = (totalMinutes: number): string => {
+  if (isNaN(totalMinutes) || totalMinutes < 0) return '';
+  const normalized = ((Math.floor(totalMinutes) % 1440) + 1440) % 1440;
+  const h = Math.floor(normalized / 60);
+  const m = normalized % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+};
+
+/**
+ * Normalizes any time representation ("2:00 PM", "14:00", "02:00 PM", ISO) into standard 24-hr "HH:mm".
+ */
+export const normalizeTimeTo24h = (timeStr?: string | null): string => {
+  const min = parseTimeToMinutes(timeStr);
+  return isNaN(min) ? '' : minutesToTimeString(min);
+};
+
+/**
+ * Format any time string ('14:00', '2:00 PM', '09:30', ISO) into standard 12-hr display format ('2:00 PM', '9:30 AM').
+ * Does NOT append AM/PM if already present.
  */
 export const formatSingleTime = (timeStr?: string | null): string => {
-  if (!timeStr) return '';
-  const trimmed = timeStr.trim();
-  if (/AM|PM/i.test(trimmed)) return trimmed;
-  const [h, m] = trimmed.split(':').map(Number);
-  if (isNaN(h) || isNaN(m)) return trimmed;
+  const min = parseTimeToMinutes(timeStr);
+  if (isNaN(min)) {
+    return typeof timeStr === 'string' ? timeStr.trim() : '';
+  }
+  const h = Math.floor(min / 60) % 24;
+  const m = min % 60;
   const period = h >= 12 ? 'PM' : 'AM';
   const displayHour = h > 12 ? h - 12 : h === 0 ? 12 : h;
   return `${displayHour}:${String(m).padStart(2, '0')} ${period}`;
 };
 
 /**
- * Format a 24-hr time string or interval range ('12:30', '12:30 - 12:45', '12:30 – 12:45') into 12-hr format.
+ * Canonical alias for backwards compatibility across existing dashboard components.
  */
-export const formatPickupTime = (timeStr?: string | null): string => {
-  if (!timeStr) return '';
-  const trimmed = timeStr.trim();
-  if (trimmed.includes('–')) {
-    const parts = trimmed.split('–').map(s => s.trim());
-    return `${formatSingleTime(parts[0])} – ${formatSingleTime(parts[1])}`;
-  }
-  if (trimmed.includes(' - ')) {
-    const parts = trimmed.split(' - ').map(s => s.trim());
-    return `${formatSingleTime(parts[0])} – ${formatSingleTime(parts[1])}`;
-  }
-  return formatSingleTime(trimmed);
-};
-
-/**
- * Helper to parse "HH:MM" into total minutes from 00:00.
- */
-export const parseTimeToMinutes = (timeStr: string): number => {
-  if (!timeStr) return 0;
-  const [h, m] = timeStr.split(':').map(Number);
-  return (isNaN(h) ? 0 : h) * 60 + (isNaN(m) ? 0 : m);
-};
-
-/**
- * Helper to convert minutes from midnight to "HH:MM".
- */
-export const minutesToTimeString = (totalMinutes: number): string => {
-  const h = Math.floor(totalMinutes / 60) % 24;
-  const m = totalMinutes % 60;
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-};
+export const formatPickupTime = formatSingleTime;
 
 /**
  * Format two time strings as a range: e.g. "12:00 PM – 12:15 PM"
  */
 export const formatTimeRange = (startTime: string, endTime: string): string => {
+  return `${formatSingleTime(startTime)} – ${formatSingleTime(endTime)}`;
   return `${formatSingleTime(startTime)} – ${formatSingleTime(endTime)}`;
 };
 

@@ -2,11 +2,19 @@ import {
   calculateOrderPrepDuration,
   calculateLocalOrderSchedule,
   getPrepUrgencyStatus,
-  ScheduledCartItem
-} from '../src/lib/smartScheduling';
-import { LunchSlotConfig, parseTimeToMinutes, minutesToTimeString, formatSingleTime } from '../src/lib/lunchSlots';
+  verifyBackendOrderSchedule,
+  ScheduledCartItem,
+} from './lib/smartScheduling';
+import {
+  LunchSlotConfig,
+  parseTimeToMinutes,
+  minutesToTimeString,
+  formatSingleTime,
+  normalizeTimeTo24h,
+  isValidTimeString,
+} from './lib/lunchSlots';
 
-const testConfig: LunchSlotConfig = {
+const baseConfig: LunchSlotConfig = {
   serviceStartTime: '12:00',
   serviceEndTime: '14:00',
   slotDurationMinutes: 15,
@@ -32,104 +40,241 @@ function assert(condition: boolean, testName: string, details?: string) {
   }
 }
 
-console.log('--- TEST SUITE: SMART PREPARATION SCHEDULING ---');
+console.log('====================================================');
+console.log('  SKIP TRAY CANTEEN: COMPREHENSIVE SCHEDULING TESTS ');
+console.log('====================================================');
 
-// Test 1: Non-10-minute times (12:17 PM, 12:26 PM, 12:43 PM)
-console.log('\n[Scenario 1: Arbitrary Flexible Minutes]');
-const currentISTMin = parseTimeToMinutes('11:30'); // Early morning before service
+// --- 1. Manually entering a valid time within service hours ---
+console.log('\n[Test 1: Manually entering a valid time within service hours]');
+{
+  const currentIST = parseTimeToMinutes('11:00'); // 11:00 AM
+  const res = calculateLocalOrderSchedule('12:30', [], baseConfig, currentIST);
+  assert(res.isValid === true, '12:30 is accepted within 12:00-14:00 window');
+  assert(res.validationCode === 'VALID', 'validationCode is VALID');
+  assert(res.statusBadge === '12:30 PM', 'statusBadge displays 12:30 PM');
+  assert(res.pickupTimeStr === '12:30', 'pickupTimeStr normalized to 12:30');
+}
 
-const schedule1217 = calculateLocalOrderSchedule('12:17', [], testConfig, currentISTMin);
-assert(schedule1217.isAvailable === true, '12:17 is accepted as valid pickup time');
-assert(schedule1217.pickupTimeFormatted === '12:17 PM', '12:17 formats to 12:17 PM');
-assert(schedule1217.plannedPrepStartTime.includes('12:07'), 'Prep starts 10m before (12:07)', schedule1217.plannedPrepStartTime);
+// --- 2. Selecting each available quick-suggestion time ---
+console.log('\n[Test 2: Selecting each available quick-suggestion time]');
+{
+  const suggestions = ['12:15', '12:30', '12:45', '13:00', '13:15', '13:30', '13:45', '14:00'];
+  const currentIST = parseTimeToMinutes('11:30');
+  let allValid = true;
+  for (const time of suggestions) {
+    const res = calculateLocalOrderSchedule(time, [], baseConfig, currentIST);
+    if (!res.isValid) {
+      allValid = false;
+      console.error(`Suggestion ${time} failed: ${res.reason}`);
+    }
+  }
+  assert(allValid, 'All 8 quick suggestions within service hours evaluate to valid');
+}
 
-const schedule1226 = calculateLocalOrderSchedule('12:26', [], testConfig, currentISTMin);
-assert(schedule1226.isAvailable === true, '12:26 is accepted as valid pickup time');
-assert(schedule1226.pickupTimeFormatted === '12:26 PM', '12:26 formats to 12:26 PM');
-assert(schedule1226.plannedPrepStartTime.includes('12:16'), 'Prep starts at 12:16', schedule1226.plannedPrepStartTime);
+// --- 3. Selecting the suggested feasible time ---
+console.log('\n[Test 3: Selecting the suggested feasible time]');
+{
+  // Current time: 12:20 PM. User initially selects 12:25 PM with 14-min prep (not feasible).
+  const currentIST = parseTimeToMinutes('12:20');
+  const cartItems: ScheduledCartItem[] = [
+    { id: '1', quantity: 5, prep_time_minutes: 10, name: 'Meals' },
+  ];
+  const initialRes = calculateLocalOrderSchedule('12:25', cartItems, baseConfig, currentIST);
+  assert(initialRes.isValid === false, '12:25 rejected due to prep lead time');
+  assert(initialRes.suggestedPickupTime !== undefined, 'Suggested feasible time is provided');
 
-const schedule1243 = calculateLocalOrderSchedule('12:43', [], testConfig, currentISTMin);
-assert(schedule1243.isAvailable === true, '12:43 is accepted as valid pickup time');
-assert(schedule1243.pickupTimeFormatted === '12:43 PM', '12:43 formats to 12:43 PM');
-assert(schedule1243.plannedPrepStartTime.includes('12:33'), 'Prep starts at 12:33', schedule1243.plannedPrepStartTime);
+  // Customer accepts the feasible time
+  const feasibleTime = initialRes.suggestedPickupTime!;
+  const followUpRes = calculateLocalOrderSchedule(feasibleTime, cartItems, baseConfig, currentIST);
+  assert(followUpRes.isValid === true, `Suggested feasible time (${feasibleTime}) validates cleanly`);
+  assert(followUpRes.validationCode === 'VALID', 'Validation code is VALID after switching');
+  assert(followUpRes.statusBadge === followUpRes.pickupTimeFormatted, 'Status badge is formatted time');
+}
 
-// Test 2: Concurrent Preparation Time Calculation
-console.log('\n[Scenario 2: Concurrent Kitchen Cooking Model]');
-const singleItem: ScheduledCartItem[] = [{ id: '1', quantity: 1, prep_time_minutes: 10, name: 'Burger' }];
-const prepSingle = calculateOrderPrepDuration(singleItem, 10);
-assert(prepSingle === 10, 'Single item takes exact item prep time (10m)');
+// --- 4. Entering a time earlier than the required preparation lead time ---
+console.log('\n[Test 4: Entering a time earlier than required prep lead time]');
+{
+  const currentIST = parseTimeToMinutes('12:00'); // 12:00 PM
+  const cartItems: ScheduledCartItem[] = [
+    { id: '1', quantity: 5, prep_time_minutes: 10, name: 'Curd Rice' }, // 10 + 4 = 14 mins prep
+  ];
+  // Pickup requested at 12:05 PM (only 5 mins notice, but kitchen needs 14 mins)
+  const res = calculateLocalOrderSchedule('12:05', cartItems, baseConfig, currentIST);
+  assert(res.isValid === false, '12:05 rejected due to 14m prep requirement');
+  assert(res.validationCode === 'INSUFFICIENT_LEAD_TIME', 'validationCode is INSUFFICIENT_LEAD_TIME');
+  assert(res.statusBadge === 'Too Soon', 'statusBadge displays "Too Soon"');
+  assert(res.error?.includes('Kitchen needs 14 minutes') === true, 'Error message mentions "Kitchen needs 14 minutes"');
+  assert(res.suggestedPickupFormatted === '12:14 PM', 'Earliest ready time suggested is 12:14 PM', res.suggestedPickupFormatted);
+}
 
-const multiItems: ScheduledCartItem[] = [
-  { id: '1', quantity: 1, prep_time_minutes: 10, name: 'Burger' },
-  { id: '2', quantity: 2, prep_time_minutes: 8, name: 'Fries' },
-  { id: '3', quantity: 1, prep_time_minutes: 5, name: 'Drink' },
-];
-// total quantity = 4. max prep = 10. additional items = 3. total = 10 + 3 = 13 mins (NOT 10+8+8+5 = 31 mins naive sum)
-const prepMulti = calculateOrderPrepDuration(multiItems, 10);
-assert(prepMulti === 13, `Multi-item concurrent prep duration is 13m (got ${prepMulti})`);
+// --- 5. Entering a time outside service hours ---
+console.log('\n[Test 5: Entering a time outside service hours]');
+{
+  const currentIST = parseTimeToMinutes('10:00');
+  const resEarly = calculateLocalOrderSchedule('11:45', [], baseConfig, currentIST);
+  assert(resEarly.isValid === false, '11:45 AM before opening is rejected');
+  assert(resEarly.validationCode === 'OUTSIDE_HOURS', 'Early time validationCode is OUTSIDE_HOURS');
+  assert(resEarly.statusBadge === 'Outside Hours', 'statusBadge displays "Outside Hours"');
 
-// Test 3: Planned Prep Start Time Formula
-console.log('\n[Scenario 3: Planned Prep Start Time = Requested Pickup - Prep Duration]');
-// Pickup 12:30, multiItems (13m prep) -> Prep start 12:17, Ready by 12:30
-const schedule1230Multi = calculateLocalOrderSchedule('12:30', multiItems, testConfig, currentISTMin);
-assert(schedule1230Multi.isAvailable === true, '12:30 order is valid');
-assert(schedule1230Multi.estimatedPrepDurationMinutes === 13, 'Prep duration is 13 mins');
-assert(schedule1230Multi.plannedPrepStartTime.includes('12:17'), 'Prep starts at 12:17', schedule1230Multi.plannedPrepStartTime);
-assert(schedule1230Multi.prepStartFormatted === '12:17 PM', 'Prep start formatted is 12:17 PM');
-assert(schedule1230Multi.readyByFormatted === '12:30 PM', 'Ready by formatted is 12:30 PM');
+  const resLate = calculateLocalOrderSchedule('14:30', [], baseConfig, currentIST);
+  assert(resLate.isValid === false, '2:30 PM after closing is rejected');
+  assert(resLate.validationCode === 'OUTSIDE_HOURS', 'Late time validationCode is OUTSIDE_HOURS');
+  assert(resLate.statusBadge === 'Outside Hours', 'statusBadge displays "Outside Hours"');
+}
 
-// Test 4: Out of Bounds (Service Hours)
-console.log('\n[Scenario 4: Service Hours Boundary Enforcement]');
-const scheduleEarly = calculateLocalOrderSchedule('11:45', [], testConfig, currentISTMin);
-assert(scheduleEarly.isAvailable === false, 'Time before 12:00 PM is rejected');
-assert(scheduleEarly.error?.includes('during lunch service') === true, 'Error explains service window requirement');
+// --- 6. Entering a time in the past ---
+console.log('\n[Test 6: Entering a time in the past]');
+{
+  const currentIST = parseTimeToMinutes('13:10'); // 1:10 PM
+  const res = calculateLocalOrderSchedule('12:30', [], baseConfig, currentIST);
+  assert(res.isValid === false, '12:30 PM rejected when current time is 1:10 PM');
+  assert(res.validationCode === 'PAST_TIME', 'validationCode is PAST_TIME');
+  assert(res.statusBadge === 'Past Time', 'statusBadge displays "Past Time"');
+  assert(res.error?.includes('already passed') === true, 'Error message explains time has passed');
+}
 
-const scheduleLate = calculateLocalOrderSchedule('14:15', [], testConfig, currentISTMin);
-assert(scheduleLate.isAvailable === false, 'Time after 2:00 PM is rejected');
-assert(scheduleLate.error?.includes('during lunch service') === true || scheduleLate.error?.includes('closing') === true, 'Error explains closing time');
+// --- 7. Entering an empty or malformed value ---
+console.log('\n[Test 7: Entering an empty or malformed value]');
+{
+  const currentIST = parseTimeToMinutes('11:00');
+  const emptyRes = calculateLocalOrderSchedule('', [], baseConfig, currentIST);
+  assert(emptyRes.isValid === false, 'Empty time is rejected');
+  assert(emptyRes.validationCode === 'INVALID_FORMAT', 'Empty time validationCode is INVALID_FORMAT');
+  assert(emptyRes.statusBadge === 'Invalid Time', 'statusBadge displays "Invalid Time"');
 
-// Test 5: Insufficient Preparation Lead Time (Prep Start In The Past)
-console.log('\n[Scenario 5: Insufficient Preparation Lead Time]');
-const currentMidday = parseTimeToMinutes('12:25'); // Current time is 12:25 PM
-// If user selects 12:30 with 10m prep: requires prep to start at 12:20 (5 mins ago!)
-const scheduleTooSoon = calculateLocalOrderSchedule('12:30', singleItem, testConfig, currentMidday);
-assert(scheduleTooSoon.isAvailable === false, 'Order with past prep start time is rejected');
-assert(scheduleTooSoon.suggestedPickupTime !== undefined, 'Suggests nearest feasible alternative');
-console.log(`  Suggested alternative pickup: ${scheduleTooSoon.suggestedPickupFormatted}`);
+  const malformedRes = calculateLocalOrderSchedule('invalid-text', [], baseConfig, currentIST);
+  assert(malformedRes.isValid === false, 'Gibberish string is rejected');
+  assert(malformedRes.validationCode === 'INVALID_FORMAT', 'Gibberish validationCode is INVALID_FORMAT');
 
-// Test 6: Staff Urgency Calculation
-console.log('\n[Scenario 6: Kitchen Urgency Status]');
-const nowMs = new Date('2026-10-12T12:00:00+05:30').getTime();
+  const outOfRangeRes = calculateLocalOrderSchedule('26:70', [], baseConfig, currentIST);
+  assert(outOfRangeRes.isValid === false, '26:70 is rejected as invalid time');
+}
 
-const upcomingOrder = {
-  status: 'ACCEPTED',
-  planned_prep_start_time: '2026-10-12T12:15:00+05:30', // In 15 mins
-};
-const upcomingStatus = getPrepUrgencyStatus(upcomingOrder, nowMs);
-assert(upcomingStatus.stage === 'UPCOMING', '15m in future is UPCOMING');
+// --- 8. Using both 12-hour display format and 24-hour input format ---
+console.log('\n[Test 8: Both 12-hour and 24-hour formats]');
+{
+  const currentIST = parseTimeToMinutes('11:00');
+  // "02:00 PM" (12h) vs "14:00" (24h)
+  const res12h = calculateLocalOrderSchedule('02:00 PM', [], baseConfig, currentIST);
+  const res24h = calculateLocalOrderSchedule('14:00', [], baseConfig, currentIST);
 
-const urgentOrder = {
-  status: 'ACCEPTED',
-  planned_prep_start_time: '2026-10-12T11:58:00+05:30', // 2 mins overdue
-};
-const urgentStatus = getPrepUrgencyStatus(urgentOrder, nowMs);
-assert(urgentStatus.stage === 'START_NOW', 'Overdue prep start is START_NOW');
+  assert(res12h.isValid === true, '"02:00 PM" is valid');
+  assert(res24h.isValid === true, '"14:00" is valid');
+  assert(res12h.pickupTimeStr === '14:00', '"02:00 PM" normalizes to 24h "14:00"');
+  assert(res24h.pickupTimeStr === '14:00', '"14:00" remains 24h "14:00"');
+  assert(res12h.pickupTimeFormatted === '2:00 PM', 'Both format to "2:00 PM"');
+  assert(res24h.pickupTimeFormatted === '2:00 PM', 'Both format to "2:00 PM"');
 
-const cookingOrder = {
-  status: 'PREPARING',
-  planned_prep_start_time: '2026-10-12T11:50:00+05:30',
-};
-const cookingStatus = getPrepUrgencyStatus(cookingOrder, nowMs);
-assert(cookingStatus.stage === 'COOKING', 'Status PREPARING is COOKING');
+  // Also test "1:15 pm", "12:30 AM/PM"
+  const res115 = calculateLocalOrderSchedule('1:15 pm', [], baseConfig, currentIST);
+  assert(res115.isValid === true && res115.pickupTimeStr === '13:15', '"1:15 pm" parses to 13:15');
+}
 
-const readyOrder = {
-  status: 'READY',
-};
-const readyStatus = getPrepUrgencyStatus(readyOrder, nowMs);
-assert(readyStatus.stage === 'READY', 'Status READY is READY');
+// --- 9. Changing cart quantities so the preparation estimate changes ---
+console.log('\n[Test 9: Dynamic preparation duration based on cart quantities]');
+{
+  const itemBase: ScheduledCartItem = { id: 'item-1', name: 'Biryani', prep_time_minutes: 12, quantity: 1 };
+  const prepQty1 = calculateOrderPrepDuration([itemBase]);
+  assert(prepQty1 === 12, '1 item = 12 mins prep');
 
-console.log(`\n========================================`);
-console.log(`SUMMARY: ${passed} passed, ${failed} failed`);
-console.log(`========================================`);
+  const prepQty3 = calculateOrderPrepDuration([{ ...itemBase, quantity: 3 }]);
+  assert(prepQty3 === 14, '3 items = 12 + 2 = 14 mins prep');
 
-if (failed > 0) process.exit(1);
+  const prepQty5 = calculateOrderPrepDuration([{ ...itemBase, quantity: 5 }]);
+  assert(prepQty5 === 16, '5 items = 12 + 4 = 16 mins prep');
+}
+
+// --- 10. Changing the selected time repeatedly ---
+console.log('\n[Test 10: Changing selected time repeatedly]');
+{
+  const currentIST = parseTimeToMinutes('12:00');
+  const times = ['12:05', '12:30', '14:30', '13:15', '02:00 PM', '11:00'];
+  const expectedValidity = [false, true, false, true, true, false];
+
+  let consistent = true;
+  for (let i = 0; i < times.length; i++) {
+    const res = calculateLocalOrderSchedule(times[i], [], baseConfig, currentIST);
+    if (res.isValid !== expectedValidity[i]) {
+      consistent = false;
+      console.error(`Step ${i} (${times[i]}) expected ${expectedValidity[i]}, got ${res.isValid}`);
+    }
+  }
+  assert(consistent, 'Sequential pickup time changes evaluate correctly without state leakage');
+}
+
+// --- 11. Testing when the service window is updated by admin/staff ---
+console.log('\n[Test 11: Updated service window configuration]');
+{
+  const updatedConfig: LunchSlotConfig = {
+    ...baseConfig,
+    serviceStartTime: '12:30',
+    serviceEndTime: '15:00',
+  };
+  const currentIST = parseTimeToMinutes('11:00');
+
+  // 12:15 was valid under 12:00-14:00, but is invalid under 12:30-15:00
+  const res1215 = calculateLocalOrderSchedule('12:15', [], updatedConfig, currentIST);
+  assert(res1215.isValid === false, '12:15 is rejected when opening moved to 12:30');
+
+  // 14:30 was invalid under 12:00-14:00, but is valid under 12:30-15:00
+  const res1430 = calculateLocalOrderSchedule('14:30', [], updatedConfig, currentIST);
+  assert(res1430.isValid === true, '14:30 is accepted when closing moved to 15:00');
+}
+
+// --- 12. Submitting a valid time through backend API format ---
+console.log('\n[Test 12: API payload contract normalization]');
+{
+  const currentIST = parseTimeToMinutes('11:00');
+  const res = calculateLocalOrderSchedule('02:00 PM', [], baseConfig, currentIST);
+  // Verify API contract fields
+  assert(res.pickupTimeStr === '14:00', 'API pickup_time string is clean 24h "14:00"');
+  assert(res.requestedPickupTime.includes('T14:00:00+05:30'), 'API requested_pickup_time is ISO with IST timezone');
+  assert(res.plannedPrepStartTime.includes('+05:30'), 'plannedPrepStartTime has timezone');
+}
+
+// --- 13. Submitting an invalid or manipulated time directly ---
+console.log('\n[Test 13: Direct validation rejection of manipulated time]');
+{
+  const currentIST = parseTimeToMinutes('12:00');
+  const manipulatedTimes = ['03:00 AM', '25:00', '-01:00', 'null', 'undefined'];
+  let allRejected = true;
+  for (const mt of manipulatedTimes) {
+    const res = calculateLocalOrderSchedule(mt, [], baseConfig, currentIST);
+    if (res.isValid) {
+      allRejected = false;
+      console.error(`Manipulated time ${mt} was unexpectedly accepted`);
+    }
+  }
+  assert(allRejected, 'All manipulated/out-of-bounds time strings rejected');
+}
+
+// --- 14. Verifying frontend and backend validation produce consistent results ---
+console.log('\n[Test 14: Consistency between frontend calculation and backend verification]');
+{
+  const currentIST = parseTimeToMinutes('11:00');
+  const localRes = calculateLocalOrderSchedule('13:00', [], baseConfig, currentIST);
+  // verifyBackendOrderSchedule with undefined canteenId uses authoritative local calculation
+  const backendResPromise = verifyBackendOrderSchedule(undefined, '13:00', [], baseConfig, currentIST);
+  backendResPromise.then(backendRes => {
+    assert(localRes.isValid === backendRes.isValid, 'Local and backend return identical validity');
+    assert(localRes.pickupTimeStr === backendRes.pickupTimeStr, 'Local and backend return identical 24h pickup time');
+    assert(localRes.pickupTimeFormatted === backendRes.pickupTimeFormatted, 'Local and backend return identical 12h display');
+  });
+}
+
+// --- 15. Confirming that selected pickup time persists correctly in order format ---
+console.log('\n[Test 15: Persistence and round-trip parsing of saved order datetime]');
+{
+  const testIso = '2026-10-13T14:00:00+05:30';
+  const parsedMin = parseTimeToMinutes(testIso);
+  assert(parsedMin === 840, 'ISO timestamp parses to 840 minutes (14:00)');
+  assert(formatSingleTime(testIso) === '2:00 PM', 'ISO timestamp formats back to "2:00 PM"');
+  assert(normalizeTimeTo24h(testIso) === '14:00', 'ISO timestamp normalizes to "14:00"');
+}
+
+setTimeout(() => {
+  console.log(`\n====================================================`);
+  console.log(`TOTAL SUITE RESULTS: ${passed} PASSED, ${failed} FAILED`);
+  console.log(`====================================================\n`);
+  if (failed > 0) process.exit(1);
+}, 200);

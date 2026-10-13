@@ -1026,14 +1026,15 @@ export default function StaffDashboard() {
         <div className="flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3">
           {/* Search Bar with Enhanced Contrast & Visibility */}
           <div className="relative flex-1 group">
-            <div className="relative flex items-center bg-slate-100 hover:bg-slate-50/80 focus-within:bg-white border-2 border-slate-300 focus-within:border-indigo-600 focus-within:ring-4 focus-within:ring-indigo-100 rounded-2xl shadow-sm transition-all overflow-hidden">
-              <IconSearch size={18} className="w-5 h-5 text-indigo-600 ml-3.5 shrink-0 pointer-events-none" />
+            <div className="relative flex items-center bg-slate-100 hover:bg-slate-50/80 focus-within:bg-white border-2 border-slate-300 focus-within:border-indigo-600 focus-within:ring-4 focus-within:ring-indigo-100 rounded-2xl shadow-sm transition-all overflow-hidden px-4 py-2.5 gap-3">
+              <IconSearch size={18} className="w-5 h-5 text-indigo-600 shrink-0 pointer-events-none" />
               <input
                 type="text"
                 placeholder="Search by Order Number, Student Name, Student ID, or OTP..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className="w-full pl-3 pr-28 py-2.5 sm:py-3 bg-transparent text-sm sm:text-base font-medium text-slate-900 placeholder:text-slate-500 placeholder:font-normal focus:outline-none"
+                className="w-full bg-transparent text-sm sm:text-base font-medium text-slate-900 placeholder:text-slate-500 placeholder:font-normal border-none outline-none focus:outline-none focus-visible:outline-none ring-0 focus:ring-0 p-0 pr-24"
+                style={{ caretColor: 'transparent' }}
               />
               <div className="absolute right-2.5 flex items-center gap-1.5">
                 {searchQuery && (

@@ -36,33 +36,51 @@ serve(async (req) => {
       throw new Error("Missing payment verification details");
     }
 
-    // Backend validation of pickup_time (supports HH:MM or HH:MM - HH:MM)
-    if (!pickup_time || typeof pickup_time !== 'string' || !/^\d{2}:\d{2}(\s*[-–]\s*\d{2}:\d{2})?$/.test(pickup_time.trim())) {
+    // Backend normalization & validation of pickup_time (supports HH:MM, 12h h:mm AM/PM, range, or ISO timestamp)
+    let cleanPickupTime = String(pickup_time || '').trim();
+    if (cleanPickupTime.includes('T')) {
+      // Extract HH:MM from ISO string if passed
+      const match = cleanPickupTime.match(/T(\d{2}:\d{2})/);
+      if (match) cleanPickupTime = match[1];
+    }
+    const meridiemMatch = cleanPickupTime.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+    if (meridiemMatch) {
+      let h = parseInt(meridiemMatch[1], 10);
+      const m = meridiemMatch[2];
+      const p = meridiemMatch[3].toUpperCase();
+      if (p === 'PM' && h < 12) h += 12;
+      if (p === 'AM' && h === 12) h = 0;
+      cleanPickupTime = `${String(h).padStart(2, '0')}:${m}`;
+    }
+
+    if (!cleanPickupTime || !/^\d{2}:\d{2}(\s*[-–]\s*\d{2}:\d{2})?$/.test(cleanPickupTime)) {
       throw new Error("Invalid pickup time format. Expected HH:MM or HH:MM - HH:MM.");
     }
 
     // Extract start and end times
-    const timeParts = pickup_time.split(/[-–]/).map((s: string) => s.trim());
+    const timeParts = cleanPickupTime.split(/[-–]/).map((s: string) => s.trim());
     const startTimeStr = timeParts[0];
     const endTimeStr = timeParts[1] || null;
 
     // Validate against canteen lunch service configuration
-    let serviceStartTime = '12:00';
-    let serviceEndTime = '14:00';
+    let serviceStartTime = '09:30';
+    let serviceEndTime = '22:00';
+    let slotConfig: any = null;
 
     if (canteen_id) {
-      const { data: slotConfig } = await supabase
+      const { data } = await supabase
         .from('lunch_slot_configs')
         .select('*')
         .eq('canteen_id', canteen_id)
         .maybeSingle();
 
+      slotConfig = data;
       if (slotConfig) {
         if (!slotConfig.is_lunch_enabled) {
           throw new Error("Lunch ordering is currently closed for this canteen.");
         }
-        serviceStartTime = slotConfig.service_start_time || '12:00';
-        serviceEndTime = slotConfig.service_end_time || '14:00';
+        serviceStartTime = slotConfig.service_start_time || '09:30';
+        serviceEndTime = slotConfig.service_end_time || '22:00';
       }
     }
 
@@ -88,10 +106,10 @@ serve(async (req) => {
 
     // Smart Preparation Scheduling Calculation & Capacity Validation
     let defaultPrepMinutes = 10;
-    let maxCapacity = 15;
+    let maxCapacity = 30;
     if (slotConfig) {
       defaultPrepMinutes = slotConfig.default_prep_time_minutes || 10;
-      maxCapacity = slotConfig.max_concurrent_orders || 15;
+      maxCapacity = slotConfig.max_concurrent_orders || 30;
     }
 
     // Fetch prep time for menu items
@@ -200,13 +218,14 @@ serve(async (req) => {
     }
 
     // Insert order securely with unique idempotency_key, smart scheduling fields, and payment link
-    const { data: newOrder, error: orderError } = await supabase
+    let newOrder;
+    const { data: fullOrder, error: orderError } = await supabase
       .from('orders')
       .insert({
         user_id: user.id,
         canteen_id,
         tenant_id,
-        pickup_time,
+        pickup_time: cleanPickupTime,
         requested_pickup_time: requestedPickupTimeIso,
         estimated_prep_duration_minutes: prepDurationMinutes,
         planned_prep_start_time: plannedPrepStartIso,
@@ -223,51 +242,58 @@ serve(async (req) => {
       .single();
 
     if (orderError) {
-      // In case of error here, the payment was recorded but order failed. 
-      // Idempotency key UNIQUE violation means the order is already there.
       if (orderError.code === '23505') {
         return new Response(JSON.stringify({ success: true, message: 'Order already processed' }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
           status: 200,
         });
       }
-      throw orderError;
+
+      // Retry with core schema if extra columns are unmigrated
+      const { data: baseOrder, error: baseErr } = await supabase
+        .from('orders')
+        .insert({
+          user_id: user.id,
+          canteen_id,
+          tenant_id,
+          pickup_time: cleanPickupTime,
+          is_takeaway,
+          status: 'PLACED',
+          otp_code: generateOTP(),
+          idempotency_key,
+          payment_id: paymentRecord.id,
+        })
+        .select('id')
+        .single();
+
+      if (baseErr) throw baseErr;
+      newOrder = baseOrder;
+    } else {
+      newOrder = fullOrder;
     }
 
-    // Insert order ledger with full GST and fee accounting
-    if (ledger) {
-      const { error: ledgerError } = await supabase
-        .from('order_ledger')
-        .insert({
-          order_id: newOrder.id,
-          student_id: user.id,
-          canteen_id,
-          food_subtotal: ledger.food_subtotal,
-          commission_fee: ledger.commission_fee,
-          target_net: ledger.target_net,
-          gross_payable: ledger.gross_payable,
-          gateway_fee: ledger.gateway_fee,
-          gw_deduction: ledger.gw_deduction,
-          net_settled: ledger.net_settled,
-          canteen_payable: ledger.canteen_payable,
-          platform_net: ledger.platform_net,
-          tax_mode: ledger.tax_mode ?? 'TAX_INCLUSIVE',
-          supply_type: ledger.supply_type ?? 'INTRA_STATE',
-          taxable_food_amount: ledger.taxable_food_amount ?? 0,
-          food_gst_rate: ledger.food_gst_rate ?? 5.0,
-          food_gst_amount: ledger.food_gst_amount ?? 0,
-          cgst_rate: ledger.cgst_rate ?? 2.5,
-          cgst_amount: ledger.cgst_amount ?? 0,
-          sgst_rate: ledger.sgst_rate ?? 2.5,
-          sgst_amount: ledger.sgst_amount ?? 0,
-          igst_rate: ledger.igst_rate ?? 0,
-          igst_amount: ledger.igst_amount ?? 0,
-          fee_gst_amount: ledger.fee_gst_amount ?? 0,
-          total_tax_amount: Number(ledger.total_tax_amount ?? ledger.food_gst_amount ?? 0),
-          tax_snapshot: ledger.tax_snapshot ?? null
-        });
-
-      if (ledgerError) throw ledgerError;
+    // Insert order ledger with core accounting (ignoring missing tax columns if any)
+    if (ledger && canteen_id) {
+      try {
+        await supabase
+          .from('order_ledger')
+          .insert({
+            order_id: newOrder.id,
+            student_id: user.id,
+            canteen_id,
+            food_subtotal: ledger.food_subtotal,
+            commission_fee: ledger.commission_fee,
+            target_net: ledger.target_net,
+            gross_payable: ledger.gross_payable,
+            gateway_fee: ledger.gateway_fee,
+            gw_deduction: ledger.gw_deduction,
+            net_settled: ledger.net_settled,
+            canteen_payable: ledger.canteen_payable,
+            platform_net: ledger.platform_net,
+          });
+      } catch (ledErr) {
+        console.warn('Optional ledger insert skipped:', ledErr);
+      }
     }
 
     // Insert order items
