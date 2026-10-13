@@ -36,6 +36,140 @@ serve(async (req) => {
       throw new Error("Missing payment verification details");
     }
 
+    // Backend normalization & validation of pickup_time (supports HH:MM, 12h h:mm AM/PM, range, or ISO timestamp)
+    let cleanPickupTime = String(pickup_time || '').trim();
+    if (cleanPickupTime.includes('T')) {
+      // Extract HH:MM from ISO string if passed
+      const match = cleanPickupTime.match(/T(\d{2}:\d{2})/);
+      if (match) cleanPickupTime = match[1];
+    }
+    const meridiemMatch = cleanPickupTime.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+    if (meridiemMatch) {
+      let h = parseInt(meridiemMatch[1], 10);
+      const m = meridiemMatch[2];
+      const p = meridiemMatch[3].toUpperCase();
+      if (p === 'PM' && h < 12) h += 12;
+      if (p === 'AM' && h === 12) h = 0;
+      cleanPickupTime = `${String(h).padStart(2, '0')}:${m}`;
+    }
+
+    if (!cleanPickupTime || !/^\d{2}:\d{2}(\s*[-–]\s*\d{2}:\d{2})?$/.test(cleanPickupTime)) {
+      throw new Error("Invalid pickup time format. Expected HH:MM or HH:MM - HH:MM.");
+    }
+
+    // Extract start and end times
+    const timeParts = cleanPickupTime.split(/[-–]/).map((s: string) => s.trim());
+    const startTimeStr = timeParts[0];
+    const endTimeStr = timeParts[1] || null;
+
+    // Validate against canteen lunch service configuration
+    let serviceStartTime = '09:30';
+    let serviceEndTime = '22:00';
+    let slotConfig: any = null;
+
+    if (canteen_id) {
+      const { data } = await supabase
+        .from('lunch_slot_configs')
+        .select('*')
+        .eq('canteen_id', canteen_id)
+        .maybeSingle();
+
+      slotConfig = data;
+      if (slotConfig) {
+        if (!slotConfig.is_lunch_enabled) {
+          throw new Error("Lunch ordering is currently closed for this canteen.");
+        }
+        serviceStartTime = slotConfig.service_start_time || '09:30';
+        serviceEndTime = slotConfig.service_end_time || '22:00';
+      }
+    }
+
+    const [pH, pM] = startTimeStr.split(':').map(Number);
+    const [sH, sM] = serviceStartTime.split(':').map(Number);
+    const [eH, eM] = serviceEndTime.split(':').map(Number);
+
+    const startMinutes = pH * 60 + pM;
+    const serviceStartMin = sH * 60 + sM;
+    const serviceEndMin = eH * 60 + eM;
+
+    if (startMinutes < serviceStartMin || startMinutes >= serviceEndMin) {
+      throw new Error(`Pickup start time (${startTimeStr}) is outside the allowed lunch period (${serviceStartTime} - ${serviceEndTime}).`);
+    }
+
+    if (endTimeStr) {
+      const [endH, endM] = endTimeStr.split(':').map(Number);
+      const endMinutes = endH * 60 + endM;
+      if (endMinutes > serviceEndMin) {
+        throw new Error(`Pickup end time (${endTimeStr}) exceeds lunch closing time (${serviceEndTime}).`);
+      }
+    }
+
+    // Smart Preparation Scheduling Calculation & Capacity Validation
+    let defaultPrepMinutes = 10;
+    let maxCapacity = 30;
+    if (slotConfig) {
+      defaultPrepMinutes = slotConfig.default_prep_time_minutes || 10;
+      maxCapacity = slotConfig.max_concurrent_orders || 30;
+    }
+
+    // Fetch prep time for menu items
+    let maxItemPrep = defaultPrepMinutes;
+    let totalItemsCount = 0;
+    if (Array.isArray(cart_items) && cart_items.length > 0) {
+      const itemIds = cart_items.map((i: any) => i.id);
+      const { data: menuData } = await supabase
+        .from('menu_items')
+        .select('id, prep_time_minutes')
+        .in('id', itemIds);
+
+      const prepMap: Record<string, number> = {};
+      (menuData || []).forEach((m: any) => {
+        prepMap[m.id] = m.prep_time_minutes || defaultPrepMinutes;
+      });
+
+      for (const ci of cart_items) {
+        const itemPrep = prepMap[ci.id] || defaultPrepMinutes;
+        if (itemPrep > maxItemPrep) maxItemPrep = itemPrep;
+        totalItemsCount += Number(ci.quantity) || 1;
+      }
+    }
+
+    // Commercial kitchen concurrency formula
+    const prepDurationMinutes = Math.min(35, Math.max(8, maxItemPrep + Math.min(10, Math.max(0, totalItemsCount - 1))));
+
+    // Calculate timestamps (IST: +05:30)
+    const todayStr = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
+    const requestedPickupTimeIso = `${todayStr}T${startTimeStr}:00+05:30`;
+    const requestedPickupMs = new Date(requestedPickupTimeIso).getTime();
+    const plannedPrepStartMs = requestedPickupMs - (prepDurationMinutes * 60 * 1000);
+    const plannedPrepStartIso = new Date(plannedPrepStartMs).toISOString();
+    const targetReadyByIso = requestedPickupTimeIso;
+
+    // Check preparation start time is not in the past (allow 1 min grace)
+    const nowMs = Date.now();
+    if (plannedPrepStartMs < (nowMs - 60000)) {
+      const earliestFeasibleMs = nowMs + (prepDurationMinutes + 2) * 60 * 1000;
+      const earliestDate = new Date(earliestFeasibleMs);
+      const earliestH = String(earliestDate.getHours()).padStart(2, '0');
+      const earliestM = String(earliestDate.getMinutes()).padStart(2, '0');
+      throw new Error(`Kitchen needs ${prepDurationMinutes} minutes to prepare this order. Earliest pickup time is ${earliestH}:${earliestM}.`);
+    }
+
+    // Kitchen Capacity Check for this canteen
+    if (canteen_id) {
+      const { count: activeCount } = await supabase
+        .from('orders')
+        .select('id', { count: 'exact', head: true })
+        .eq('canteen_id', canteen_id)
+        .in('status', ['PLACED', 'ACCEPTED', 'PREPARING'])
+        .gte('planned_prep_start_time', new Date(plannedPrepStartMs - 10 * 60 * 1000).toISOString())
+        .lte('planned_prep_start_time', new Date(plannedPrepStartMs + 10 * 60 * 1000).toISOString());
+
+      if (typeof activeCount === 'number' && activeCount >= maxCapacity) {
+        throw new Error(`Kitchen is currently at peak capacity (${maxCapacity} orders) for this timeframe. Please select a pickup time 15 minutes later.`);
+      }
+    }
+
     // Verify payment with ZohoPay API
     const zohoPaySecret = Deno.env.get("ZOHOPAY_SECRET_KEY");
     if (zohoPaySecret && zohoPaySecret !== "mock") {
@@ -83,55 +217,83 @@ serve(async (req) => {
       throw paymentError;
     }
 
-    // Insert order securely with unique idempotency_key and linking the payment
-    const { data: newOrder, error: orderError } = await supabase
+    // Insert order securely with unique idempotency_key, smart scheduling fields, and payment link
+    let newOrder;
+    const { data: fullOrder, error: orderError } = await supabase
       .from('orders')
       .insert({
         user_id: user.id,
         canteen_id,
         tenant_id,
-        pickup_time,
+        pickup_time: cleanPickupTime,
+        requested_pickup_time: requestedPickupTimeIso,
+        estimated_prep_duration_minutes: prepDurationMinutes,
+        planned_prep_start_time: plannedPrepStartIso,
+        target_ready_by_time: targetReadyByIso,
         is_takeaway,
         status: 'PLACED',
         otp_code: generateOTP(),
         idempotency_key,
-        payment_id: paymentRecord.id
+        payment_id: paymentRecord.id,
+        total_tax_amount: Number(ledger?.total_tax_amount ?? ledger?.food_gst_amount ?? 0),
+        tax_snapshot: ledger?.tax_snapshot ?? null
       })
       .select('id')
       .single();
 
     if (orderError) {
-      // In case of error here, the payment was recorded but order failed. 
-      // Idempotency key UNIQUE violation means the order is already there.
       if (orderError.code === '23505') {
         return new Response(JSON.stringify({ success: true, message: 'Order already processed' }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
           status: 200,
         });
       }
-      throw orderError;
+
+      // Retry with core schema if extra columns are unmigrated
+      const { data: baseOrder, error: baseErr } = await supabase
+        .from('orders')
+        .insert({
+          user_id: user.id,
+          canteen_id,
+          tenant_id,
+          pickup_time: cleanPickupTime,
+          is_takeaway,
+          status: 'PLACED',
+          otp_code: generateOTP(),
+          idempotency_key,
+          payment_id: paymentRecord.id,
+        })
+        .select('id')
+        .single();
+
+      if (baseErr) throw baseErr;
+      newOrder = baseOrder;
+    } else {
+      newOrder = fullOrder;
     }
 
-    // Insert order ledger
-    if (ledger) {
-      const { error: ledgerError } = await supabase
-        .from('order_ledger')
-        .insert({
-          order_id: newOrder.id,
-          student_id: user.id,
-          canteen_id,
-          food_subtotal: ledger.food_subtotal,
-          commission_fee: ledger.commission_fee,
-          target_net: ledger.target_net,
-          gross_payable: ledger.gross_payable,
-          gateway_fee: ledger.gateway_fee,
-          gw_deduction: ledger.gw_deduction,
-          net_settled: ledger.net_settled,
-          canteen_payable: ledger.canteen_payable,
-          platform_net: ledger.platform_net
-        });
-
-      if (ledgerError) throw ledgerError;
+    // Insert order ledger with core accounting (ignoring missing tax columns if any)
+    if (ledger && canteen_id) {
+      try {
+        await supabase
+          .from('order_ledger')
+          .insert({
+            order_id: newOrder.id,
+            student_id: user.id,
+            canteen_id,
+            food_subtotal: ledger.food_subtotal,
+            commission_fee: ledger.commission_fee,
+            target_net: ledger.target_net,
+            gross_payable: ledger.gross_payable,
+            gateway_fee: ledger.gateway_fee,
+            gw_deduction: ledger.gw_deduction,
+            net_settled: ledger.net_settled,
+            canteen_payable: ledger.canteen_payable,
+            platform_net: ledger.platform_net,
+          });
+      } catch (ledErr) {
+        console.warn('Optional ledger insert skipped:', ledErr);
+      }
     }
 
     // Insert order items
