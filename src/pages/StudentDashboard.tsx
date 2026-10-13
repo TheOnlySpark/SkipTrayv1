@@ -63,6 +63,16 @@ export default function StudentDashboard() {
   const [showQrModal, setShowQrModal] = useState(false);
   const [currentTime, setCurrentTime] = useState(Date.now());
 
+  // Close cart on Escape key press
+  useEffect(() => {
+    if (!cartOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setCartOpen(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [cartOpen]);
+
   // Periodically refresh current time every 30s to dynamically update slot cutoffs
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(Date.now()), 30000);
@@ -865,6 +875,15 @@ export default function StudentDashboard() {
             </div>
           </div>
 
+          {/* Background Blur Overlay when Cart is Open */}
+          <div
+            onClick={() => setCartOpen(false)}
+            aria-hidden="true"
+            className={`fixed inset-0 bg-slate-950/40 backdrop-blur-md transition-opacity duration-300 z-40 ${
+              cartOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+            }`}
+          />
+
           {/* Floating Bottom Cart Bar */}
           <div
             style={{
@@ -892,7 +911,7 @@ export default function StudentDashboard() {
                   background: '#0f172a',
                   borderRadius: cartOpen ? '1.5rem 1.5rem 0 0' : '1.5rem',
                   overflow: 'hidden',
-                  boxShadow: '0 -8px 40px rgba(0,0,0,0.25)',
+                  boxShadow: cartOpen ? '0 -10px 50px rgba(0,0,0,0.5)' : '0 -8px 40px rgba(0,0,0,0.25)',
                   margin: cartOpen ? '0' : '0 1rem 1rem',
                   transition: 'all 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
                 }}
