@@ -733,6 +733,29 @@ export default function StaffDashboard() {
     );
   };
 
+  // Guard: deleted / deactivated staff
+  if (profile?.name?.startsWith('[DELETED]') || profile?.id_number === 'DELETED') {
+    return (
+      <div className="w-full max-w-2xl mx-auto mt-16 text-center">
+        <div className="bg-rose-50 border border-rose-200 rounded-[2rem] p-10 flex flex-col items-center gap-4">
+          <div className="w-16 h-16 bg-rose-100 rounded-full flex items-center justify-center">
+            <IconAlertTriangle className="w-8 h-8 text-rose-600" />
+          </div>
+          <h2 className="text-xl font-extrabold text-rose-900">Account Removed</h2>
+          <p className="text-rose-700 text-sm max-w-sm">
+            This staff account has been deleted by your cafeteria administrator.
+          </p>
+          <button
+            onClick={() => signOut()}
+            className="px-6 py-2.5 bg-rose-600 text-white font-bold rounded-xl hover:bg-rose-700 transition"
+          >
+            Sign Out
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // Guard: unassigned staff
   if (!profile?.canteen_id) {
     return (
