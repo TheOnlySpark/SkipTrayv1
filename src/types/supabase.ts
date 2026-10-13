@@ -43,35 +43,168 @@ export interface Database {
           }
         ]
       }
+      canteen_tax_configs: {
+        Row: {
+          id: string
+          canteen_id: string
+          tenant_id: string
+          gstin: string | null
+          legal_business_name: string | null
+          state_code: string
+          state_name: string
+          price_mode: 'TAX_INCLUSIVE' | 'TAX_EXCLUSIVE'
+          default_food_gst_rate: number
+          service_fee_gst_rate: number
+          is_gst_registered: boolean
+          is_composition_scheme: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          canteen_id: string
+          tenant_id: string
+          gstin?: string | null
+          legal_business_name?: string | null
+          state_code?: string
+          state_name?: string
+          price_mode?: 'TAX_INCLUSIVE' | 'TAX_EXCLUSIVE'
+          default_food_gst_rate?: number
+          service_fee_gst_rate?: number
+          is_gst_registered?: boolean
+          is_composition_scheme?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          canteen_id?: string
+          tenant_id?: string
+          gstin?: string | null
+          legal_business_name?: string | null
+          state_code?: string
+          state_name?: string
+          price_mode?: 'TAX_INCLUSIVE' | 'TAX_EXCLUSIVE'
+          default_food_gst_rate?: number
+          service_fee_gst_rate?: number
+          is_gst_registered?: boolean
+          is_composition_scheme?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      lunch_slot_configs: {
+        Row: {
+          id: string
+          canteen_id: string | null
+          tenant_id: string | null
+          service_start_time: string
+          service_end_time: string
+          slot_duration_minutes: number
+          min_notice_minutes: number
+          is_lunch_enabled: boolean
+          disabled_slots: Json
+          slot_capacities: Json
+          custom_slots: Json
+          max_concurrent_orders: number | null
+          default_prep_time_minutes: number | null
+          order_cutoff_minutes: number | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          canteen_id?: string | null
+          tenant_id?: string | null
+          service_start_time?: string
+          service_end_time?: string
+          slot_duration_minutes?: number
+          min_notice_minutes?: number
+          is_lunch_enabled?: boolean
+          disabled_slots?: Json
+          slot_capacities?: Json
+          custom_slots?: Json
+          max_concurrent_orders?: number | null
+          default_prep_time_minutes?: number | null
+          order_cutoff_minutes?: number | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          canteen_id?: string | null
+          tenant_id?: string | null
+          service_start_time?: string
+          service_end_time?: string
+          slot_duration_minutes?: number
+          min_notice_minutes?: number
+          is_lunch_enabled?: boolean
+          disabled_slots?: Json
+          slot_capacities?: Json
+          custom_slots?: Json
+          max_concurrent_orders?: number | null
+          default_prep_time_minutes?: number | null
+          order_cutoff_minutes?: number | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lunch_slot_configs_canteen_id_fkey"
+            columns: ["canteen_id"]
+            referencedRelation: "canteens"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lunch_slot_configs_tenant_id_fkey"
+            columns: ["tenant_id"]
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
       menu_items: {
         Row: {
+          category: string | null
           created_at: string
           id: string
           is_sold_out: boolean
           name: string
           price: number
+          prep_time_minutes: number | null
+          gst_rate_percent: number | null
+          hsn_code: string | null
           updated_at: string
           veg_non_veg: Database["public"]["Enums"]["food_type"]
           tenant_id: string
           canteen_id: string
         }
         Insert: {
+          category?: string | null
           created_at?: string
           id?: string
           is_sold_out?: boolean
           name: string
           price?: number
+          prep_time_minutes?: number | null
+          gst_rate_percent?: number | null
+          hsn_code?: string | null
           updated_at?: string
           veg_non_veg: Database["public"]["Enums"]["food_type"]
           tenant_id: string
           canteen_id: string
         }
         Update: {
+          category?: string | null
           created_at?: string
           id?: string
           is_sold_out?: boolean
           name?: string
           price?: number
+          prep_time_minutes?: number | null
+          gst_rate_percent?: number | null
+          hsn_code?: string | null
           updated_at?: string
           veg_non_veg?: Database["public"]["Enums"]["food_type"]
           tenant_id?: string
@@ -191,12 +324,19 @@ export interface Database {
           otp_attempts: number
           otp_code: string
           pickup_time: string
+          requested_pickup_time: string | null
+          estimated_prep_duration_minutes: number | null
+          planned_prep_start_time: string | null
+          target_ready_by_time: string | null
+          preparation_started_at: string | null
           is_takeaway: boolean
           ready_at: string | null
           status: Database["public"]["Enums"]["order_status"]
           user_id: string
           tenant_id: string
           canteen_id: string
+          total_tax_amount: number | null
+          tax_snapshot: Json | null
         }
         Insert: {
           accepted_at?: string | null
@@ -207,12 +347,19 @@ export interface Database {
           otp_attempts?: number
           otp_code: string
           pickup_time: string
+          requested_pickup_time?: string | null
+          estimated_prep_duration_minutes?: number | null
+          planned_prep_start_time?: string | null
+          target_ready_by_time?: string | null
+          preparation_started_at?: string | null
           is_takeaway?: boolean
           ready_at?: string | null
           status?: Database["public"]["Enums"]["order_status"]
           user_id: string
           tenant_id: string
           canteen_id: string
+          total_tax_amount?: number | null
+          tax_snapshot?: Json | null
         }
         Update: {
           accepted_at?: string | null
@@ -223,12 +370,19 @@ export interface Database {
           otp_attempts?: number
           otp_code?: string
           pickup_time?: string
+          requested_pickup_time?: string | null
+          estimated_prep_duration_minutes?: number | null
+          planned_prep_start_time?: string | null
+          target_ready_by_time?: string | null
+          preparation_started_at?: string | null
           is_takeaway?: boolean
           ready_at?: string | null
           status?: Database["public"]["Enums"]["order_status"]
           user_id?: string
           tenant_id?: string
           canteen_id?: string
+          total_tax_amount?: number | null
+          tax_snapshot?: Json | null
         }
         Relationships: [
           {
@@ -318,6 +472,105 @@ export interface Database {
         }
         Relationships: []
       }
+      order_ledger: {
+        Row: {
+          id: string
+          order_id: string
+          student_id: string
+          canteen_id: string
+          payment_status: string
+          food_subtotal: number
+          commission_fee: number
+          target_net: number
+          gross_payable: number
+          gateway_fee: number
+          gw_deduction: number
+          net_settled: number
+          canteen_payable: number
+          platform_net: number
+          tax_mode: string | null
+          supply_type: string | null
+          taxable_food_amount: number | null
+          food_gst_rate: number | null
+          food_gst_amount: number | null
+          cgst_rate: number | null
+          cgst_amount: number | null
+          sgst_rate: number | null
+          sgst_amount: number | null
+          igst_rate: number | null
+          igst_amount: number | null
+          fee_gst_amount: number | null
+          total_tax_amount: number | null
+          tax_snapshot: Json | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          order_id: string
+          student_id: string
+          canteen_id: string
+          payment_status?: string
+          food_subtotal: number
+          commission_fee: number
+          target_net: number
+          gross_payable: number
+          gateway_fee: number
+          gw_deduction: number
+          net_settled: number
+          canteen_payable: number
+          platform_net: number
+          tax_mode?: string | null
+          supply_type?: string | null
+          taxable_food_amount?: number | null
+          food_gst_rate?: number | null
+          food_gst_amount?: number | null
+          cgst_rate?: number | null
+          cgst_amount?: number | null
+          sgst_rate?: number | null
+          sgst_amount?: number | null
+          igst_rate?: number | null
+          igst_amount?: number | null
+          fee_gst_amount?: number | null
+          total_tax_amount?: number | null
+          tax_snapshot?: Json | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          order_id?: string
+          student_id?: string
+          canteen_id?: string
+          payment_status?: string
+          food_subtotal?: number
+          commission_fee?: number
+          target_net?: number
+          gross_payable?: number
+          gateway_fee?: number
+          gw_deduction?: number
+          net_settled?: number
+          canteen_payable?: number
+          platform_net?: number
+          tax_mode?: string | null
+          supply_type?: string | null
+          taxable_food_amount?: number | null
+          food_gst_rate?: number | null
+          food_gst_amount?: number | null
+          cgst_rate?: number | null
+          cgst_amount?: number | null
+          sgst_rate?: number | null
+          sgst_amount?: number | null
+          igst_rate?: number | null
+          igst_amount?: number | null
+          fee_gst_amount?: number | null
+          total_tax_amount?: number | null
+          tax_snapshot?: Json | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       tenant_settings: {
         Row: {
           tenant_id: string
@@ -403,6 +656,55 @@ export interface Database {
             foreignKeyName: "inv_products_tenant_id_fkey"
             columns: ["tenant_id"]
             referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      user_notifications: {
+        Row: {
+          id: string
+          user_id: string
+          order_id: string | null
+          order_number: number | null
+          status: string
+          title: string
+          message: string
+          read: boolean
+          created_at: string
+        }
+        Insert: {
+          id: string
+          user_id: string
+          order_id?: string | null
+          order_number?: number | null
+          status: string
+          title: string
+          message: string
+          read?: boolean
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          order_id?: string | null
+          order_number?: number | null
+          status?: string
+          title?: string
+          message?: string
+          read?: boolean
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_notifications_user_id_fkey"
+            columns: ["user_id"]
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_notifications_order_id_fkey"
+            columns: ["order_id"]
+            referencedRelation: "orders"
             referencedColumns: ["id"]
           }
         ]
