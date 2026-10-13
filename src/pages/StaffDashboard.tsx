@@ -64,6 +64,21 @@ export default function StaffDashboard() {
   const [selectedOrderForOtp, setSelectedOrderForOtp] = useState<string | null>(null);
   const [otpInput, setOtpInput] = useState('');
 
+  // Quick Menu Availability Filter State
+  const [menuSearch, setMenuSearch] = useState('');
+  const [menuFilter, setMenuFilter] = useState<'ALL' | 'VEG' | 'NON_VEG' | 'SOLD_OUT'>('ALL');
+
+  const filteredMenuItems = useMemo(() => {
+    return menuItems.filter(item => {
+      const matchesSearch = item.name.toLowerCase().includes(menuSearch.toLowerCase());
+      if (!matchesSearch) return false;
+      if (menuFilter === 'VEG') return item.veg_non_veg === 'VEG';
+      if (menuFilter === 'NON_VEG') return item.veg_non_veg === 'NON_VEG';
+      if (menuFilter === 'SOLD_OUT') return item.is_sold_out;
+      return true;
+    });
+  }, [menuItems, menuSearch, menuFilter]);
+
   // 30-second interval to dynamically re-check 10-minute pickup overdue timers
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(Date.now()), 30000);
@@ -1634,47 +1649,87 @@ export default function StaffDashboard() {
 
       {/* Quick Menu Item Availability Section */}
       <div className="bg-white border border-slate-200 rounded-[2rem] p-5 sm:p-7 shadow-sm mt-6">
-        <div className="flex justify-between items-center mb-5">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
           <div>
             <h3 className="font-extrabold text-xl text-slate-800">Quick Menu Availability</h3>
             <p className="text-xs text-slate-500 mt-0.5">Toggle sold out status instantaneously across student devices</p>
           </div>
-          <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
-            {menuItems.filter(m => !m.is_sold_out).length} / {menuItems.length} Available
-          </span>
+          <div className="flex items-center gap-2 self-stretch sm:self-auto justify-between sm:justify-end">
+            <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full whitespace-nowrap">
+              {menuItems.filter(m => !m.is_sold_out).length} / {menuItems.length} Available
+            </span>
+          </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-          {menuItems.map(item => (
-            <div 
-              key={item.id} 
-              className={`flex flex-col justify-between p-3.5 rounded-2xl border transition-all text-center ${
-                item.is_sold_out ? 'bg-slate-50 border-slate-200 opacity-60' : 'bg-white border-slate-200 shadow-sm'
-              }`}
-            >
-              <div>
-                <div className="flex items-center justify-center gap-1.5 mb-1.5">
-                  <span className={`w-2 h-2 rounded-full ${item.veg_non_veg === 'VEG' ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
-                  <span className="text-[10px] font-bold text-slate-400 uppercase">{item.veg_non_veg === 'VEG' ? 'Veg' : 'Non-Veg'}</span>
-                </div>
-                <div className={`text-xs font-bold leading-tight ${item.is_sold_out ? 'text-slate-400 line-through' : 'text-slate-800'}`}>
-                  {item.name}
-                </div>
-                <div className="text-[11px] font-extrabold text-indigo-600 mt-1">₹{Number(item.price || 0).toFixed(0)}</div>
-              </div>
+        {menuItems.length > 6 && (
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-4 pb-3 border-b border-slate-100">
+            <div className="flex items-center gap-1.5">
+              {(['ALL', 'VEG', 'NON_VEG', 'SOLD_OUT'] as const).map((filter) => (
+                <button
+                  key={filter}
+                  onClick={() => setMenuFilter(filter)}
+                  className={`text-xs px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                    menuFilter === filter
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {filter === 'ALL' ? 'All' : filter === 'VEG' ? 'Veg' : filter === 'NON_VEG' ? 'Non-Veg' : 'Sold Out'}
+                </button>
+              ))}
+            </div>
+            <div className="relative min-w-[180px]">
+              <IconSearch className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search menu..."
+                value={menuSearch}
+                onChange={(e) => setMenuSearch(e.target.value)}
+                className="w-full pl-8 pr-3 py-1 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+            </div>
+          </div>
+        )}
 
-              <button 
-                onClick={() => handleToggleSoldOut(item.id, item.is_sold_out)}
-                className={`mt-3 w-full text-[11px] py-1.5 rounded-xl font-bold transition-transform active:scale-95 border ${
-                  item.is_sold_out 
-                    ? 'bg-slate-200 text-slate-700 hover:bg-slate-300 border-slate-300' 
-                    : 'bg-rose-50 text-rose-600 hover:bg-rose-100 border-rose-200'
+        <div className="overflow-y-auto max-h-[310px] pr-1.5 custom-scrollbar">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+            {filteredMenuItems.map(item => (
+              <div 
+                key={item.id} 
+                className={`flex flex-col justify-between p-3.5 rounded-2xl border transition-all text-center ${
+                  item.is_sold_out ? 'bg-slate-50 border-slate-200 opacity-60' : 'bg-white border-slate-200 shadow-sm'
                 }`}
               >
-                {item.is_sold_out ? 'Mark Available' : 'Sold Out'}
-              </button>
+                <div>
+                  <div className="flex items-center justify-center gap-1.5 mb-1.5">
+                    <span className={`w-2 h-2 rounded-full ${item.veg_non_veg === 'VEG' ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">{item.veg_non_veg === 'VEG' ? 'Veg' : 'Non-Veg'}</span>
+                  </div>
+                  <div className={`text-xs font-bold leading-tight ${item.is_sold_out ? 'text-slate-400 line-through' : 'text-slate-800'}`}>
+                    {item.name}
+                  </div>
+                  <div className="text-[11px] font-extrabold text-indigo-600 mt-1">₹{Number(item.price || 0).toFixed(0)}</div>
+                </div>
+
+                <button 
+                  onClick={() => handleToggleSoldOut(item.id, item.is_sold_out)}
+                  className={`mt-3 w-full text-[11px] py-1.5 rounded-xl font-bold transition-transform active:scale-95 border cursor-pointer ${
+                    item.is_sold_out 
+                      ? 'bg-slate-200 text-slate-700 hover:bg-slate-300 border-slate-300' 
+                      : 'bg-rose-50 text-rose-600 hover:bg-rose-100 border-rose-200'
+                  }`}
+                >
+                  {item.is_sold_out ? 'Mark Available' : 'Sold Out'}
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {filteredMenuItems.length === 0 && (
+            <div className="text-center py-8 text-sm text-slate-400">
+              No matching menu items found.
             </div>
-          ))}
+          )}
         </div>
       </div>
 
