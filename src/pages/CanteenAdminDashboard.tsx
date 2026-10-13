@@ -35,8 +35,24 @@ import {
   ShieldCheck,
   Copy,
   Check,
-  Trash2
+  Trash2,
+  IndianRupee,
+  CreditCard,
+  Receipt,
+  Sparkles,
+  ArrowUpRight,
+  ArrowDownRight,
+  CalendarDays,
+  Filter
 } from 'lucide-react';
+import { SalesCollectionDashboard } from '../components/SalesCollectionDashboard';
+import {
+  calculateOrderTotal,
+  getOrderPaymentStatus,
+  computeSalesCollectionSummary,
+  formatCurrency,
+  PaymentStatusType,
+} from '../lib/salesAnalytics';
 import {
   fetchLunchSlotConfig,
   saveLunchSlotConfig,
@@ -75,7 +91,8 @@ export default function CanteenAdminDashboard() {
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
   const [submittingReply, setSubmittingReply] = useState(false);
-  const [orderFilter, setOrderFilter] = useState<'TODAY' | 'WEEK' | 'MONTH'>('TODAY');
+  const [orderFilter, setOrderFilter] = useState<'TODAY' | 'YESTERDAY' | 'LAST_7_DAYS' | 'LAST_30_DAYS' | 'ALL'>('TODAY');
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState<'ALL' | PaymentStatusType>('ALL');
 
   // Order List Filters, Pagination & View
   const [orderSearch, setOrderSearch] = useState('');
@@ -88,7 +105,7 @@ export default function CanteenAdminDashboard() {
   // Reset pagination on filter changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [orderSearch, orderStatusFilter, orderFilter]);
+  }, [orderSearch, orderStatusFilter, paymentStatusFilter, orderFilter]);
 
   const toggleExpandOrder = (orderId: string) => {
     setExpandedOrderIds(prev => {
@@ -99,20 +116,116 @@ export default function CanteenAdminDashboard() {
     });
   };
 
+  // Dedicated query for 60-day orders to compute all 4 sales collection cards and comparative trends
+  const { data: salesCollectionOrders = [], isLoading: salesLoading } = useQuery({
+    queryKey: ['canteenSalesCollectionOrders', currentCanteenId],
+    enabled: !!currentCanteenId,
+    queryFn: async () => {
+      const sixtyDaysAgo = new Date();
+      sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+      sixtyDaysAgo.setHours(0, 0, 0, 0);
+
+      try {
+        const { data, error } = await supabase
+          .from('orders')
+          .select(`
+            id, order_number, status, created_at, pickup_time, total_tax_amount,
+            profiles (name, id_number),
+            order_items (
+              id, quantity,
+              menu_items (name, price)
+            ),
+            order_ledger (
+              food_subtotal, gross_payable, payment_status, commission_fee, gateway_fee
+            )
+          `)
+          .eq('canteen_id', currentCanteenId)
+          .gte('created_at', sixtyDaysAgo.toISOString())
+          .order('created_at', { ascending: false });
+
+        if (!error && data) {
+          return (data as any[]) || [];
+        }
+      } catch (err) {
+        console.warn('order_ledger join in collection query fallback:', err);
+      }
+
+      const { data: fallbackData } = await supabase
+        .from('orders')
+        .select(`
+          id, order_number, status, created_at, pickup_time, total_tax_amount,
+          profiles (name, id_number),
+          order_items (
+            id, quantity,
+            menu_items (name, price)
+          )
+        `)
+        .eq('canteen_id', currentCanteenId)
+        .gte('created_at', sixtyDaysAgo.toISOString())
+        .order('created_at', { ascending: false });
+
+      return (fallbackData as any[]) || [];
+    },
+    refetchInterval: 30000,
+  });
+
+  const salesCollectionSummary = useMemo(() => {
+    return computeSalesCollectionSummary(salesCollectionOrders);
+  }, [salesCollectionOrders]);
+
+  // Fetch orders according to the active timeframe filter
   const { data: allOrders = [], isLoading: ordersLoading } = useQuery({
     queryKey: ['canteenOrders', orderFilter, currentCanteenId],
     enabled: !!currentCanteenId,
     queryFn: async () => {
-      let startDate = new Date();
+      let query = supabase
+        .from('orders')
+        .select(`
+          *,
+          profiles (name, id_number),
+          order_items (
+            id, quantity,
+            menu_items (name, price)
+          ),
+          order_ledger (
+            food_subtotal, gross_payable, payment_status, commission_fee, gateway_fee
+          )
+        `)
+        .eq('canteen_id', currentCanteenId);
+
+      const now = new Date();
       if (orderFilter === 'TODAY') {
-        startDate.setHours(0, 0, 0, 0);
-      } else if (orderFilter === 'WEEK') {
-        startDate.setDate(startDate.getDate() - 7);
-      } else if (orderFilter === 'MONTH') {
-        startDate.setMonth(startDate.getMonth() - 1);
+        const start = new Date(now);
+        start.setHours(0, 0, 0, 0);
+        query = query.gte('created_at', start.toISOString());
+      } else if (orderFilter === 'YESTERDAY') {
+        const start = new Date(now);
+        start.setDate(start.getDate() - 1);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(now);
+        end.setDate(end.getDate() - 1);
+        end.setHours(23, 59, 59, 999);
+        query = query.gte('created_at', start.toISOString()).lte('created_at', end.toISOString());
+      } else if (orderFilter === 'LAST_7_DAYS') {
+        const start = new Date(now);
+        start.setDate(start.getDate() - 6);
+        start.setHours(0, 0, 0, 0);
+        query = query.gte('created_at', start.toISOString());
+      } else if (orderFilter === 'LAST_30_DAYS') {
+        const start = new Date(now);
+        start.setDate(start.getDate() - 29);
+        start.setHours(0, 0, 0, 0);
+        query = query.gte('created_at', start.toISOString());
       }
 
-      const { data } = await supabase
+      try {
+        const { data, error } = await query.order('created_at', { ascending: false });
+        if (!error && data) return (data as any[]) || [];
+      } catch (err) {
+        console.warn('order_ledger join fallback:', err);
+      }
+
+      let fallbackQuery = supabase
         .from('orders')
         .select(`
           *,
@@ -122,11 +235,34 @@ export default function CanteenAdminDashboard() {
             menu_items (name, price)
           )
         `)
-        .eq('canteen_id', currentCanteenId)
-        .gte('created_at', startDate.toISOString())
-        .order('created_at', { ascending: false });
+        .eq('canteen_id', currentCanteenId);
 
-      return (data as any[]) || [];
+      if (orderFilter === 'TODAY') {
+        const start = new Date(now);
+        start.setHours(0, 0, 0, 0);
+        fallbackQuery = fallbackQuery.gte('created_at', start.toISOString());
+      } else if (orderFilter === 'YESTERDAY') {
+        const start = new Date(now);
+        start.setDate(start.getDate() - 1);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(now);
+        end.setDate(end.getDate() - 1);
+        end.setHours(23, 59, 59, 999);
+        fallbackQuery = fallbackQuery.gte('created_at', start.toISOString()).lte('created_at', end.toISOString());
+      } else if (orderFilter === 'LAST_7_DAYS') {
+        const start = new Date(now);
+        start.setDate(start.getDate() - 6);
+        start.setHours(0, 0, 0, 0);
+        fallbackQuery = fallbackQuery.gte('created_at', start.toISOString());
+      } else if (orderFilter === 'LAST_30_DAYS') {
+        const start = new Date(now);
+        start.setDate(start.getDate() - 29);
+        start.setHours(0, 0, 0, 0);
+        fallbackQuery = fallbackQuery.gte('created_at', start.toISOString());
+      }
+
+      const { data: fallbackData } = await fallbackQuery.order('created_at', { ascending: false });
+      return (fallbackData as any[]) || [];
     }
   });
 
@@ -139,11 +275,17 @@ export default function CanteenAdminDashboard() {
     return counts;
   }, [allOrders]);
 
-  // Filtered orders
+  // Filtered orders with search, status, and payment status
   const filteredAdminOrders = useMemo(() => {
     return allOrders.filter(order => {
       if (orderStatusFilter !== 'ALL' && order.status !== orderStatusFilter) {
         return false;
+      }
+      if (paymentStatusFilter !== 'ALL') {
+        const payInfo = getOrderPaymentStatus(order);
+        if (payInfo.status !== paymentStatusFilter) {
+          return false;
+        }
       }
       if (orderSearch.trim()) {
         const q = orderSearch.toLowerCase().trim();
@@ -154,13 +296,18 @@ export default function CanteenAdminDashboard() {
         const matchItems = order.order_items?.some((i: any) =>
           (i.menu_items?.name || '').toLowerCase().includes(q)
         );
-        if (!matchNum && !matchName && !matchId && !matchShortId && !matchItems) {
+        const payInfo = getOrderPaymentStatus(order);
+        const matchPay = payInfo.label.toLowerCase().includes(q) || payInfo.status.toLowerCase().includes(q);
+        const orderTotal = calculateOrderTotal(order);
+        const matchAmount = String(orderTotal.totalAmount).includes(q) || String(orderTotal.foodSubtotal).includes(q);
+
+        if (!matchNum && !matchName && !matchId && !matchShortId && !matchItems && !matchPay && !matchAmount) {
           return false;
         }
       }
       return true;
     });
-  }, [allOrders, orderStatusFilter, orderSearch]);
+  }, [allOrders, orderStatusFilter, paymentStatusFilter, orderSearch]);
 
   const totalPages = Math.max(1, Math.ceil(filteredAdminOrders.length / pageSize));
   const paginatedOrders = useMemo(() => {
@@ -810,24 +957,13 @@ export default function CanteenAdminDashboard() {
         </div>
       </div>
 
-      {/* Daily Summary */}
-      <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 shadow-sm">
-        <h2 className="text-xl font-bold text-slate-800 mb-6">Today's Summary</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="p-6 bg-blue-50 border border-blue-100 rounded-2xl flex flex-col items-center">
-            <span className="text-3xl font-bold text-blue-700">{stats.placed}</span>
-            <span className="text-sm font-semibold text-blue-600 uppercase tracking-wide mt-1">Total Orders</span>
-          </div>
-          <div className="p-6 bg-green-50 border border-green-100 rounded-2xl flex flex-col items-center">
-            <span className="text-3xl font-bold text-green-700">{stats.collected}</span>
-            <span className="text-sm font-semibold text-green-600 uppercase tracking-wide mt-1">Collected</span>
-          </div>
-          <div className="p-6 bg-red-50 border border-red-100 rounded-2xl flex flex-col items-center">
-            <span className="text-3xl font-bold text-red-700">{stats.rejected}</span>
-            <span className="text-sm font-semibold text-red-600 uppercase tracking-wide mt-1">Rejected/Cancelled</span>
-          </div>
-        </div>
-      </div>
+      {/* Sales Collection Summary Dashboard */}
+      <SalesCollectionDashboard
+        data={salesCollectionSummary}
+        isLoading={salesLoading}
+        activePeriod={orderFilter}
+        onSelectPeriod={(p) => setOrderFilter(p)}
+      />
 
       {/* Order List */}
       <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 shadow-sm">
@@ -840,27 +976,35 @@ export default function CanteenAdminDashboard() {
                 {filteredAdminOrders.length} {filteredAdminOrders.length === 1 ? 'order' : 'orders'}
               </span>
             </div>
-            <p className="text-xs text-slate-500 mt-0.5">Filter, search, and inspect orders across time ranges</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Individual order total calculation, payment status, and food price breakdown
+            </p>
           </div>
           
-          <div className="flex items-center gap-2">
-            {(['TODAY', 'WEEK', 'MONTH'] as const).map(filter => (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {([
+              { key: 'TODAY', label: "Today" },
+              { key: 'YESTERDAY', label: "Yesterday" },
+              { key: 'LAST_7_DAYS', label: "Last 7 Days" },
+              { key: 'LAST_30_DAYS', label: "Last 30 Days" },
+              { key: 'ALL', label: "All Time" }
+            ] as const).map(f => (
               <button
-                key={filter}
-                onClick={() => setOrderFilter(filter)}
-                className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-colors ${
-                  orderFilter === filter
+                key={f.key}
+                onClick={() => setOrderFilter(f.key)}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
+                  orderFilter === f.key
                     ? 'bg-emerald-600 text-white shadow-sm'
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}
               >
-                {filter === 'TODAY' ? "Today" : filter === 'WEEK' ? "Past Week" : "Past Month"}
+                {f.label}
               </button>
             ))}
           </div>
         </div>
 
-        {/* Toolbar: Search, View Switcher & Status Tabs */}
+        {/* Toolbar: Search, View Switcher & Filters */}
         <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between mb-4">
           {/* Search Input */}
           <div className="relative flex-1 max-w-md">
@@ -911,9 +1055,9 @@ export default function CanteenAdminDashboard() {
         </div>
 
         {/* Status Filter Tabs */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-3 mb-4 scrollbar-thin">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-2 mb-2 scrollbar-thin">
           {[
-            { key: 'ALL', label: 'All', count: statusCounts.ALL || 0 },
+            { key: 'ALL', label: 'All Statuses', count: statusCounts.ALL || 0 },
             { key: 'PLACED', label: 'Placed', count: statusCounts.PLACED || 0 },
             { key: 'ACCEPTED', label: 'Accepted', count: statusCounts.ACCEPTED || 0 },
             { key: 'PREPARING', label: 'Preparing', count: statusCounts.PREPARING || 0 },
@@ -947,6 +1091,32 @@ export default function CanteenAdminDashboard() {
           })}
         </div>
 
+        {/* Payment Status Quick Filter Pills */}
+        <div className="flex items-center gap-2 mb-4 text-xs overflow-x-auto pb-1 scrollbar-thin">
+          <span className="text-slate-400 font-bold uppercase tracking-wider text-[10px] shrink-0">Payment:</span>
+          {(['ALL', 'PAID', 'PENDING', 'FAILED', 'REFUNDED'] as const).map(pKey => (
+            <button
+              key={pKey}
+              onClick={() => setPaymentStatusFilter(pKey)}
+              className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all border shrink-0 ${
+                paymentStatusFilter === pKey
+                  ? pKey === 'PAID'
+                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                    : pKey === 'FAILED'
+                    ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
+                    : pKey === 'REFUNDED'
+                    ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
+                    : pKey === 'PENDING'
+                    ? 'bg-amber-500 text-white border-amber-500 shadow-xs'
+                    : 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                  : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              {pKey === 'ALL' ? 'All Payments' : pKey}
+            </button>
+          ))}
+        </div>
+
         {/* Orders Content Area */}
         {ordersLoading ? (
           <div className="text-slate-500 text-sm py-16 text-center">Loading orders...</div>
@@ -957,12 +1127,12 @@ export default function CanteenAdminDashboard() {
             <div className="text-xs text-slate-400">
               {orderSearch ? `No matches found for "${orderSearch}"` : 'Try selecting a different time range or status filter.'}
             </div>
-            {(orderSearch || orderStatusFilter !== 'ALL') && (
+            {(orderSearch || orderStatusFilter !== 'ALL' || paymentStatusFilter !== 'ALL') && (
               <button
-                onClick={() => { setOrderSearch(''); setOrderStatusFilter('ALL'); }}
+                onClick={() => { setOrderSearch(''); setOrderStatusFilter('ALL'); setPaymentStatusFilter('ALL'); }}
                 className="mt-2 text-xs font-bold text-emerald-600 hover:text-emerald-800 underline"
               >
-                Reset Filters
+                Reset All Filters
               </button>
             )}
           </div>
@@ -974,18 +1144,20 @@ export default function CanteenAdminDashboard() {
                 <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-extrabold uppercase tracking-wider text-slate-500">
                   <th className="py-3 px-3.5">Order #</th>
                   <th className="py-3 px-3.5">Student</th>
+                  <th className="py-3 px-3.5">Placed At</th>
                   <th className="py-3 px-3.5">Items Summary</th>
                   <th className="py-3 px-3.5">Pickup Slot</th>
-                  <th className="py-3 px-3.5">Status</th>
-                  <th className="py-3 px-3.5">Placed At</th>
+                  <th className="py-3 px-3.5">Order Status</th>
+                  <th className="py-3 px-3.5">Payment</th>
+                  <th className="py-3 px-3.5 text-right">Total Amount</th>
                   <th className="py-3 px-3.5 text-right">Details</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs">
                 {paginatedOrders.map(order => {
                   const isExpanded = expandedOrderIds.has(order.id);
-                  const totalItems = order.order_items?.reduce((s: number, i: any) => s + (i.quantity || 0), 0) || 0;
-                  const totalAmount = order.order_items?.reduce((s: number, i: any) => s + ((Number(i.menu_items?.price) || 0) * (i.quantity || 1)), 0) || 0;
+                  const orderTotal = calculateOrderTotal(order);
+                  const payInfo = getOrderPaymentStatus(order);
 
                   return (
                     <React.Fragment key={order.id}>
@@ -1007,12 +1179,18 @@ export default function CanteenAdminDashboard() {
                             {order.profiles?.id_number || 'No ID'}
                           </div>
                         </td>
+                        <td className="py-3 px-3.5 whitespace-nowrap text-slate-500 text-[11px]">
+                          <div>{new Date(order.created_at).toLocaleDateString()}</div>
+                          <div className="text-slate-400 text-[10px]">
+                            {new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        </td>
                         <td className="py-3 px-3.5">
                           <div className="flex items-center gap-1.5 flex-wrap max-w-xs">
                             <span className="font-bold bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded text-[10px] shrink-0">
-                              {totalItems} {totalItems === 1 ? 'item' : 'items'}
+                              {orderTotal.itemCount} {orderTotal.itemCount === 1 ? 'item' : 'items'}
                             </span>
-                            <span className="text-slate-600 truncate max-w-[200px]" title={order.order_items?.map((i: any) => `${i.quantity}x ${i.menu_items?.name}`).join(', ')}>
+                            <span className="text-slate-600 truncate max-w-[180px]" title={order.order_items?.map((i: any) => `${i.quantity}x ${i.menu_items?.name}`).join(', ')}>
                               {order.order_items?.map((i: any) => `${i.quantity}x ${i.menu_items?.name}`).join(', ')}
                             </span>
                           </div>
@@ -1034,14 +1212,26 @@ export default function CanteenAdminDashboard() {
                             {order.status}
                           </span>
                         </td>
-                        <td className="py-3 px-3.5 whitespace-nowrap text-slate-500 text-[11px]">
-                          {new Date(order.created_at).toLocaleDateString()} {new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        <td className="py-3 px-3.5 whitespace-nowrap">
+                          <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wider border ${payInfo.badgeClass}`}>
+                            {payInfo.label}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3.5 text-right whitespace-nowrap">
+                          <div className="font-black text-slate-900 text-sm">
+                            {formatCurrency(orderTotal.totalAmount)}
+                          </div>
+                          {orderTotal.additionalCharges > 0 && (
+                            <div className="text-[10px] text-slate-400">
+                              Food: {formatCurrency(orderTotal.foodSubtotal)}
+                            </div>
+                          )}
                         </td>
                         <td className="py-3 px-3.5 text-right whitespace-nowrap">
                           <button
                             onClick={(e) => { e.stopPropagation(); toggleExpandOrder(order.id); }}
                             className="text-slate-400 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100 transition-colors"
-                            title="Toggle order details"
+                            title="Toggle order price breakdown"
                           >
                             {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                           </button>
@@ -1049,31 +1239,69 @@ export default function CanteenAdminDashboard() {
                       </tr>
                       {isExpanded && (
                         <tr className="bg-slate-50/70 border-b border-slate-200">
-                          <td colSpan={7} className="p-4">
-                            <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
-                              <div className="flex justify-between items-center text-xs border-b border-slate-100 pb-2">
-                                <span className="font-bold text-slate-800">Order Items Breakdown</span>
-                                {totalAmount > 0 && (
-                                  <span className="font-extrabold text-emerald-700">Total: ₹{totalAmount.toFixed(2)}</span>
-                                )}
+                          <td colSpan={9} className="p-4">
+                            <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3 shadow-xs">
+                              <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 border-b border-slate-100 pb-2">
+                                <span className="font-bold text-slate-800 text-xs">
+                                  Order #{order.order_number} Itemized Breakdown
+                                </span>
+                                <div className="flex items-center gap-2 text-xs">
+                                  <span className="text-slate-500">
+                                    Payment: <strong className="text-slate-800">{payInfo.label}</strong>
+                                  </span>
+                                  <span className="text-slate-300">|</span>
+                                  <span className="font-extrabold text-emerald-700 text-sm">
+                                    Total: {formatCurrency(orderTotal.totalAmount)}
+                                  </span>
+                                </div>
                               </div>
+
+                              {/* Items Breakdown List */}
                               <ul className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-                                {order.order_items?.map((item: any) => (
-                                  <li key={item.id} className="flex justify-between items-center bg-slate-50 p-2.5 rounded-lg border border-slate-100 text-xs">
-                                    <div className="flex items-center gap-2">
-                                      <span className="font-black bg-slate-200 text-slate-800 px-1.5 py-0.5 rounded text-[10px]">
-                                        {item.quantity}x
-                                      </span>
-                                      <span className="font-semibold text-slate-700">{item.menu_items?.name}</span>
-                                    </div>
-                                    {item.menu_items?.price && (
-                                      <span className="text-slate-500 font-mono text-[11px]">
-                                        ₹{(Number(item.menu_items.price) * item.quantity).toFixed(2)}
-                                      </span>
-                                    )}
-                                  </li>
-                                ))}
+                                {order.order_items?.map((item: any) => {
+                                  const itemQty = Number(item.quantity) || 1;
+                                  const itemUnitPrice = Number(item.menu_items?.price ?? item.price ?? 0);
+                                  const itemSubtotal = itemQty * itemUnitPrice;
+
+                                  return (
+                                    <li key={item.id} className="flex justify-between items-center bg-slate-50 p-2.5 rounded-lg border border-slate-100 text-xs">
+                                      <div className="flex items-center gap-2 truncate">
+                                        <span className="font-black bg-slate-200 text-slate-800 px-1.5 py-0.5 rounded text-[10px] shrink-0">
+                                          {itemQty}x
+                                        </span>
+                                        <span className="font-semibold text-slate-700 truncate">{item.menu_items?.name || 'Item'}</span>
+                                      </div>
+                                      <div className="text-right pl-2 shrink-0">
+                                        <div className="text-slate-700 font-bold font-mono text-[11px]">
+                                          {formatCurrency(itemSubtotal)}
+                                        </div>
+                                        <div className="text-[10px] text-slate-400">
+                                          @{formatCurrency(itemUnitPrice, false)}/ea
+                                        </div>
+                                      </div>
+                                    </li>
+                                  );
+                                })}
                               </ul>
+
+                              {/* Cost Breakdown Details */}
+                              <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap justify-between items-center gap-3 text-xs bg-slate-50/50 p-3 rounded-lg">
+                                <div className="space-y-0.5 text-slate-600">
+                                  <div>Food Subtotal: <strong className="text-slate-800">{formatCurrency(orderTotal.foodSubtotal)}</strong></div>
+                                  {orderTotal.additionalCharges > 0 && (
+                                    <div>Taxes &amp; Fees: <strong className="text-slate-800">{formatCurrency(orderTotal.additionalCharges)}</strong></div>
+                                  )}
+                                  {orderTotal.discountAmount > 0 && (
+                                    <div className="text-emerald-700">Discount Applied: <strong>-{formatCurrency(orderTotal.discountAmount)}</strong></div>
+                                  )}
+                                </div>
+                                <div className="text-right">
+                                  <span className="text-[11px] text-slate-400 uppercase font-bold block">Final Order Amount</span>
+                                  <span className="text-base font-black text-emerald-700">
+                                    {formatCurrency(orderTotal.totalAmount)}
+                                  </span>
+                                </div>
+                              </div>
                             </div>
                           </td>
                         </tr>
@@ -1087,57 +1315,89 @@ export default function CanteenAdminDashboard() {
         ) : (
           /* Responsive Card Grid View */
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {paginatedOrders.map(order => (
-              <div key={order.id} className="p-5 rounded-2xl border border-slate-200 bg-slate-50 flex flex-col justify-between gap-3 hover:border-emerald-300 transition-colors shadow-sm bg-white">
-                <div>
-                  <div className="flex justify-between items-start mb-2">
-                    <div>
-                      <h3 className="font-bold text-slate-900 text-base">Order #{order.order_number}</h3>
-                      <div className="text-[11px] text-slate-400 font-mono">ID: {order.id.split('-')[0].toUpperCase()}</div>
+            {paginatedOrders.map(order => {
+              const orderTotal = calculateOrderTotal(order);
+              const payInfo = getOrderPaymentStatus(order);
+
+              return (
+                <div key={order.id} className="p-5 rounded-2xl border border-slate-200 bg-white flex flex-col justify-between gap-3 hover:border-emerald-300 transition-all shadow-sm">
+                  <div>
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <h3 className="font-bold text-slate-900 text-base">Order #{order.order_number}</h3>
+                        <div className="text-[11px] text-slate-400 font-mono">ID: {order.id.split('-')[0].toUpperCase()}</div>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border ${
+                          order.status === 'COLLECTED' ? 'bg-green-50 text-green-700 border-green-200' :
+                          order.status === 'READY' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                          order.status === 'PREPARING' ? 'bg-orange-50 text-orange-700 border-orange-200' :
+                          order.status === 'ACCEPTED' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                          order.status === 'REJECTED' ? 'bg-red-50 text-red-700 border-red-200' :
+                          'bg-slate-100 text-slate-700 border-slate-200'
+                        }`}>
+                          {order.status}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border ${payInfo.badgeClass}`}>
+                          {payInfo.label}
+                        </span>
+                      </div>
                     </div>
-                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border ${
-                      order.status === 'COLLECTED' ? 'bg-green-50 text-green-700 border-green-200' :
-                      order.status === 'READY' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                      order.status === 'PREPARING' ? 'bg-orange-50 text-orange-700 border-orange-200' :
-                      order.status === 'ACCEPTED' ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                      order.status === 'REJECTED' ? 'bg-red-50 text-red-700 border-red-200' :
-                      'bg-slate-100 text-slate-700 border-slate-200'
-                    }`}>
-                      {order.status}
-                    </span>
+
+                    <div className="text-xs text-slate-700 mb-1">
+                      <span className="font-semibold">{order.profiles?.name || 'Student'}</span>
+                      <span className="text-slate-400 font-mono ml-1.5">({order.profiles?.id_number || 'No ID'})</span>
+                    </div>
+
+                    <div className="text-xs text-indigo-600 font-bold bg-indigo-50 border border-indigo-100 rounded-lg px-2 py-1 inline-block mb-3">
+                      Pickup: {formatPickupTime(order.pickup_time)}
+                    </div>
+
+                    {/* Food Items Breakdown */}
+                    <div className="pt-2.5 border-t border-slate-100">
+                      <ul className="space-y-1">
+                        {order.order_items?.map((item: any) => {
+                          const itemQty = Number(item.quantity) || 1;
+                          const itemUnitPrice = Number(item.menu_items?.price ?? item.price ?? 0);
+                          return (
+                            <li key={item.id} className="text-xs text-slate-700 flex justify-between">
+                              <span className="truncate pr-2">
+                                <span className="font-bold text-slate-900">{itemQty}x</span> {item.menu_items?.name || 'Item'}
+                              </span>
+                              <span className="text-slate-500 font-mono text-[11px] shrink-0">
+                                {formatCurrency(itemUnitPrice * itemQty)}
+                              </span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
                   </div>
 
-                  <div className="text-xs text-slate-700 mb-1">
-                    <span className="font-semibold">{order.profiles?.name || 'Student'}</span>
-                    <span className="text-slate-400 font-mono ml-1.5">({order.profiles?.id_number || 'No ID'})</span>
-                  </div>
+                  {/* Card Footer: Amount and Timestamp */}
+                  <div className="border-t border-slate-100 pt-3 space-y-2">
+                    <div className="flex justify-between items-baseline">
+                      <div className="text-xs text-slate-500">
+                        {orderTotal.additionalCharges > 0 && (
+                          <span>Food: {formatCurrency(orderTotal.foodSubtotal)} • </span>
+                        )}
+                        <span>{orderTotal.itemCount} items</span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-base font-black text-slate-900">
+                          {formatCurrency(orderTotal.totalAmount)}
+                        </span>
+                      </div>
+                    </div>
 
-                  <div className="text-xs text-indigo-600 font-bold bg-indigo-50 border border-indigo-100 rounded-lg px-2 py-1 inline-block mb-3">
-                    Pickup: {formatPickupTime(order.pickup_time)}
-                  </div>
-
-                  <div className="pt-2.5 border-t border-slate-100">
-                    <ul className="space-y-1">
-                      {order.order_items?.map((item: any) => (
-                        <li key={item.id} className="text-xs text-slate-700 flex justify-between">
-                          <span><span className="font-bold text-slate-900">{item.quantity}x</span> {item.menu_items?.name}</span>
-                          {item.menu_items?.price && (
-                            <span className="text-slate-400 font-mono text-[11px]">
-                              ₹{(Number(item.menu_items.price) * item.quantity).toFixed(0)}
-                            </span>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
+                    <div className="text-[11px] text-slate-400 flex justify-between pt-1 border-t border-slate-50">
+                      <span>{new Date(order.created_at).toLocaleDateString()}</span>
+                      <span>{new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
                   </div>
                 </div>
-
-                <div className="text-[11px] text-slate-400 border-t border-slate-100 pt-2 flex justify-between">
-                  <span>{new Date(order.created_at).toLocaleDateString()}</span>
-                  <span>{new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 

@@ -21,6 +21,7 @@ import {
 } from '../components/Icons';
 import { QRScannerModal, playSuccessBeep, playErrorBuzzer } from '../components/QRScannerModal';
 import { LayoutList } from 'lucide-react';
+import { calculateOrderTotal, getOrderPaymentStatus, formatCurrency } from '../lib/salesAnalytics';
 
 type Order = Database['public']['Tables']['orders']['Row'];
 type OrderItem = Database['public']['Tables']['order_items']['Row'];
@@ -812,40 +813,46 @@ export default function StaffDashboard() {
         </div>
 
         {/* Item Breakdown */}
-        {compactKanban ? (
-          <div className="my-1.5 flex justify-between items-center bg-slate-50 p-2 rounded-xl border border-slate-100 text-xs">
-            <span className="text-slate-700 font-semibold truncate max-w-[180px]">
-              {order.order_items.map(i => `${i.quantity}x ${i.menu_items?.name || 'Item'}`).join(', ')}
-            </span>
-            <span className="text-indigo-600 font-extrabold text-xs ml-2 shrink-0">
-              ₹{order.order_items.reduce((sum, item) => sum + (Number(item.menu_items?.price || 0) * item.quantity), 0).toFixed(0)}
-            </span>
-          </div>
-        ) : (
-          <div className="flex-grow my-1">
-            <ul className="space-y-1">
-              {order.order_items.map(item => (
-                <li key={item.id} className="text-xs flex justify-between items-center text-slate-700">
-                  <span className="truncate">
-                    <span className="font-bold text-slate-900 bg-slate-100 px-1.5 py-0.5 rounded mr-1.5">{item.quantity}x</span>
-                    {item.menu_items?.name}
-                  </span>
-                  {item.menu_items?.price !== undefined && item.menu_items?.price !== null && (
-                    <span className="text-[11px] text-slate-400 font-medium ml-2 shrink-0">
-                      ₹{(Number(item.menu_items.price) * item.quantity).toFixed(0)}
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
-            <div className="mt-2 pt-1.5 border-t border-dashed border-slate-100 flex justify-between items-center text-[11px] font-bold text-slate-500">
-              <span>Total Value</span>
-              <span className="text-indigo-600 font-extrabold text-xs">
-                ₹{order.order_items.reduce((sum, item) => sum + (Number(item.menu_items?.price || 0) * item.quantity), 0).toFixed(2)}
+        {(() => {
+          const orderTotal = calculateOrderTotal(order);
+          return compactKanban ? (
+            <div className="my-1.5 flex justify-between items-center bg-slate-50 p-2 rounded-xl border border-slate-100 text-xs">
+              <span className="text-slate-700 font-semibold truncate max-w-[180px]">
+                {order.order_items.map(i => `${i.quantity}x ${i.menu_items?.name || 'Item'}`).join(', ')}
+              </span>
+              <span className="text-indigo-600 font-extrabold text-xs ml-2 shrink-0">
+                {formatCurrency(orderTotal.totalAmount)}
               </span>
             </div>
-          </div>
-        )}
+          ) : (
+            <div className="flex-grow my-1">
+              <ul className="space-y-1">
+                {order.order_items.map(item => {
+                  const unitPrice = Number(item.menu_items?.price ?? item.price ?? 0);
+                  return (
+                    <li key={item.id} className="text-xs flex justify-between items-center text-slate-700">
+                      <span className="truncate">
+                        <span className="font-bold text-slate-900 bg-slate-100 px-1.5 py-0.5 rounded mr-1.5">{item.quantity}x</span>
+                        {item.menu_items?.name}
+                      </span>
+                      {unitPrice > 0 && (
+                        <span className="text-[11px] text-slate-400 font-medium ml-2 shrink-0">
+                          {formatCurrency(unitPrice * item.quantity)}
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+              <div className="mt-2 pt-1.5 border-t border-dashed border-slate-100 flex justify-between items-center text-[11px] font-bold text-slate-500">
+                <span>Total Value</span>
+                <span className="text-indigo-600 font-extrabold text-xs">
+                  {formatCurrency(orderTotal.totalAmount)}
+                </span>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Action Buttons */}
         <div className="mt-3 pt-2.5 border-t border-slate-100 flex flex-col gap-1.5">
@@ -1451,8 +1458,9 @@ export default function StaffDashboard() {
                   <th className="py-3 px-3.5">Slot / Timing</th>
                   <th className="py-3 px-3.5">Student</th>
                   <th className="py-3 px-3.5">Items</th>
-                  <th className="py-3 px-3.5">Status</th>
-                  <th className="py-3 px-3.5">Total</th>
+                  <th className="py-3 px-3.5">Order Status</th>
+                  <th className="py-3 px-3.5">Payment</th>
+                  <th className="py-3 px-3.5 text-right">Total</th>
                   <th className="py-3 px-3.5 text-right">Quick Action</th>
                 </tr>
               </thead>
@@ -1460,8 +1468,8 @@ export default function StaffDashboard() {
                 {filteredOrders.map(order => {
                   const overdueInfo = getOrderOverdueInfo(order);
                   const qrExpired = isQrExpired(order);
-                  const totalItems = order.order_items.reduce((sum, i) => sum + i.quantity, 0);
-                  const totalAmount = order.order_items.reduce((sum, item) => sum + (Number(item.menu_items?.price || 0) * item.quantity), 0);
+                  const orderTotal = calculateOrderTotal(order);
+                  const payInfo = getOrderPaymentStatus(order);
 
                   return (
                     <tr 
@@ -1509,9 +1517,9 @@ export default function StaffDashboard() {
                       <td className="py-3 px-3.5 max-w-xs">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="font-bold bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded text-[10px] shrink-0">
-                            {totalItems}x
+                            {orderTotal.itemCount}x
                           </span>
-                          <span className="text-slate-600 truncate max-w-[200px]" title={order.order_items.map(i => `${i.quantity}x ${i.menu_items?.name}`).join(', ')}>
+                          <span className="text-slate-600 truncate max-w-[180px]" title={order.order_items.map(i => `${i.quantity}x ${i.menu_items?.name}`).join(', ')}>
                             {order.order_items.map(i => `${i.quantity}x ${i.menu_items?.name}`).join(', ')}
                           </span>
                         </div>
@@ -1528,8 +1536,14 @@ export default function StaffDashboard() {
                         </span>
                       </td>
 
-                      <td className="py-3 px-3.5 whitespace-nowrap font-extrabold text-slate-800">
-                        ₹{totalAmount.toFixed(0)}
+                      <td className="py-3 px-3.5 whitespace-nowrap">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border ${payInfo.badgeClass}`}>
+                          {payInfo.label}
+                        </span>
+                      </td>
+
+                      <td className="py-3 px-3.5 text-right whitespace-nowrap font-extrabold text-slate-900">
+                        {formatCurrency(orderTotal.totalAmount)}
                       </td>
 
                       <td className="py-3 px-3.5 text-right whitespace-nowrap">
