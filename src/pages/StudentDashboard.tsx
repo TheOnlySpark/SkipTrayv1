@@ -637,6 +637,7 @@ export default function StudentDashboard() {
                 const { data: payRec } = await (supabase as any).from('payments').insert({
                   user_id: profile?.id,
                   tenant_id: tenantId,
+                  canteen_id: canteenId,
                   amount: ledger.gross_payable,
                   provider_order_id: idempotencyKey,
                   provider_payment_id: paymentId,
@@ -691,6 +692,7 @@ export default function StudentDashboard() {
                     order_id: createdOrderId,
                     student_id: profile?.id,
                     canteen_id: canteenId,
+                    tenant_id: tenantId,
                     food_subtotal: ledger.food_subtotal,
                     commission_fee: ledger.commission_fee,
                     target_net: ledger.target_net,

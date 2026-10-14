@@ -478,6 +478,7 @@ export interface Database {
           order_id: string
           student_id: string
           canteen_id: string
+          tenant_id: string
           payment_status: string
           food_subtotal: number
           commission_fee: number
@@ -510,6 +511,7 @@ export interface Database {
           order_id: string
           student_id: string
           canteen_id: string
+          tenant_id?: string
           payment_status?: string
           food_subtotal: number
           commission_fee: number
@@ -542,6 +544,7 @@ export interface Database {
           order_id?: string
           student_id?: string
           canteen_id?: string
+          tenant_id?: string
           payment_status?: string
           food_subtotal?: number
           commission_fee?: number
