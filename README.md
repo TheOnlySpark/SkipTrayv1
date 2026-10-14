@@ -2,7 +2,7 @@
 
 SkipTray is a modern, fast, and tactile canteen ordering and management dashboard designed to streamline operations for students, teachers, and canteen staff. It uses a clean card-based design with robust typography to ensure rapid scanning and error-free order processing.
 
-## 🌟 Key Features
+## Key Features
 
 *   **Role-Based Access Control**:
     *   **Students/Teachers**: View menu, place orders (subject to time slot constraints, e.g., 9:30 AM), receive pickup OTPs, and submit reviews.
@@ -17,7 +17,7 @@ SkipTray is a modern, fast, and tactile canteen ordering and management dashboar
     *   Integrated audio feedback for QR scanning and OTP processing.
     *   Semantic color coding for order statuses (e.g., Placed, Preparing, Ready).
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 *   **Frontend**: React (v19), Vite, TailwindCSS (v4), Framer Motion, Lucide React
 *   **Backend & Database**: Supabase (PostgreSQL) with Row Level Security (RLS)

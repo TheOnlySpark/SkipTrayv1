@@ -5,13 +5,13 @@ import { useDialog } from '../contexts/ModalDialogContext';
 import { supabase } from '../lib/supabase';
 import { Database } from '../types/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { 
-  IconAlertTriangle, 
-  IconBan, 
-  IconClock, 
+import {
+  IconAlertTriangle,
+  IconBan,
+  IconClock,
   IconHourglass,
-  IconStar, 
-  IconX, 
+  IconStar,
+  IconX,
   IconChevronUp,
   IconQrCode,
   IconMaximize,
@@ -20,6 +20,8 @@ import {
 } from '../components/Icons';
 import { QRCodeSVG } from '../components/QRCode';
 import { calculateOrderLedger } from '../lib/ledger';
+import { formatErrorMessage } from '../utils/validation';
+import { Lock, Radio } from 'lucide-react';
 
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 type Order = Database['public']['Tables']['orders']['Row'];
@@ -67,7 +69,7 @@ export default function StudentDashboard() {
   const [activeOrder, setActiveOrder] = useState<Order | null>(null);
   const [pastOrders, setPastOrders] = useState<PastOrder[]>([]);
   const [showHistory, setShowHistory] = useState(false);
-  
+
   // Food Search & Filter States
   const [foodSearchQuery, setFoodSearchQuery] = useState('');
   const [foodTypeFilter, setFoodTypeFilter] = useState<'ALL' | 'VEG' | 'NON_VEG'>('ALL');
@@ -96,7 +98,7 @@ export default function StudentDashboard() {
     return minutesToTimeString(startMin);
   };
 
-  const [cart, setCart] = useState<{item: MenuItem, quantity: number}[]>([]);
+  const [cart, setCart] = useState<{ item: MenuItem, quantity: number }[]>([]);
   const [pickupTime, setPickupTime] = useState(getInitialPickupTime);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -263,9 +265,9 @@ export default function StudentDashboard() {
     // Listen to changes on our active order and past orders
     const orderSub = supabase
       .channel('public:orders')
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
         table: 'orders',
         filter: `user_id=eq.${profile.id}`
       }, (payload) => {
@@ -291,9 +293,9 @@ export default function StudentDashboard() {
     // Listen to changes on item reviews (e.g. admin reply)
     const reviewSub = supabase
       .channel('public:item_reviews')
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
         table: 'item_reviews',
         filter: `user_id=eq.${profile.id}`
       }, () => {
@@ -449,7 +451,7 @@ export default function StudentDashboard() {
       });
       return;
     }
-    
+
     const existing = cart.find(c => c.item.id === item.id);
     if (existing) {
       setCart(cart.map(c => c.item.id === item.id ? { ...c, quantity: c.quantity + 1 } : c));
@@ -494,14 +496,14 @@ export default function StudentDashboard() {
     const idempotencyKey = crypto.randomUUID();
 
     // 2. Save cart state in case of redirect
-    localStorage.setItem('pending_order', JSON.stringify({ 
-      cart, 
-      pickupTime: finalPickupTime, 
+    localStorage.setItem('pending_order', JSON.stringify({
+      cart,
+      pickupTime: finalPickupTime,
       requestedPickupTime: smartSchedule.requestedPickupTime,
       plannedPrepStartTime: smartSchedule.plannedPrepStartTime,
       targetReadyByTime: smartSchedule.targetReadyByTime,
       estimatedPrepDurationMinutes: smartSchedule.estimatedPrepDurationMinutes,
-      idempotencyKey 
+      idempotencyKey
     }));
 
     try {
@@ -511,7 +513,7 @@ export default function StudentDashboard() {
       let sessionId = `mock_session_${Date.now()}`;
       try {
         const { data: createData, error: createError } = await supabase.functions.invoke('create-zohopay-order', {
-          body: { 
+          body: {
             items: itemsJson,
             total_amount: ledger.gross_payable,
             idempotency_key: idempotencyKey,
@@ -528,7 +530,7 @@ export default function StudentDashboard() {
       // 4. Initialize ZohoPay Widget Popup
       if (!(window as any).ZohoPay || (window as any).ZohoPay.__isMock) {
         console.warn("ZohoPay SDK is not loaded. Mocking visual payment popup.");
-        
+
         // Create or update visual mock ZohoPay popup
         (window as any).ZohoPay = {
           __isMock: true,
@@ -555,7 +557,7 @@ export default function StudentDashboard() {
             modal.style.borderRadius = '16px';
             modal.style.textAlign = 'center';
             modal.style.boxShadow = '0 10px 25px -5px rgba(0, 0, 0, 0.1)';
-            
+
             modal.innerHTML = `
               <h2 style="font-size: 24px; font-weight: bold; margin-bottom: 8px;">ZohoPay Mock Popup</h2>
               <p style="color: #64748b; margin-bottom: 24px;">This is a test payment screen.</p>
@@ -564,7 +566,7 @@ export default function StudentDashboard() {
                 <button id="mock-cancel-btn" style="background-color: #ef4444; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold;">Cancel</button>
               </div>
             `;
-            
+
             overlay.appendChild(modal);
             document.body.appendChild(overlay);
 
@@ -754,12 +756,12 @@ export default function StudentDashboard() {
       isDangerous: true
     });
     if (!confirmed) return;
-    
+
     // In Phase 7, we use an RPC to enforce the 5 min rule securely
     const { error } = await supabase.rpc('cancel_order', {
       p_order_id: activeOrder.id
     });
-    
+
     if (error) {
       showAlert({
         title: 'Cancellation Failed',
@@ -781,7 +783,7 @@ export default function StudentDashboard() {
     e.preventDefault();
     if (!reviewingItem || !profile?.id) return;
     setSubmittingReview(true);
-    
+
     const { error } = await supabase.from('item_reviews').insert({
       order_id: reviewingItem.orderId,
       menu_item_id: reviewingItem.menuItemId,
@@ -790,11 +792,11 @@ export default function StudentDashboard() {
       rating: reviewRating,
       feedback_text: reviewText
     });
-    
+
     if (error) {
       showAlert({
         title: 'Submission Failed',
-        message: 'Failed to submit review. Please try again.',
+        message: formatErrorMessage(error, 'Failed to submit review. Please try again.'),
         type: 'error'
       });
     } else {
@@ -843,7 +845,7 @@ export default function StudentDashboard() {
               )}
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-3 leading-tight">Welcome, {profile?.name || 'User'}</h1>
-            
+
             {strikeCount === 1 && !isSuspended && (
               <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50/80 border border-amber-200/60 p-2.5 rounded-xl mt-3 font-medium">
                 <IconAlertTriangle size={16} className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
@@ -908,14 +910,14 @@ export default function StudentDashboard() {
                       {o.status}
                     </div>
                   </div>
-                  
+
                   {o.order_items && o.order_items.length > 0 && (
                     <div className="space-y-3">
                       {o.order_items.map((oi, idx) => {
                         const menuItem = oi.menu_items;
                         if (!menuItem) return null;
                         const existingReview = o.item_reviews?.find(r => r.menu_item_id === menuItem.id);
-                        
+
                         return (
                           <div key={idx} className="flex flex-col gap-2 p-3 bg-slate-50 rounded-lg border border-slate-100">
                             <div className="flex justify-between items-center">
@@ -934,17 +936,17 @@ export default function StudentDashboard() {
                                 </button>
                               )}
                             </div>
-                            
+
                             {/* Existing Review Display */}
                             {existingReview && (
                               <div className="mt-1 bg-white p-3 rounded-lg border border-indigo-100 shadow-sm">
                                 <div className="flex items-center gap-1 mb-1">
                                   {Array.from({ length: 5 }).map((_, i) => (
-                                    <IconStar 
-                                      key={i} 
-                                      size={14} 
-                                      className={`w-3.5 h-3.5 ${i < existingReview.rating ? 'text-yellow-400 fill-yellow-400' : 'text-slate-200'}`} 
-                                      filled={i < existingReview.rating} 
+                                    <IconStar
+                                      key={i}
+                                      size={14}
+                                      className={`w-3.5 h-3.5 ${i < existingReview.rating ? 'text-yellow-400 fill-yellow-400' : 'text-slate-200'}`}
+                                      filled={i < existingReview.rating}
                                     />
                                   ))}
                                 </div>
@@ -979,10 +981,10 @@ export default function StudentDashboard() {
                                         onClick={() => setReviewRating(star)}
                                         className="p-0.5 transition-transform hover:scale-110 focus:outline-none"
                                       >
-                                        <IconStar 
-                                          size={22} 
-                                          className={`w-5.5 h-5.5 ${star <= reviewRating ? 'text-yellow-400 fill-yellow-400' : 'text-slate-200'}`} 
-                                          filled={star <= reviewRating} 
+                                        <IconStar
+                                          size={22}
+                                          className={`w-5.5 h-5.5 ${star <= reviewRating ? 'text-yellow-400 fill-yellow-400' : 'text-slate-200'}`}
+                                          filled={star <= reviewRating}
                                         />
                                       </button>
                                     ))}
@@ -1024,7 +1026,7 @@ export default function StudentDashboard() {
           <div className="w-full flex justify-end h-10 mb-2">
             {/* Cancel button if within 5 mins and not preparing */}
             {['PLACED', 'ACCEPTED'].includes(activeOrder.status) && (new Date().getTime() - new Date(activeOrder.created_at).getTime()) < 5 * 60 * 1000 && (
-              <button 
+              <button
                 onClick={handleCancelOrder}
                 className="bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-xl text-sm font-semibold transition-colors"
               >
@@ -1041,96 +1043,102 @@ export default function StudentDashboard() {
               </span>
             </div>
             <p className="text-indigo-200 font-medium tracking-wide mb-4 text-sm">Your Order Status</p>
-          
-          <div className={`mt-2 px-6 py-2 rounded-full font-bold text-sm tracking-wider uppercase ${getStatusColor(activeOrder.status).replace('100', '900').replace('600', '100')}`}>
-            {activeOrder.status}
-          </div>
-          
-          {/* Security Gatekeeper: Live Anti-Screenshot Pass only illuminates when READY */}
-          {activeOrder.status === 'READY' ? (
-            <div className="mt-6 flex flex-col items-center gap-3 w-full max-w-xs animate-in fade-in zoom-in-95 duration-300">
-              {/* Anti-Screenshot Live Security Watermark */}
-              <div className="flex items-center justify-center gap-2 bg-emerald-500/20 text-emerald-200 px-3.5 py-1.5 rounded-full text-xs font-extrabold border border-emerald-400/40 shadow-inner">
-                <span className="relative flex h-2.5 w-2.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400"></span>
-                </span>
-                <span className="tracking-wide font-mono">🔴 LIVE PASS • {liveTickerTime}</span>
-              </div>
 
-              {/* High-Contrast QR Code Card with Pulsing Security Halo */}
-              <div 
-                onClick={() => setShowQrModal(true)}
-                className="bg-white p-4 rounded-3xl shadow-[0_0_30px_rgba(52,211,153,0.35)] cursor-pointer hover:scale-105 transition-all relative group border-4 border-emerald-400"
-                title="Click to Enlarge QR Code"
-              >
-                <QRCodeSVG 
-                  value={`SKIPTRAY:${activeOrder.id}:${activeOrder.otp_code}`} 
-                  size={180}
-                  className="rounded-xl"
-                />
-                <div className="absolute inset-0 bg-indigo-950/70 backdrop-blur-xs rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white gap-1.5 p-2">
-                  <IconMaximize size={24} className="w-6 h-6 text-white" />
-                  <span className="text-[11px] font-extrabold uppercase tracking-wider">Tap to Enlarge</span>
+            <div className={`mt-2 px-6 py-2 rounded-full font-bold text-sm tracking-wider uppercase ${getStatusColor(activeOrder.status).replace('100', '900').replace('600', '100')}`}>
+              {activeOrder.status}
+            </div>
+
+            {/* Security Gatekeeper: Live Anti-Screenshot Pass only illuminates when READY */}
+            {activeOrder.status === 'READY' ? (
+              <div className="mt-6 flex flex-col items-center gap-3 w-full max-w-xs animate-in fade-in zoom-in-95 duration-300">
+                {/* Anti-Screenshot Live Security Watermark */}
+                <div className="flex items-center justify-center gap-2 bg-emerald-500/20 text-emerald-200 px-3.5 py-1.5 rounded-full text-xs font-extrabold border border-emerald-400/40 shadow-inner">
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400"></span>
+                  </span>
+                  <span className="tracking-wide font-mono inline-flex items-center gap-1.5">
+                    <Radio size={12} className="text-emerald-400 shrink-0" />
+                    <span>LIVE PASS • {liveTickerTime}</span>
+                  </span>
+                </div>
+
+                {/* High-Contrast QR Code Card with Pulsing Security Halo */}
+                <div
+                  onClick={() => setShowQrModal(true)}
+                  className="bg-white p-4 rounded-3xl shadow-[0_0_30px_rgba(52,211,153,0.35)] cursor-pointer hover:scale-105 transition-all relative group border-4 border-emerald-400"
+                  title="Click to Enlarge QR Code"
+                >
+                  <QRCodeSVG
+                    value={`SKIPTRAY:${activeOrder.id}:${activeOrder.otp_code}`}
+                    size={180}
+                    className="rounded-xl"
+                  />
+                  <div className="absolute inset-0 bg-indigo-950/70 backdrop-blur-xs rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white gap-1.5 p-2">
+                    <IconMaximize size={24} className="w-6 h-6 text-white" />
+                    <span className="text-[11px] font-extrabold uppercase tracking-wider">Tap to Enlarge</span>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setShowQrModal(true)}
+                  className="text-xs text-indigo-100 hover:text-white flex items-center gap-1.5 font-medium transition-colors"
+                >
+                  <IconQrCode size={14} className="w-3.5 h-3.5" />
+                  <span>Show QR at counter for instant scan</span>
+                </button>
+
+                {/* Manual 6-Digit OTP Box (Fallback / Backup) */}
+                <div className="bg-white/10 px-4 py-2.5 rounded-2xl border border-white/20 text-center w-full shadow-inner mt-1">
+                  <p className="text-indigo-200 text-[10px] font-bold uppercase tracking-widest mb-0.5">Or Give 6-Digit OTP</p>
+                  <p className="text-3xl font-mono font-black tracking-[0.25em] text-white">{activeOrder.otp_code}</p>
                 </div>
               </div>
-
-              <button
-                onClick={() => setShowQrModal(true)}
-                className="text-xs text-indigo-100 hover:text-white flex items-center gap-1.5 font-medium transition-colors"
-              >
-                <IconQrCode size={14} className="w-3.5 h-3.5" />
-                <span>Show QR at counter for instant scan</span>
-              </button>
-
-              {/* Manual 6-Digit OTP Box (Fallback / Backup) */}
-              <div className="bg-white/10 px-4 py-2.5 rounded-2xl border border-white/20 text-center w-full shadow-inner mt-1">
-                <p className="text-indigo-200 text-[10px] font-bold uppercase tracking-widest mb-0.5">Or Give 6-Digit OTP</p>
-                <p className="text-3xl font-mono font-black tracking-[0.25em] text-white">{activeOrder.otp_code}</p>
-              </div>
-            </div>
-          ) : (
-            /* Kitchen Preparing State Card (QR Locked Until Ready) */
-            <div className="mt-6 flex flex-col items-center justify-center bg-white/10 border border-white/20 rounded-3xl p-6 text-center max-w-xs w-full backdrop-blur-xs">
-              <div className="w-14 h-14 rounded-full bg-white/15 flex items-center justify-center mb-3 text-amber-300">
-                <IconHourglass size={28} className="animate-spin" style={{ animationDuration: '4s' }} />
-              </div>
-              <h4 className="font-extrabold text-base text-white">Kitchen is preparing your meal</h4>
-              <p className="text-xs text-indigo-100 mt-1">
-                Your food is currently being cooked and boxed.
-              </p>
-              <div className="mt-4 px-3 py-2 bg-indigo-950/40 rounded-2xl border border-indigo-300/20 text-[11px] text-indigo-200 flex items-center gap-2">
-                <span className="text-amber-300 font-bold">🔒 Secure Pass</span>
-                <span>• Unlocks automatically when READY</span>
-              </div>
-            </div>
-          )}
-          
-          {/* Smart Scheduling Details in Active Order Card */}
-          <div className="mt-5 pt-4 border-t border-indigo-400/20 grid grid-cols-2 sm:grid-cols-3 gap-3 text-left">
-            <div>
-              <span className="text-[10px] text-indigo-300 uppercase tracking-wider block font-bold">Your Pickup Time</span>
-              <span className="text-sm font-bold text-white">
-                {formatPickupTime((activeOrder as any).requested_pickup_time || activeOrder.pickup_time)}
-              </span>
-            </div>
-            {(activeOrder as any).planned_prep_start_time && (
-              <div>
-                <span className="text-[10px] text-indigo-300 uppercase tracking-wider block font-bold">Kitchen Prep Starts</span>
-                <span className="text-sm font-semibold text-amber-300">
-                  {formatPickupTime((activeOrder as any).planned_prep_start_time)}
-                </span>
+            ) : (
+              /* Kitchen Preparing State Card (QR Locked Until Ready) */
+              <div className="mt-6 flex flex-col items-center justify-center bg-white/10 border border-white/20 rounded-3xl p-6 text-center max-w-xs w-full backdrop-blur-xs">
+                <div className="w-14 h-14 rounded-full bg-white/15 flex items-center justify-center mb-3 text-amber-300">
+                  <IconHourglass size={28} className="animate-spin" style={{ animationDuration: '4s' }} />
+                </div>
+                <h4 className="font-extrabold text-base text-white">Kitchen is preparing your meal</h4>
+                <p className="text-xs text-indigo-100 mt-1">
+                  Your food is currently being cooked and boxed.
+                </p>
+                <div className="mt-4 px-3 py-2 bg-indigo-950/40 rounded-2xl border border-indigo-300/20 text-[11px] text-indigo-200 flex items-center gap-2">
+                  <span className="text-amber-300 font-bold inline-flex items-center gap-1">
+                    <Lock size={12} className="shrink-0" />
+                    <span>Secure Pass</span>
+                  </span>
+                  <span>• Unlocks automatically when READY</span>
+                </div>
               </div>
             )}
-            {(activeOrder as any).target_ready_by_time && (
+
+            {/* Smart Scheduling Details in Active Order Card */}
+            <div className="mt-5 pt-4 border-t border-indigo-400/20 grid grid-cols-2 sm:grid-cols-3 gap-3 text-left">
               <div>
-                <span className="text-[10px] text-indigo-300 uppercase tracking-wider block font-bold">Hot & Ready By</span>
-                <span className="text-sm font-semibold text-emerald-300">
-                  {formatPickupTime((activeOrder as any).target_ready_by_time)}
+                <span className="text-[10px] text-indigo-300 uppercase tracking-wider block font-bold">Your Pickup Time</span>
+                <span className="text-sm font-bold text-white">
+                  {formatPickupTime((activeOrder as any).requested_pickup_time || activeOrder.pickup_time)}
                 </span>
               </div>
-            )}
-          </div>
+              {(activeOrder as any).planned_prep_start_time && (
+                <div>
+                  <span className="text-[10px] text-indigo-300 uppercase tracking-wider block font-bold">Kitchen Prep Starts</span>
+                  <span className="text-sm font-semibold text-amber-300">
+                    {formatPickupTime((activeOrder as any).planned_prep_start_time)}
+                  </span>
+                </div>
+              )}
+              {(activeOrder as any).target_ready_by_time && (
+                <div>
+                  <span className="text-[10px] text-indigo-300 uppercase tracking-wider block font-bold">Hot & Ready By</span>
+                  <span className="text-sm font-semibold text-emerald-300">
+                    {formatPickupTime((activeOrder as any).target_ready_by_time)}
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       ) : (
@@ -1200,22 +1208,20 @@ export default function StudentDashboard() {
                   <button
                     type="button"
                     onClick={() => setFoodTypeFilter('ALL')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
-                      foodTypeFilter === 'ALL'
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${foodTypeFilter === 'ALL'
                         ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
                         : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                    }`}
+                      }`}
                   >
                     All
                   </button>
                   <button
                     type="button"
                     onClick={() => setFoodTypeFilter('VEG')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 ${
-                      foodTypeFilter === 'VEG'
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 ${foodTypeFilter === 'VEG'
                         ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
                         : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50'
-                    }`}
+                      }`}
                   >
                     <span className="w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-emerald-300"></span>
                     <span>Veg</span>
@@ -1223,11 +1229,10 @@ export default function StudentDashboard() {
                   <button
                     type="button"
                     onClick={() => setFoodTypeFilter('NON_VEG')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 ${
-                      foodTypeFilter === 'NON_VEG'
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 ${foodTypeFilter === 'NON_VEG'
                         ? 'bg-rose-600 text-white border-rose-600 shadow-sm'
                         : 'bg-white text-rose-700 border-rose-200 hover:bg-rose-50'
-                    }`}
+                      }`}
                   >
                     <span className="w-2 h-2 rounded-full bg-rose-500 ring-2 ring-rose-300"></span>
                     <span>Non-Veg</span>
@@ -1240,44 +1245,40 @@ export default function StudentDashboard() {
                   <button
                     type="button"
                     onClick={() => setCategoryFilter('ALL')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
-                      categoryFilter === 'ALL'
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${categoryFilter === 'ALL'
                         ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
                         : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                    }`}
+                      }`}
                   >
                     All Categories
                   </button>
                   <button
                     type="button"
                     onClick={() => setCategoryFilter('PACKED_FOOD')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1 ${
-                      categoryFilter === 'PACKED_FOOD'
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1 ${categoryFilter === 'PACKED_FOOD'
                         ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
                         : 'bg-white text-slate-700 border-slate-200 hover:bg-amber-50 hover:text-amber-800 hover:border-amber-200'
-                    }`}
+                      }`}
                   >
                     <span>Packed Food</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => setCategoryFilter('MEALS')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1 ${
-                      categoryFilter === 'MEALS'
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1 ${categoryFilter === 'MEALS'
                         ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
                         : 'bg-white text-slate-700 border-slate-200 hover:bg-indigo-50 hover:text-indigo-800 hover:border-indigo-200'
-                    }`}
+                      }`}
                   >
                     <span>Meals</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => setCategoryFilter('DRINKS')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1 ${
-                      categoryFilter === 'DRINKS'
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1 ${categoryFilter === 'DRINKS'
                         ? 'bg-cyan-600 text-white border-cyan-600 shadow-sm'
                         : 'bg-white text-slate-700 border-slate-200 hover:bg-cyan-50 hover:text-cyan-800 hover:border-cyan-200'
-                    }`}
+                      }`}
                   >
                     <span>Drinks</span>
                   </button>
@@ -1342,7 +1343,7 @@ export default function StudentDashboard() {
                       <h3 className="font-bold text-slate-800 leading-tight">{item.name}</h3>
                       <div className="text-sm font-extrabold text-indigo-600 mt-1.5">₹{Number(item.price || 0).toFixed(2)}</div>
                     </div>
-                    
+
                     <div className="mt-4 flex items-center justify-between gap-1">
                       <span className="text-xs font-medium text-slate-400 shrink-0">{item.veg_non_veg === 'VEG' ? 'Veg' : 'Non-Veg'}</span>
                       {!item.is_sold_out ? (
@@ -1362,7 +1363,7 @@ export default function StudentDashboard() {
                                 >
                                   <span className="leading-none text-base font-semibold">−</span>
                                 </button>
-                                <span 
+                                <span
                                   className="w-6 text-center font-bold text-sm text-indigo-950 tabular-nums select-none"
                                   aria-label={`${quantity} of ${item.name} in cart`}
                                 >
@@ -1383,7 +1384,7 @@ export default function StudentDashboard() {
                           }
 
                           return (
-                            <button 
+                            <button
                               type="button"
                               onClick={() => addToCart(item)}
                               disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cartTotalItems >= 5}
@@ -1409,9 +1410,8 @@ export default function StudentDashboard() {
           <div
             onClick={() => setCartOpen(false)}
             aria-hidden="true"
-            className={`fixed inset-0 bg-slate-950/40 backdrop-blur-md transition-opacity duration-300 z-40 ${
-              cartOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
-            }`}
+            className={`fixed inset-0 bg-slate-950/40 backdrop-blur-md transition-opacity duration-300 z-40 ${cartOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+              }`}
           />
 
           {/* Floating Bottom Cart Bar */}
@@ -1989,7 +1989,7 @@ export default function StudentDashboard() {
       {showQrModal && activeOrder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-in fade-in">
           <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-sm w-full text-center flex flex-col items-center gap-4 shadow-2xl relative">
-            <button 
+            <button
               onClick={() => setShowQrModal(false)}
               className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-700 rounded-full hover:bg-slate-100 transition-colors"
             >
@@ -1999,15 +1999,16 @@ export default function StudentDashboard() {
             <div>
               <div className="inline-flex items-center justify-center gap-1.5 bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-[11px] font-extrabold border border-emerald-200 uppercase tracking-wider mb-1">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
-                <span>🔴 LIVE PASS • {liveTickerTime}</span>
+                <Radio size={12} className="text-emerald-600 shrink-0" />
+                <span>LIVE PASS • {liveTickerTime}</span>
               </div>
               <h3 className="text-2xl font-extrabold text-slate-900 mt-1">Order #{activeOrder.order_number}</h3>
               <p className="text-xs text-slate-500 font-mono mt-0.5">ID: {activeOrder.id.split('-')[0].toUpperCase()}</p>
             </div>
 
             <div className="p-3 bg-slate-50 border-2 border-slate-100 rounded-2xl shadow-inner">
-              <QRCodeSVG 
-                value={`SKIPTRAY:${activeOrder.id}:${activeOrder.otp_code}`} 
+              <QRCodeSVG
+                value={`SKIPTRAY:${activeOrder.id}:${activeOrder.otp_code}`}
                 size={230}
               />
             </div>

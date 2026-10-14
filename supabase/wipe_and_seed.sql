@@ -3,6 +3,21 @@
 -- INSTRUCTIONS: Run this directly in your Supabase SQL Editor.
 -- ============================================================================
 
+-- 0. Ensure schema columns exist and reload PostgREST schema cache
+ALTER TABLE public.menu_items ADD COLUMN IF NOT EXISTS prep_time_minutes INTEGER DEFAULT 10;
+ALTER TABLE public.menu_items ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'Meals';
+ALTER TABLE public.menu_items ADD COLUMN IF NOT EXISTS gst_rate_percent NUMERIC(5,2) DEFAULT NULL;
+ALTER TABLE public.menu_items ADD COLUMN IF NOT EXISTS hsn_code TEXT DEFAULT '996331';
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS requested_pickup_time TIMESTAMPTZ;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS estimated_prep_duration_minutes INTEGER DEFAULT 12;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS planned_prep_start_time TIMESTAMPTZ;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS target_ready_by_time TIMESTAMPTZ;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS preparation_started_at TIMESTAMPTZ;
+ALTER TABLE public.lunch_slot_configs ADD COLUMN IF NOT EXISTS max_concurrent_orders INTEGER DEFAULT 15;
+ALTER TABLE public.lunch_slot_configs ADD COLUMN IF NOT EXISTS default_prep_time_minutes INTEGER DEFAULT 10;
+ALTER TABLE public.lunch_slot_configs ADD COLUMN IF NOT EXISTS order_cutoff_minutes INTEGER DEFAULT 15;
+NOTIFY pgrst, 'reload schema';
+
 -- 1. Wipe all data (Cascade will handle related records)
 TRUNCATE TABLE public.order_items CASCADE;
 TRUNCATE TABLE public.orders CASCADE;

@@ -319,7 +319,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       title = `Kitchen Preparing Order #${orderNumber}`;
       message = 'Your meal is now being freshly prepared.';
     } else if (status === 'READY') {
-      title = `Order #${orderNumber} is Ready! 🍽️`;
+      title = `Order #${orderNumber} is Ready!`;
       message = 'Your food is ready for pickup! Show your QR pass at the counter.';
     }
 

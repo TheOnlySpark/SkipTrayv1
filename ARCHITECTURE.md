@@ -2,7 +2,7 @@
 
 This document provides a high-level overview of the SkipTray system architecture, database schema, and core operational flows.
 
-## 🏗️ System Architecture
+## System Architecture
 
 SkipTray is built on a modern **React (Vite)** frontend connected to a **Supabase (PostgreSQL)** backend as a Service (BaaS).
 
@@ -22,7 +22,7 @@ SkipTray is built on a modern **React (Vite)** frontend connected to a **Supabas
 
 ---
 
-## 🗄️ Database Schema
+## Database Schema
 
 The database consists of the following core tables:
 
@@ -72,7 +72,7 @@ Stores feedback and ratings.
 
 ---
 
-## 🔒 Row Level Security (RLS)
+## Row Level Security (RLS)
 
 Security is enforced at the database level:
 *   **Students/Teachers**: Can insert `orders`, read their own `orders`, and read `menu_items`. Cannot update order status beyond placement.
@@ -81,7 +81,7 @@ Security is enforced at the database level:
 
 ---
 
-## 🔄 Core Workflows
+## Core Workflows
 
 ### The Order Lifecycle
 1.  **Placement**: Student selects items and a pickup time slot. The system checks for constraints (e.g., time must be >= 9:30 AM). If valid, an `order` is created with status `PLACED` and a random 6-digit `otp_code`.

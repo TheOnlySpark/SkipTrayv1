@@ -20,7 +20,11 @@ import {
   IconCamera
 } from '../components/Icons';
 import { QRScannerModal, playSuccessBeep, playErrorBuzzer } from '../components/QRScannerModal';
-import { LayoutList } from 'lucide-react';
+import { LayoutList, Utensils, Search as SearchIcon, Store } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
+import { formatErrorMessage } from '../utils/validation';
+import { Button, InputField, Table } from '../components';
+import type { Column } from '../components';
 import { calculateOrderTotal, getOrderPaymentStatus, formatCurrency } from '../lib/salesAnalytics';
 
 type Order = Database['public']['Tables']['orders']['Row'];
@@ -34,6 +38,9 @@ type OrderWithDetails = Order & {
 };
 
 export default function StaffDashboard() {
+  const location = useLocation();
+  const isMenuView = location.pathname === '/staff/menu' || location.search.includes('tab=menu');
+
   const { profile, signOut } = useAuth();
   const { showAlert, showConfirm } = useDialog();
   const [orders, setOrders] = useState<OrderWithDetails[]>([]);
@@ -41,10 +48,15 @@ export default function StaffDashboard() {
   const [loading, setLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState(Date.now());
 
+  // Menu Search & Filter State
+  const [menuSearch, setMenuSearch] = useState('');
+  const [menuFilter, setMenuFilter] = useState<'ALL' | 'VEG' | 'NON_VEG' | 'AVAILABLE' | 'SOLD_OUT'>('ALL');
+
   // Filtering & View State
   const [selectedSlot, setSelectedSlot] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [viewMode, setViewMode] = useState<'KANBAN' | 'GRID' | 'LIST'>('KANBAN');
+  const [viewMode, setViewMode] = useState<'KANBAN' | 'GRID' | 'LIST'>('LIST');
+  const [menuViewMode, setMenuViewMode] = useState<'GRID' | 'TABLE'>('GRID');
   const [compactKanban, setCompactKanban] = useState<boolean>(false);
   const [sortByPrepStart, setSortByPrepStart] = useState<boolean>(true);
   const [showBatchSummary, setShowBatchSummary] = useState<boolean>(true);
@@ -65,20 +77,6 @@ export default function StaffDashboard() {
   const [selectedOrderForOtp, setSelectedOrderForOtp] = useState<string | null>(null);
   const [otpInput, setOtpInput] = useState('');
 
-  // Quick Menu Availability Filter State
-  const [menuSearch, setMenuSearch] = useState('');
-  const [menuFilter, setMenuFilter] = useState<'ALL' | 'VEG' | 'NON_VEG' | 'SOLD_OUT'>('ALL');
-
-  const filteredMenuItems = useMemo(() => {
-    return menuItems.filter(item => {
-      const matchesSearch = item.name.toLowerCase().includes(menuSearch.toLowerCase());
-      if (!matchesSearch) return false;
-      if (menuFilter === 'VEG') return item.veg_non_veg === 'VEG';
-      if (menuFilter === 'NON_VEG') return item.veg_non_veg === 'NON_VEG';
-      if (menuFilter === 'SOLD_OUT') return item.is_sold_out;
-      return true;
-    });
-  }, [menuItems, menuSearch, menuFilter]);
 
   // 30-second interval to dynamically re-check 10-minute pickup overdue timers
   useEffect(() => {
@@ -168,9 +166,9 @@ export default function StaffDashboard() {
 
     // Realtime subscriptions strictly locked to this staff member's assigned canteen
     const orderSub = supabase.channel(`staff_orders_${profile.canteen_id}`)
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
         table: 'orders',
         filter: `canteen_id=eq.${profile.canteen_id}`
       }, () => {
@@ -179,9 +177,9 @@ export default function StaffDashboard() {
       .subscribe();
 
     const menuSub = supabase.channel(`staff_menu_${profile.canteen_id}`)
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
         table: 'menu_items',
         filter: `canteen_id=eq.${profile.canteen_id}`
       }, () => {
@@ -255,14 +253,14 @@ export default function StaffDashboard() {
       .in('status', ['PLACED', 'ACCEPTED', 'PREPARING', 'READY'])
       .order('pickup_time', { ascending: true })
       .order('order_number', { ascending: true });
-      
+
     if (data) setOrders(data as OrderWithDetails[]);
     setLoading(false);
   };
 
   const updateOrderStatus = async (orderId: string, status: string) => {
     // Optimistic update for instant UI feedback
-    setOrders(prev => prev.map(order => 
+    setOrders(prev => prev.map(order =>
       order.id === orderId ? { ...order, status: status as any } : order
     ));
 
@@ -293,7 +291,7 @@ export default function StaffDashboard() {
     if (!confirmed) return;
 
     // Optimistic update
-    setOrders(prev => prev.map(order => 
+    setOrders(prev => prev.map(order =>
       orderIds.includes(order.id) ? { ...order, status: 'ACCEPTED' } : order
     ));
 
@@ -307,7 +305,7 @@ export default function StaffDashboard() {
   };
 
   const handleToggleSoldOut = async (id: string, currentStatus: boolean) => {
-    setMenuItems(prev => prev.map(item => 
+    setMenuItems(prev => prev.map(item =>
       item.id === id ? { ...item, is_sold_out: !currentStatus } : item
     ));
 
@@ -317,7 +315,7 @@ export default function StaffDashboard() {
     });
 
     if (error) {
-      setMenuItems(prev => prev.map(item => 
+      setMenuItems(prev => prev.map(item =>
         item.id === id ? { ...item, is_sold_out: currentStatus } : item
       ));
       if (import.meta.env.DEV) console.error("Failed to toggle sold out status", error);
@@ -335,7 +333,7 @@ export default function StaffDashboard() {
       if (import.meta.env.DEV) console.error("verify_pickup_otp failed:", error);
       showAlert({
         title: 'Verification Error',
-        message: `Verification failed: ${error.message || JSON.stringify(error)}`,
+        message: formatErrorMessage(error, 'Order verification failed. Please check the OTP and try again.'),
         type: 'error'
       });
       return false;
@@ -381,7 +379,20 @@ export default function StaffDashboard() {
   const handleQuickOtpSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanOtp = quickOtpInput.trim();
-    if (cleanOtp.length !== 6) return;
+    if (!cleanOtp) {
+      setQuickOtpToast({
+        message: 'Please enter the 6-digit collection OTP code.',
+        isError: true
+      });
+      return;
+    }
+    if (cleanOtp.length !== 6 || !/^\d{6}$/.test(cleanOtp)) {
+      setQuickOtpToast({
+        message: 'OTP must be exactly 6 numeric digits.',
+        isError: true
+      });
+      return;
+    }
 
     setQuickOtpLoading(true);
     setQuickOtpToast(null);
@@ -400,7 +411,7 @@ export default function StaffDashboard() {
     // Readiness Check (Still Preparing / Placed)
     if (matchingOrder.status !== 'READY') {
       setQuickOtpToast({
-        message: `⚠️ NOT READY: Order #${matchingOrder.order_number} is currently in status "${matchingOrder.status}". Please mark it as 'READY' first.`,
+        message: `NOT READY: Order #${matchingOrder.order_number} is currently in status "${matchingOrder.status}". Please mark it as 'READY' first.`,
         isError: true
       });
       setQuickOtpLoading(false);
@@ -464,7 +475,7 @@ export default function StaffDashboard() {
     if (matchingOrder && matchingOrder.status === 'COLLECTED') {
       playErrorBuzzer();
       setQuickOtpToast({
-        message: `⚠️ REPLAY BLOCKED: Order ${orderNum} for ${studentName} was ALREADY collected!`,
+        message: `REPLAY BLOCKED: Order ${orderNum} for ${studentName} was ALREADY collected!`,
         isError: true
       });
       return false;
@@ -474,7 +485,7 @@ export default function StaffDashboard() {
     if (matchingOrder && matchingOrder.status !== 'READY') {
       playErrorBuzzer();
       setQuickOtpToast({
-        message: `⚠️ NOT READY: Order ${orderNum} is currently in status "${matchingOrder.status}". Kitchen has not boxed it yet.`,
+        message: `NOT READY: Order ${orderNum} is currently in status "${matchingOrder.status}". Kitchen has not boxed it yet.`,
         isError: true
       });
       return false;
@@ -485,14 +496,14 @@ export default function StaffDashboard() {
     if (success) {
       playSuccessBeep();
       setQuickOtpToast({
-        message: `✅ QR Verified! Order ${orderNum} for ${studentName} collected successfully!`,
+        message: `QR Verified! Order ${orderNum} for ${studentName} collected successfully!`,
         isError: false
       });
       return true;
     } else {
       playErrorBuzzer();
       setQuickOtpToast({
-        message: `❌ QR verification rejected for order ${orderNum}.`,
+        message: `QR verification rejected for order ${orderNum}.`,
         isError: true
       });
       return false;
@@ -658,6 +669,20 @@ export default function StaffDashboard() {
   const kitchenOrders = useMemo(() => filteredOrders.filter(o => ['ACCEPTED', 'PREPARING'].includes(o.status)), [filteredOrders]);
   const readyOrders = useMemo(() => filteredOrders.filter(o => o.status === 'READY'), [filteredOrders]);
 
+  // Compute filtered menu items for Quick Menu Availability view
+  const filteredMenuItems = useMemo(() => {
+    return menuItems.filter(item => {
+      if (menuSearch.trim() && !item.name.toLowerCase().includes(menuSearch.toLowerCase().trim())) {
+        return false;
+      }
+      if (menuFilter === 'VEG' && item.veg_non_veg !== 'VEG') return false;
+      if (menuFilter === 'NON_VEG' && item.veg_non_veg !== 'NON_VEG') return false;
+      if (menuFilter === 'AVAILABLE' && item.is_sold_out) return false;
+      if (menuFilter === 'SOLD_OUT' && !item.is_sold_out) return false;
+      return true;
+    });
+  }, [menuItems, menuSearch, menuFilter]);
+
   // Compute live order counts per lunch slot
   const slotCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -707,11 +732,10 @@ export default function StaffDashboard() {
     const urgency = getPrepUrgencyStatus(order as any, currentTime);
 
     return (
-      <div 
-        key={order.id} 
-        className={`bg-white border rounded-2xl p-4 shadow-sm flex flex-col transition-all hover:shadow-md ${
-          overdueInfo.isOverdue ? 'border-amber-400 ring-2 ring-amber-100 bg-amber-50/20' : 'border-slate-200'
-        }`}
+      <div
+        key={order.id}
+        className={`bg-white border rounded-2xl p-4 shadow-sm flex flex-col transition-all hover:shadow-md ${overdueInfo.isOverdue ? 'border-amber-400 ring-2 ring-amber-100 bg-amber-50/20' : 'border-slate-200'
+          }`}
       >
         {/* Overdue No-Show Warning Banner */}
         {overdueInfo.isOverdue && (
@@ -795,12 +819,11 @@ export default function StaffDashboard() {
             <h4 className="font-bold text-sm text-slate-800 truncate mt-1">{order.profiles?.name || 'Student'}</h4>
             <div className="text-[11px] text-slate-400 font-mono">ID: {order.profiles?.id_number || order.id.split('-')[0].toUpperCase()}</div>
           </div>
-          <div className={`px-2.5 py-0.5 rounded-full text-[11px] font-extrabold uppercase tracking-wide border shrink-0 ${
-            order.status === 'PLACED' ? 'bg-slate-100 text-slate-700 border-slate-300' :
-            order.status === 'ACCEPTED' ? 'bg-blue-50 text-blue-700 border-blue-200' :
-            order.status === 'PREPARING' ? 'bg-orange-50 text-orange-700 border-orange-200' :
-            'bg-emerald-50 text-emerald-700 border-emerald-200'
-          }`}>
+          <div className={`px-2.5 py-0.5 rounded-full text-[11px] font-extrabold uppercase tracking-wide border shrink-0 ${order.status === 'PLACED' ? 'bg-slate-100 text-slate-700 border-slate-300' :
+              order.status === 'ACCEPTED' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                order.status === 'PREPARING' ? 'bg-orange-50 text-orange-700 border-orange-200' :
+                  'bg-emerald-50 text-emerald-700 border-emerald-200'
+            }`}>
             {order.status}
           </div>
         </div>
@@ -873,85 +896,102 @@ export default function StaffDashboard() {
         <div className="mt-3 pt-2.5 border-t border-slate-100 flex flex-col gap-1.5">
           {order.status === 'PLACED' && (
             <div className="flex gap-2">
-              <button 
-                onClick={() => updateOrderStatus(order.id, 'ACCEPTED')} 
-                className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-1.5 rounded-xl text-xs font-bold transition-colors shadow-sm"
+              <Button
+                variant="primary"
+                size="sm"
+                fullWidth
+                onClick={() => updateOrderStatus(order.id, 'ACCEPTED')}
               >
                 Accept Order
-              </button>
-              <button 
-                onClick={() => updateOrderStatus(order.id, 'REJECTED')} 
-                className="px-3 bg-rose-50 hover:bg-rose-100 text-rose-600 py-1.5 rounded-xl text-xs font-bold transition-colors border border-rose-200"
+              </Button>
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={() => updateOrderStatus(order.id, 'REJECTED')}
               >
                 Reject
-              </button>
+              </Button>
             </div>
           )}
 
           {order.status === 'ACCEPTED' && (
-            <button 
-              onClick={() => updateOrderStatus(order.id, 'PREPARING')} 
-              className="w-full bg-orange-500 hover:bg-orange-600 text-white py-1.5 rounded-xl text-xs font-bold transition-colors shadow-sm flex items-center justify-center gap-1.5"
+            <Button
+              variant="secondary"
+              size="sm"
+              fullWidth
+              onClick={() => updateOrderStatus(order.id, 'PREPARING')}
+              leftIcon={<IconCooking size={14} className="w-3.5 h-3.5" />}
             >
-              <IconCooking size={14} className="w-3.5 h-3.5" />
-              <span>Start Preparing</span>
-            </button>
+              Start Preparing
+            </Button>
           )}
 
           {order.status === 'PREPARING' && (
-            <button 
-              onClick={() => updateOrderStatus(order.id, 'READY')} 
-              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-1.5 rounded-xl text-xs font-bold transition-colors shadow-sm flex items-center justify-center gap-1.5"
+            <Button
+              variant="success"
+              size="sm"
+              fullWidth
+              onClick={() => updateOrderStatus(order.id, 'READY')}
+              leftIcon={<IconCheckCircle size={14} className="w-3.5 h-3.5" />}
             >
-              <IconCheckCircle size={14} className="w-3.5 h-3.5" />
-              <span>Mark Ready for Pickup</span>
-            </button>
+              Mark Ready for Pickup
+            </Button>
           )}
 
           {order.status === 'READY' && (
             <div className="flex flex-col gap-1.5">
               {selectedOrderForOtp === order.id ? (
                 <div className="flex gap-1.5 items-center">
-                  <input 
-                    type="text" 
-                    placeholder="OTP" 
+                  <InputField
+                    type="text"
+                    placeholder="OTP"
                     value={otpInput}
                     onChange={(e) => setOtpInput(e.target.value)}
                     autoComplete="off"
                     maxLength={6}
-                    className="w-20 px-2 py-1.5 border border-slate-300 rounded-xl text-center font-mono tracking-widest text-xs focus:ring-2 focus:ring-indigo-500 text-slate-900"
+                    size="sm"
+                    className="w-20 text-center font-mono tracking-widest text-xs"
+                    containerClassName="w-20"
                   />
-                  <button 
-                    onClick={() => handleVerifyOtp(order.id)} 
-                    className="flex-1 bg-slate-900 text-white py-1.5 rounded-xl text-xs font-bold hover:bg-slate-800"
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => handleVerifyOtp(order.id)}
+                    className="flex-1"
                   >
                     Verify
-                  </button>
-                  <button 
-                    onClick={() => { setSelectedOrderForOtp(null); setOtpInput(''); }} 
-                    className="px-2.5 py-1.5 bg-slate-100 text-slate-500 rounded-xl hover:bg-slate-200 text-xs flex items-center justify-center"
+                  </Button>
+                  <Button
+                    variant="tertiary"
+                    size="sm"
+                    onClick={() => { setSelectedOrderForOtp(null); setOtpInput(''); }}
+                    className="px-2"
                   >
                     <IconX size={13} className="w-3.5 h-3.5" />
-                  </button>
+                  </Button>
                 </div>
               ) : (
-                <button 
-                  onClick={() => setSelectedOrderForOtp(order.id)} 
-                  className="w-full bg-slate-900 hover:bg-slate-800 text-white py-1.5 rounded-xl text-xs font-bold transition-colors shadow-sm flex items-center justify-center gap-1.5"
+                <Button
+                  variant="primary"
+                  size="sm"
+                  fullWidth
+                  onClick={() => setSelectedOrderForOtp(order.id)}
+                  leftIcon={<IconKey size={14} className="w-3.5 h-3.5 text-indigo-200" />}
                 >
-                  <IconKey size={14} className="w-3.5 h-3.5 text-indigo-200" />
-                  <span>Verify OTP</span>
-                </button>
+                  Verify OTP
+                </Button>
               )}
 
               {overdueInfo.isOverdue && (
-                <button 
-                  onClick={() => handleMarkNoShow(order)} 
-                  className="w-full bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 py-1.5 px-3 rounded-xl text-xs font-bold transition-colors text-center"
+                <Button
+                  variant="danger"
+                  size="sm"
+                  fullWidth
+                  onClick={() => handleMarkNoShow(order)}
                   title="Cancel order and add 1 strike to student"
                 >
-                  Cancel &amp; Strike (No-Show)
-                </button>
+                  Cancel & Strike (No-Show)
+                </Button>
               )}
             </div>
           )}
@@ -959,6 +999,306 @@ export default function StaffDashboard() {
       </div>
     );
   };
+
+  // Table Columns Definition for Orders
+  const orderColumns: Column<OrderWithDetails>[] = useMemo(() => [
+    {
+      key: 'order_number',
+      header: 'Order #',
+      sortable: true,
+      accessor: (row) => row.order_number,
+      render: (_, order) => (
+        <div>
+          <div className="flex items-center gap-1.5">
+            <span className="font-extrabold text-sm text-slate-900">#{order.order_number}</span>
+            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase ${
+              order.is_takeaway ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
+            }`}>
+              {order.is_takeaway ? 'TAKEAWAY' : 'DINE'}
+            </span>
+          </div>
+          <span className="text-[10px] text-slate-400 font-mono block mt-0.5">
+            ID: {order.profiles?.id_number || order.id.split('-')[0].toUpperCase()}
+          </span>
+        </div>
+      )
+    },
+    {
+      key: 'pickup_time',
+      header: 'Slot / Timing',
+      sortable: true,
+      accessor: (row) => row.pickup_time,
+      render: (_, order) => {
+        const overdueInfo = getOrderOverdueInfo(order);
+        const qrExpired = isQrExpired(order);
+        return (
+          <div>
+            <span className="font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full text-xs">
+              {formatPickupTime(order.pickup_time)}
+            </span>
+            {overdueInfo.isOverdue && (
+              <div className="text-[10px] font-bold text-amber-600 mt-1 flex items-center gap-1">
+                <IconAlertTriangle size={11} className="w-3 h-3 text-amber-600 shrink-0" />
+                <span>{overdueInfo.minutesOverdue}m overdue</span>
+              </div>
+            )}
+            {qrExpired && !overdueInfo.isOverdue && (
+              <div className="text-[10px] font-bold text-rose-600 mt-1">
+                QR Expired
+              </div>
+            )}
+          </div>
+        );
+      }
+    },
+    {
+      key: 'student',
+      header: 'Student',
+      sortable: true,
+      accessor: (row) => row.profiles?.name || 'Student',
+      render: (_, order) => (
+        <div>
+          <div className="font-medium text-slate-800">{order.profiles?.name || 'Student'}</div>
+          <div className="text-[11px] text-slate-400 font-mono">{order.profiles?.id_number || 'No ID'}</div>
+        </div>
+      )
+    },
+    {
+      key: 'items',
+      header: 'Items',
+      render: (_, order) => {
+        const totalItems = order.order_items.reduce((sum, i) => sum + i.quantity, 0);
+        return (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="font-medium bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded text-[10px] shrink-0">
+              {totalItems}x
+            </span>
+            <span className="text-slate-600 truncate max-w-[200px]" title={order.order_items.map(i => `${i.quantity}x ${i.menu_items?.name}`).join(', ')}>
+              {order.order_items.map(i => `${i.quantity}x ${i.menu_items?.name}`).join(', ')}
+            </span>
+          </div>
+        );
+      }
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      sortable: true,
+      accessor: (row) => row.status,
+      render: (_, order) => (
+        <span className={`px-2.5 py-1 rounded-full text-[10px] font-medium uppercase tracking-wide border ${
+          order.status === 'PLACED' ? 'bg-slate-100 text-slate-700 border-slate-300' :
+          order.status === 'ACCEPTED' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+          order.status === 'PREPARING' ? 'bg-orange-50 text-orange-700 border-orange-200' :
+          'bg-emerald-50 text-emerald-700 border-emerald-200'
+        }`}>
+          {order.status}
+        </span>
+      )
+    },
+    {
+      key: 'total',
+      header: 'Total',
+      sortable: true,
+      accessor: (row) => calculateOrderTotal(row).totalAmount,
+      render: (_, order) => {
+        const orderTotal = calculateOrderTotal(order);
+        return (
+          <span className="font-medium text-slate-800">
+            {formatCurrency(orderTotal.totalAmount)}
+          </span>
+        );
+      }
+    },
+    {
+      key: 'actions',
+      header: 'Quick Action',
+      align: 'right',
+      render: (_, order) => {
+        const overdueInfo = getOrderOverdueInfo(order);
+        return (
+          <div className="flex items-center justify-end gap-1.5">
+            {order.status === 'PLACED' && (
+              <>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={() => updateOrderStatus(order.id, 'ACCEPTED')}
+                  className="text-xs px-2.5 py-1"
+                >
+                  Accept
+                </Button>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  onClick={() => updateOrderStatus(order.id, 'REJECTED')}
+                  className="text-xs px-2 py-1"
+                >
+                  Reject
+                </Button>
+              </>
+            )}
+
+            {order.status === 'ACCEPTED' && (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => updateOrderStatus(order.id, 'PREPARING')}
+                leftIcon={<IconCooking size={13} className="w-3.5 h-3.5" />}
+                className="text-xs px-2.5 py-1"
+              >
+                Start Prep
+              </Button>
+            )}
+
+            {order.status === 'PREPARING' && (
+              <Button
+                size="sm"
+                variant="success"
+                onClick={() => updateOrderStatus(order.id, 'READY')}
+                leftIcon={<IconCheckCircle size={13} className="w-3.5 h-3.5" />}
+                className="text-xs px-2.5 py-1"
+              >
+                Mark Ready
+              </Button>
+            )}
+
+            {order.status === 'READY' && (
+              <>
+                {selectedOrderForOtp === order.id ? (
+                  <div className="flex items-center gap-1">
+                    <InputField
+                      type="text"
+                      placeholder="OTP"
+                      value={otpInput}
+                      onChange={(e) => setOtpInput(e.target.value)}
+                      autoComplete="off"
+                      maxLength={6}
+                      size="sm"
+                      className="w-16 px-1.5 py-1 text-center font-mono text-xs"
+                      containerClassName="w-16"
+                    />
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      onClick={() => handleVerifyOtp(order.id)}
+                      className="px-2 py-1 text-xs"
+                    >
+                      OK
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="tertiary"
+                      onClick={() => { setSelectedOrderForOtp(null); setOtpInput(''); }}
+                      className="p-1 text-slate-400 hover:text-slate-600"
+                    >
+                      <IconX size={12} />
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    onClick={() => setSelectedOrderForOtp(order.id)}
+                    leftIcon={<IconKey size={13} className="w-3 h-3 text-indigo-300" />}
+                    className="text-xs px-2.5 py-1"
+                  >
+                    Verify
+                  </Button>
+                )}
+
+                {overdueInfo.isOverdue && (
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    onClick={() => handleMarkNoShow(order)}
+                    title="Issue strike to student"
+                    className="text-xs px-2 py-1"
+                  >
+                    Strike
+                  </Button>
+                )}
+              </>
+            )}
+          </div>
+        );
+      }
+    }
+  ], [selectedOrderForOtp, otpInput, orders]);
+
+  // Table Columns Definition for Menu Items
+  const menuTableColumns: Column<MenuItem>[] = useMemo(() => [
+    {
+      key: 'name',
+      header: 'Item Name',
+      sortable: true,
+      accessor: (item) => item.name,
+      render: (_, item) => (
+        <div className="flex items-center gap-2">
+          <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${item.veg_non_veg === 'VEG' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+          <span className={`font-medium text-sm ${item.is_sold_out ? 'text-slate-400 line-through' : 'text-slate-800'}`}>
+            {item.name}
+          </span>
+        </div>
+      )
+    },
+    {
+      key: 'category',
+      header: 'Type',
+      sortable: true,
+      accessor: (item) => item.veg_non_veg,
+      render: (_, item) => (
+        <span className={`px-2 py-0.5 rounded-md text-[10px] font-medium uppercase tracking-wider ${
+          item.veg_non_veg === 'VEG'
+            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+            : 'bg-rose-50 text-rose-700 border border-rose-200'
+        }`}>
+          {item.veg_non_veg === 'VEG' ? 'Veg' : 'Non-Veg'}
+        </span>
+      )
+    },
+    {
+      key: 'price',
+      header: 'Price',
+      sortable: true,
+      accessor: (item) => Number(item.price || 0),
+      render: (_, item) => (
+        <span className="font-medium text-indigo-600 text-sm">
+          ₹{Number(item.price || 0).toFixed(0)}
+        </span>
+      )
+    },
+    {
+      key: 'status',
+      header: 'Availability',
+      sortable: true,
+      accessor: (item) => item.is_sold_out ? 'Sold Out' : 'Available',
+      render: (_, item) => (
+        <span className={`px-2.5 py-1 rounded-full text-[10px] font-medium uppercase tracking-wide border ${
+          item.is_sold_out
+            ? 'bg-rose-50 text-rose-700 border-rose-200'
+            : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+        }`}>
+          {item.is_sold_out ? 'Sold Out' : 'Available'}
+        </span>
+      )
+    },
+    {
+      key: 'action',
+      header: 'Quick Action',
+      align: 'right',
+      render: (_, item) => (
+        <Button
+          size="sm"
+          variant={item.is_sold_out ? 'success' : 'danger'}
+          onClick={() => handleToggleSoldOut(item.id, item.is_sold_out)}
+          className="text-xs px-3 py-1"
+        >
+          {item.is_sold_out ? 'Mark Available' : 'Sold Out'}
+        </Button>
+      )
+    }
+  ], []);
 
   // Guard: deleted / deactivated staff
   if (profile?.name?.startsWith('[DELETED]') || profile?.id_number === 'DELETED') {
@@ -989,7 +1329,7 @@ export default function StaffDashboard() {
       <div className="w-full max-w-2xl mx-auto mt-16 text-center">
         <div className="bg-amber-50 border border-amber-200 rounded-[2rem] p-10 flex flex-col items-center gap-4">
           <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center">
-            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-600"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-600"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
           </div>
           <h2 className="text-xl font-extrabold text-amber-900">No Cafeteria Assigned</h2>
           <p className="text-amber-700 text-sm max-w-sm">
@@ -1002,757 +1342,759 @@ export default function StaffDashboard() {
 
   return (
     <div className="w-full max-w-7xl mx-auto space-y-4 pb-20">
-      {/* Top Operations Header */}
-      <div className="bg-slate-900 rounded-[2rem] p-5 sm:p-7 text-white shadow-xl relative overflow-hidden">
-        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 pb-4 border-b border-slate-800">
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="px-3 py-1 bg-indigo-500/20 text-indigo-300 text-xs font-bold uppercase tracking-wider rounded-full border border-indigo-500/30">
-                Staff Operations Portal
-              </span>
-              <span className="px-3 py-1 bg-emerald-500/20 text-emerald-300 text-xs font-bold uppercase tracking-wider rounded-full border border-emerald-500/30">
-                🏪 Kitchen Terminal: {assignedCanteen?.name ?? 'Ground Floor Canteen'}
-              </span>
-              <span className="text-xs text-slate-400">Lunch Window: 11:30 AM – 2:30 PM</span>
-            </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-white mt-2 leading-tight">
-              Order Command Center
-            </h1>
-          </div>
-
-          {/* Quick Counter Pickup by OTP / QR Scan */}
-          <div className="w-full lg:w-auto flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setIsScannerOpen(true)}
-              className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-sm shrink-0 active:scale-95 border border-indigo-400/30"
-              title="Open camera to scan student's QR code"
-            >
-              <IconCamera size={16} className="w-4 h-4" />
-              <span>Scan QR</span>
-            </button>
-
-            <form onSubmit={handleQuickOtpSubmit} className="flex gap-2 bg-slate-800/90 p-1.5 rounded-2xl border border-slate-700 shadow-inner">
-              <input
-                type="text"
-                placeholder="Type 6-Digit OTP..."
-                value={quickOtpInput}
-                onChange={e => setQuickOtpInput(e.target.value)}
-                maxLength={6}
-                className="w-36 sm:w-44 px-3 py-2 bg-slate-900 border border-slate-700 text-white font-mono rounded-xl tracking-widest text-center focus:outline-none focus:ring-2 focus:ring-indigo-400 text-sm placeholder:text-slate-500 placeholder:tracking-normal placeholder:font-sans"
-              />
-              <button
-                type="submit"
-                disabled={quickOtpInput.trim().length !== 6 || quickOtpLoading}
-                className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm shrink-0"
-              >
-                <IconZap size={14} className="w-3.5 h-3.5" />
-                <span>{quickOtpLoading ? 'Verifying...' : 'Collect'}</span>
-              </button>
-            </form>
-          </div>
-        </div>
-
-        {/* Quick Toast Feedback for Top Bar OTP */}
-        {quickOtpToast && (
-          <div className={`mt-3 p-3 rounded-xl text-xs font-bold flex items-center justify-between gap-2 animate-in fade-in slide-in-from-top-1 ${
-            quickOtpToast.isError 
-              ? 'bg-rose-500/20 border border-rose-500/40 text-rose-200' 
-              : 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-200'
-          }`}>
-            <span>{quickOtpToast.message}</span>
-            <button onClick={() => setQuickOtpToast(null)} className="text-slate-400 hover:text-white p-1">
-              <IconX size={14} className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        )}
-
-        {/* Live Metrics Row */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
-          <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3">
-            <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Total Active</div>
-            <div className="text-2xl font-black text-white mt-0.5">{totalActiveCount}</div>
-          </div>
-          <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3">
-            <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Placed (New)</div>
-            <div className="text-2xl font-black text-indigo-400 mt-0.5">
-              {orders.filter(o => o.status === 'PLACED').length}
-            </div>
-          </div>
-          <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3">
-            <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">In Kitchen</div>
-            <div className="text-2xl font-black text-orange-400 mt-0.5">
-              {orders.filter(o => ['ACCEPTED', 'PREPARING'].includes(o.status)).length}
-            </div>
-          </div>
-          <div className={`rounded-xl p-3 border ${
-            totalOverdueCount > 0 
-              ? 'bg-amber-500/20 border-amber-500/40 text-amber-200' 
-              : 'bg-slate-800/60 border-slate-700/60'
-          }`}>
-            <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Ready / Overdue</div>
-            <div className="text-2xl font-black text-emerald-400 mt-0.5 flex items-center gap-2">
-              <span>{orders.filter(o => o.status === 'READY').length}</span>
-              {totalOverdueCount > 0 && (
-                <span className="text-xs bg-amber-500 text-slate-900 font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
-                  <IconAlertTriangle size={12} className="w-3 h-3 text-slate-900 shrink-0" />
-                  <span>{totalOverdueCount} No-Show</span>
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Control Bar: Slot Filters, Global Search, and View Controls */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-3">
-        {/* Top Controls: Search Bar & View Mode Switcher */}
-        <div className="flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3">
-          {/* Search Bar with Enhanced Contrast & Visibility */}
-          <div className="relative flex-1 group">
-            <div className="relative flex items-center bg-slate-100 hover:bg-slate-50/80 focus-within:bg-white border-2 border-slate-300 focus-within:border-indigo-600 focus-within:ring-4 focus-within:ring-indigo-100 rounded-2xl shadow-sm transition-all overflow-hidden px-4 py-2.5 gap-3">
-              <IconSearch size={18} className="w-5 h-5 text-indigo-600 shrink-0 pointer-events-none" />
-              <input
-                type="text"
-                placeholder="Search by Order Number, Student Name, Student ID, or OTP..."
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                className="w-full bg-transparent text-sm sm:text-base font-medium text-slate-900 placeholder:text-slate-500 placeholder:font-normal border-none outline-none focus:outline-none focus-visible:outline-none ring-0 focus:ring-0 p-0 pr-24"
-                style={{ caretColor: 'transparent' }}
-              />
-              <div className="absolute right-2.5 flex items-center gap-1.5">
-                {searchQuery && (
-                  <>
-                    <span className="hidden sm:inline-block px-2 py-0.5 bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold rounded-lg">
-                      {filteredOrders.length} {filteredOrders.length === 1 ? 'match' : 'matches'}
-                    </span>
-                    <button 
-                      type="button"
-                      onClick={() => setSearchQuery('')}
-                      className="px-2.5 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors active:scale-95 shadow-sm"
-                      title="Clear search query"
-                    >
-                      <IconX size={12} className="w-3 h-3 text-slate-600" />
-                      <span>Clear</span>
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 self-end md:self-auto shrink-0">
-            <button
-              onClick={() => setShowBatchSummary(!showBatchSummary)}
-              className={`px-3 py-2 rounded-xl text-xs font-bold transition-colors border flex items-center gap-1.5 ${
-                showBatchSummary 
-                  ? 'bg-indigo-50 text-indigo-700 border-indigo-200' 
-                  : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-              }`}
-            >
-              <IconCooking size={14} className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-              <span>Kitchen Batch Prep</span>
-            </button>
-
-            {/* Sort by Planned Prep Start Time Sequence */}
-            <button
-              onClick={() => setSortByPrepStart(!sortByPrepStart)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 ${
-                sortByPrepStart
-                  ? 'bg-amber-50 text-amber-900 border-amber-300 shadow-sm'
-                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-              }`}
-              title="Sort orders by Planned Preparation Start Time for kitchen cooking sequence"
-            >
-              <span className={sortByPrepStart ? 'text-amber-600' : 'text-slate-400'}>⚡</span>
-              <span>{sortByPrepStart ? 'Prep Sequence' : 'Default Order'}</span>
-            </button>
-
-            <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
-              <button
-                onClick={() => setViewMode('KANBAN')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                  viewMode === 'KANBAN' 
-                    ? 'bg-white text-indigo-600 shadow-sm' 
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                <IconKanban size={13} className="w-3.5 h-3.5" />
-                <span>Kanban</span>
-              </button>
-              <button
-                onClick={() => setViewMode('GRID')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                  viewMode === 'GRID' 
-                    ? 'bg-white text-indigo-600 shadow-sm' 
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                <IconGrid size={13} className="w-3.5 h-3.5" />
-                <span>Grid</span>
-              </button>
-              <button
-                onClick={() => setViewMode('LIST')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                  viewMode === 'LIST' 
-                    ? 'bg-white text-indigo-600 shadow-sm' 
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                <LayoutList size={13} className="w-3.5 h-3.5" />
-                <span>Compact List</span>
-              </button>
-            </div>
-
-            {viewMode === 'KANBAN' && (
-              <button
-                onClick={() => setCompactKanban(!compactKanban)}
-                className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all border ${
-                  compactKanban 
-                    ? 'bg-indigo-50 text-indigo-700 border-indigo-200' 
-                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                }`}
-                title="Toggle card compactness"
-              >
-                {compactKanban ? 'Dense' : 'Normal'}
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Cross-Slot Search Notification */}
-        {searchQuery.trim() && otherSlotMatchesCount > 0 && selectedSlot !== 'ALL' && (
-          <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-indigo-50 border border-indigo-200 rounded-xl text-xs font-bold text-indigo-900 animate-in fade-in">
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-indigo-600 animate-pulse"></span>
-              <span>
-                Found {allSlotMatches.length} matching {allSlotMatches.length === 1 ? 'order' : 'orders'} in other lunch slots.
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setSelectedSlot('ALL')}
-              className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors shadow-sm shrink-0"
-            >
-              Switch to All Slots ({allSlotMatches.length})
-            </button>
-          </div>
-        )}
-
-        {/* Lunch Slot Tabs */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
-          <button
-            onClick={() => setSelectedSlot('ALL')}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold shrink-0 transition-all border flex items-center gap-1.5 ${
-              selectedSlot === 'ALL'
-                ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
-                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-            }`}
-          >
-            <span>All Slots</span>
-            <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${selectedSlot === 'ALL' ? 'bg-slate-700 text-white' : 'bg-slate-200 text-slate-700'}`}>
-              {orders.length}
-            </span>
-          </button>
-
-          {activeLunchSlots.map(slot => {
-            const count = slotCounts[slot.value] || 0;
-            const isSelected = selectedSlot === slot.value;
-            return (
-              <button
-                key={slot.value}
-                onClick={() => setSelectedSlot(slot.value)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 transition-all border flex items-center gap-1.5 ${
-                  isSelected
-                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                    : count > 0
-                      ? 'bg-indigo-50/70 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
-                      : 'bg-slate-50 text-slate-400 border-slate-200 opacity-70'
-                }`}
-              >
-                <span>{slot.rangeLabel || slot.label}</span>
-                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
-                  isSelected 
-                    ? 'bg-indigo-800 text-white' 
-                    : count > 0 
-                      ? 'bg-indigo-200 text-indigo-900' 
-                      : 'bg-slate-200 text-slate-500'
-                }`}>
-                  {count}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Live Kitchen Batch Preparation Summary */}
-      {showBatchSummary && (
-        <div className="bg-gradient-to-r from-slate-900 to-indigo-950 rounded-2xl p-4 sm:p-5 text-white shadow-sm border border-indigo-900/40">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-3">
-            <div className="flex items-center gap-2">
-              <IconCooking size={20} className="w-5 h-5 text-indigo-300 shrink-0" />
-              <h3 className="font-extrabold text-sm sm:text-base text-white">
-                Live Kitchen Prep Summary {selectedSlot !== 'ALL' ? `for ${formatPickupTime(selectedSlot)}` : '(All Filtered Orders)'}
-              </h3>
-            </div>
-            <span className="text-xs text-indigo-300 font-medium">
-              {batchPrepSummary.reduce((sum, item) => sum + item[1].count, 0)} total meal items to cook &amp; pack
-            </span>
-          </div>
-
-          {batchPrepSummary.length === 0 ? (
-            <div className="text-xs text-slate-400 py-2">No active items in the preparation queue for this selection.</div>
-          ) : (
-            <div className="flex flex-wrap gap-2.5">
-              {batchPrepSummary.map(([itemName, data]) => (
-                <div 
-                  key={itemName} 
-                  className="flex items-center gap-2.5 bg-white/10 backdrop-blur-sm border border-white/15 px-4 py-2.5 rounded-2xl shadow-sm hover:bg-white/15 transition-colors"
-                >
-                  <span className={`w-3 h-3 rounded-full shrink-0 ${data.veg ? 'bg-emerald-400' : 'bg-rose-400'}`}></span>
-                  <span className="text-sm font-extrabold text-white">{itemName}</span>
-                  <span className="bg-indigo-500 text-white font-mono text-sm font-black px-2.5 py-1 rounded-md shadow-sm">
-                    {data.count}x
+      {isMenuView ? (
+        /* Dedicated Quick Menu Availability View */
+        <div className="space-y-4">
+          <div className="bg-white border border-slate-200 rounded-[2rem] p-6 sm:p-8 shadow-xs">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-slate-100">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-indigo-50 text-indigo-700 border border-indigo-200">
+                    Terminal Inventory
+                  </span>
+                  <span className="text-xs text-slate-400">
+                    {assignedCanteen?.name ?? 'Ground Floor Canteen'}
                   </span>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Main Order Pipeline: Kanban vs Grid View */}
-      {loading && orders.length === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-[2rem] p-12 text-center text-slate-500 shadow-sm">
-          Loading live order queue...
-        </div>
-      ) : filteredOrders.length === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-[2rem] p-12 text-center text-slate-500 shadow-sm space-y-3">
-          <IconPackage size={38} className="w-10 h-10 text-slate-300 mx-auto" />
-          <div className="font-extrabold text-slate-800 text-lg">
-            {searchQuery.trim() ? 'No Matching Orders Found' : 'No Orders in Queue'}
-          </div>
-          <div className="text-sm text-slate-500 max-w-md mx-auto">
-            {searchQuery.trim() ? (
-              <>
-                No active orders matched <span className="font-semibold text-slate-800 font-mono">"{searchQuery}"</span>
-                {selectedSlot !== 'ALL' && ` in the ${formatPickupTime(selectedSlot)} slot`}.
-                <br />
-                <span className="text-xs text-slate-400 mt-1.5 block">
-                  Staff can search by Order Number (e.g. #4), Student Name, Student ID (including leading zeros), or 6-digit OTP.
-                </span>
-              </>
-            ) : selectedSlot !== 'ALL' ? (
-              `No orders scheduled for the ${formatPickupTime(selectedSlot)} slot.`
-            ) : (
-              'There are currently no active orders in the kitchen queue.'
-            )}
-          </div>
-
-          {/* Switch to all slots action if matches exist across other slots */}
-          {searchQuery.trim() && otherSlotMatchesCount > 0 && selectedSlot !== 'ALL' && (
-            <div className="pt-2">
-              <button
-                type="button"
-                onClick={() => setSelectedSlot('ALL')}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all flex items-center gap-2 mx-auto"
-              >
-                <span>View {allSlotMatches.length} matching {allSlotMatches.length === 1 ? 'order' : 'orders'} in All Slots</span>
-              </button>
-            </div>
-          )}
-
-          {(searchQuery || selectedSlot !== 'ALL') && (
-            <div className="pt-1">
-              <button 
-                type="button"
-                onClick={() => { setSearchQuery(''); setSelectedSlot('ALL'); }}
-                className="text-xs font-bold text-slate-600 hover:text-indigo-600 underline"
-              >
-                Reset Filters &amp; Clear Search
-              </button>
-            </div>
-          )}
-        </div>
-      ) : viewMode === 'KANBAN' ? (
-        /* 3-Column Kanban Board */
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-          {/* Column 1: Placed / Incoming */}
-          <div className="bg-slate-100/80 border border-slate-200 rounded-2xl p-3 sm:p-4 flex flex-col min-h-[300px]">
-            <div className="flex justify-between items-center mb-3 px-1">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-slate-500"></span>
-                <h3 className="font-extrabold text-sm text-slate-800 uppercase tracking-wide">
-                  Placed (New)
-                </h3>
-                <span className="bg-slate-200 text-slate-700 text-xs font-black px-2 py-0.5 rounded-full">
-                  {placedOrders.length}
-                </span>
+                <h2 className="text-2xl font-extrabold text-slate-800 tracking-tight">
+                  Quick Menu Availability
+                </h2>
+                <p className="text-xs sm:text-sm text-slate-500 mt-1">
+                  Toggle sold out status instantaneously across student devices. Changes sync live.
+                </p>
               </div>
-              {placedOrders.length > 1 && (
-                <button
-                  onClick={() => bulkAcceptOrders(placedOrders.map(o => o.id))}
-                  className="text-[11px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2 py-1 rounded-lg transition-colors flex items-center gap-1"
-                >
-                  <IconZap size={12} className="w-3 h-3 text-indigo-600" />
-                  <span>Accept All ({placedOrders.length})</span>
-                </button>
-              )}
-            </div>
 
-            <div className="space-y-3 flex-1 overflow-y-auto max-h-[75vh] pr-1">
-              {placedOrders.length === 0 ? (
-                <div className="text-center text-xs text-slate-400 py-10">No incoming new orders</div>
-              ) : (
-                placedOrders.map(renderOrderCard)
-              )}
-            </div>
-          </div>
-
-          {/* Column 2: In Kitchen Queue (Accepted & Preparing) */}
-          <div className="bg-orange-50/50 border border-orange-200/70 rounded-2xl p-3 sm:p-4 flex flex-col min-h-[300px]">
-            <div className="flex justify-between items-center mb-3 px-1">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-orange-500"></span>
-                <h3 className="font-extrabold text-sm text-orange-950 uppercase tracking-wide">
-                  Kitchen Queue
-                </h3>
-                <span className="bg-orange-200 text-orange-900 text-xs font-black px-2 py-0.5 rounded-full">
-                  {kitchenOrders.length}
-                </span>
+              {/* Live Metric Pills */}
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <div className="px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-center">
+                  <div className="text-[10px] font-semibold text-slate-400 uppercase">Total Items</div>
+                  <div className="text-base font-extrabold text-slate-800">{menuItems.length}</div>
+                </div>
+                <div className="px-3.5 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-center">
+                  <div className="text-[10px] font-semibold text-emerald-600 uppercase">Available</div>
+                  <div className="text-base font-extrabold text-emerald-700">
+                    {menuItems.filter(m => !m.is_sold_out).length}
+                  </div>
+                </div>
+                <div className="px-3.5 py-2 rounded-xl bg-rose-50 border border-rose-200 text-center">
+                  <div className="text-[10px] font-semibold text-rose-600 uppercase">Sold Out</div>
+                  <div className="text-base font-extrabold text-rose-700">
+                    {menuItems.filter(m => m.is_sold_out).length}
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div className="space-y-3 flex-1 overflow-y-auto max-h-[75vh] pr-1">
-              {kitchenOrders.length === 0 ? (
-                <div className="text-center text-xs text-slate-400 py-10">Kitchen queue is clear</div>
-              ) : (
-                kitchenOrders.map(renderOrderCard)
-              )}
-            </div>
-          </div>
+            {/* Search and Filters Toolbar */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-6 pb-2">
+              <InputField
+                placeholder="Search menu items by name..."
+                value={menuSearch}
+                onChange={e => setMenuSearch(e.target.value)}
+                clearable
+                onClear={() => setMenuSearch('')}
+                leftIcon={<SearchIcon size={16} className="text-slate-400" />}
+                size="sm"
+                containerClassName="flex-1 max-w-md"
+              />
 
-          {/* Column 3: Ready for Collection */}
-          <div className="bg-emerald-50/50 border border-emerald-200/70 rounded-2xl p-3 sm:p-4 flex flex-col min-h-[300px]">
-            <div className="flex justify-between items-center mb-3 px-1">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                <h3 className="font-extrabold text-sm text-emerald-950 uppercase tracking-wide">
-                  Ready at Counter
-                </h3>
-                <span className="bg-emerald-200 text-emerald-900 text-xs font-black px-2 py-0.5 rounded-full">
-                  {readyOrders.length}
-                </span>
-              </div>
-              {readyOrders.some(o => getOrderOverdueInfo(o).isOverdue) && (
-                <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200 animate-pulse flex items-center gap-1">
-                  <IconAlertTriangle size={11} className="w-3 h-3 text-amber-700 shrink-0" />
-                  <span>No-Show Alerts</span>
-                </span>
-              )}
-            </div>
-
-            <div className="space-y-3 flex-1 overflow-y-auto max-h-[75vh] pr-1">
-              {readyOrders.length === 0 ? (
-                <div className="text-center text-xs text-slate-400 py-10">No orders awaiting pickup</div>
-              ) : (
-                readyOrders.map(renderOrderCard)
-              )}
-            </div>
-          </div>
-        </div>
-      ) : viewMode === 'LIST' ? (
-        /* High-Density Live Orders Table */
-        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-extrabold uppercase tracking-wider text-slate-500">
-                  <th className="py-3 px-3.5">Order #</th>
-                  <th className="py-3 px-3.5">Slot / Timing</th>
-                  <th className="py-3 px-3.5">Student</th>
-                  <th className="py-3 px-3.5">Items</th>
-                  <th className="py-3 px-3.5">Order Status</th>
-                  <th className="py-3 px-3.5">Payment</th>
-                  <th className="py-3 px-3.5 text-right">Total</th>
-                  <th className="py-3 px-3.5 text-right">Quick Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-xs">
-                {filteredOrders.map(order => {
-                  const overdueInfo = getOrderOverdueInfo(order);
-                  const qrExpired = isQrExpired(order);
-                  const orderTotal = calculateOrderTotal(order);
-                  const payInfo = getOrderPaymentStatus(order);
-
-                  return (
-                    <tr 
-                      key={order.id} 
-                      className={`hover:bg-slate-50/80 transition-colors ${
-                        overdueInfo.isOverdue ? 'bg-amber-50/30' : ''
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* View Mode Toggle */}
+                <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setMenuViewMode('GRID')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${menuViewMode === 'GRID'
+                        ? 'bg-white text-indigo-600 shadow-2xs'
+                        : 'text-slate-500 hover:text-slate-800'
                       }`}
+                  >
+                    <IconGrid size={13} className="w-3.5 h-3.5" />
+                    <span>Grid</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMenuViewMode('TABLE')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${menuViewMode === 'TABLE'
+                        ? 'bg-white text-indigo-600 shadow-2xs'
+                        : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                  >
+                    <LayoutList size={13} className="w-3.5 h-3.5" />
+                    <span>Table</span>
+                  </button>
+                </div>
+
+                {/* Filter Pills */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {[
+                    { key: 'ALL', label: 'All Items' },
+                    { key: 'AVAILABLE', label: 'Available' },
+                    { key: 'SOLD_OUT', label: 'Sold Out' },
+                    { key: 'VEG', label: 'Veg' },
+                    { key: 'NON_VEG', label: 'Non-Veg' }
+                  ].map(tab => (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      onClick={() => setMenuFilter(tab.key as any)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${menuFilter === tab.key
+                          ? 'bg-indigo-600 text-white shadow-2xs'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
                     >
-                      <td className="py-3 px-3.5 whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-extrabold text-sm text-slate-900">#{order.order_number}</span>
-                          <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded uppercase ${
-                            order.is_takeaway ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
-                          }`}>
-                            {order.is_takeaway ? 'TAKEAWAY' : 'DINE'}
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Menu Items View: Grid or Table */}
+            <div className="mt-6">
+              {menuViewMode === 'TABLE' ? (
+                <Table<MenuItem>
+                  data={filteredMenuItems}
+                  columns={menuTableColumns}
+                  keyExtractor={(item) => item.id}
+                  pagination={true}
+                  pageSize={10}
+                  emptyMessage="No menu items match your search or filter"
+                  emptyIcon={<Utensils size={32} className="text-slate-300" />}
+                  hoverable={true}
+                />
+              ) : filteredMenuItems.length === 0 ? (
+                <div className="text-center py-12 bg-slate-50 rounded-2xl border border-slate-100">
+                  <Utensils size={32} className="mx-auto text-slate-300 mb-2" />
+                  <p className="text-sm font-semibold text-slate-600">No menu items match your search or filter</p>
+                  {(menuSearch || menuFilter !== 'ALL') && (
+                    <Button
+                      variant="tertiary"
+                      size="sm"
+                      onClick={() => { setMenuSearch(''); setMenuFilter('ALL'); }}
+                      className="mt-2 text-indigo-600"
+                    >
+                      Clear search &amp; filters
+                    </Button>
+                  )}
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5">
+                  {filteredMenuItems.map(item => (
+                    <div
+                      key={item.id}
+                      className={`flex flex-col justify-between p-4 rounded-2xl border transition-all text-center ${item.is_sold_out
+                          ? 'bg-slate-50 border-slate-200 opacity-65'
+                          : 'bg-white border-slate-200/90 shadow-2xs hover:shadow-sm'
+                        }`}
+                    >
+                      <div>
+                        <div className="flex items-center justify-center gap-1.5 mb-2">
+                          <span className={`w-2 h-2 rounded-full ${item.veg_non_veg === 'VEG' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                            {item.veg_non_veg === 'VEG' ? 'Veg' : 'Non-Veg'}
                           </span>
                         </div>
-                        <span className="text-[10px] text-slate-400 font-mono block">
-                          ID: {order.profiles?.id_number || order.id.split('-')[0].toUpperCase()}
-                        </span>
-                      </td>
-
-                      <td className="py-3 px-3.5 whitespace-nowrap">
-                        <span className="font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full text-xs">
-                          {formatPickupTime(order.pickup_time)}
-                        </span>
-                        {overdueInfo.isOverdue && (
-                          <div className="text-[10px] font-bold text-amber-600 mt-1 flex items-center gap-1">
-                            <IconAlertTriangle size={11} className="w-3 h-3 text-amber-600 shrink-0" />
-                            <span>{overdueInfo.minutesOverdue}m overdue</span>
-                          </div>
-                        )}
-                        {qrExpired && !overdueInfo.isOverdue && (
-                          <div className="text-[10px] font-bold text-rose-600 mt-1">
-                            QR Expired
-                          </div>
-                        )}
-                      </td>
-
-                      <td className="py-3 px-3.5 whitespace-nowrap">
-                        <div className="font-semibold text-slate-800">{order.profiles?.name || 'Student'}</div>
-                        <div className="text-[11px] text-slate-400 font-mono">{order.profiles?.id_number || 'No ID'}</div>
-                      </td>
-
-                      <td className="py-3 px-3.5 max-w-xs">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="font-bold bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded text-[10px] shrink-0">
-                            {orderTotal.itemCount}x
-                          </span>
-                          <span className="text-slate-600 truncate max-w-[180px]" title={order.order_items.map(i => `${i.quantity}x ${i.menu_items?.name}`).join(', ')}>
-                            {order.order_items.map(i => `${i.quantity}x ${i.menu_items?.name}`).join(', ')}
-                          </span>
+                        <div className={`text-xs sm:text-sm font-medium leading-snug ${item.is_sold_out ? 'text-slate-400 line-through' : 'text-slate-800'}`}>
+                          {item.name}
                         </div>
-                      </td>
+                        <div className="text-xs font-black text-indigo-600 mt-1">
+                          ₹{Number(item.price || 0).toFixed(0)}
+                        </div>
+                      </div>
 
-                      <td className="py-3 px-3.5 whitespace-nowrap">
-                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wide border ${
-                          order.status === 'PLACED' ? 'bg-slate-100 text-slate-700 border-slate-300' :
-                          order.status === 'ACCEPTED' ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                          order.status === 'PREPARING' ? 'bg-orange-50 text-orange-700 border-orange-200' :
-                          'bg-emerald-50 text-emerald-700 border-emerald-200'
-                        }`}>
-                          {order.status}
-                        </span>
-                      </td>
-
-                      <td className="py-3 px-3.5 whitespace-nowrap">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border ${payInfo.badgeClass}`}>
-                          {payInfo.label}
-                        </span>
-                      </td>
-
-                      <td className="py-3 px-3.5 text-right whitespace-nowrap font-extrabold text-slate-900">
-                        {formatCurrency(orderTotal.totalAmount)}
-                      </td>
-
-                      <td className="py-3 px-3.5 text-right whitespace-nowrap">
-                        {order.status === 'PLACED' && (
-                          <div className="flex justify-end gap-1.5">
-                            <button
-                              onClick={() => updateOrderStatus(order.id, 'ACCEPTED')}
-                              className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors"
-                            >
-                              Accept
-                            </button>
-                            <button
-                              onClick={() => updateOrderStatus(order.id, 'REJECTED')}
-                              className="px-2 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-lg text-xs font-bold transition-colors"
-                            >
-                              Reject
-                            </button>
-                          </div>
-                        )}
-
-                        {order.status === 'ACCEPTED' && (
-                          <button
-                            onClick={() => updateOrderStatus(order.id, 'PREPARING')}
-                            className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 ml-auto"
-                          >
-                            <IconCooking size={13} className="w-3.5 h-3.5" />
-                            <span>Start Prep</span>
-                          </button>
-                        )}
-
-                        {order.status === 'PREPARING' && (
-                          <button
-                            onClick={() => updateOrderStatus(order.id, 'READY')}
-                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 ml-auto"
-                          >
-                            <IconCheckCircle size={13} className="w-3.5 h-3.5" />
-                            <span>Mark Ready</span>
-                          </button>
-                        )}
-
-                        {order.status === 'READY' && (
-                          <div className="flex items-center justify-end gap-1.5">
-                            {selectedOrderForOtp === order.id ? (
-                              <div className="flex items-center gap-1">
-                                <input
-                                  type="text"
-                                  placeholder="OTP"
-                                  value={otpInput}
-                                  onChange={(e) => setOtpInput(e.target.value)}
-                                  autoComplete="off"
-                                  maxLength={6}
-                                  className="w-16 px-1.5 py-1 border border-slate-300 rounded-lg text-center font-mono text-xs focus:ring-1 focus:ring-indigo-500 text-slate-900"
-                                />
-                                <button
-                                  onClick={() => handleVerifyOtp(order.id)}
-                                  className="px-2 py-1 bg-slate-900 text-white rounded-lg text-xs font-bold hover:bg-slate-800"
-                                >
-                                  OK
-                                </button>
-                                <button
-                                  onClick={() => { setSelectedOrderForOtp(null); setOtpInput(''); }}
-                                  className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
-                                >
-                                  <IconX size={12} />
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() => setSelectedOrderForOtp(order.id)}
-                                className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1"
-                              >
-                                <IconKey size={13} className="w-3 h-3 text-indigo-300" />
-                                <span>Verify</span>
-                              </button>
-                            )}
-
-                            {overdueInfo.isOverdue && (
-                              <button
-                                onClick={() => handleMarkNoShow(order)}
-                                className="px-2 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-bold transition-colors"
-                                title="Issue strike to student"
-                              >
-                                Strike
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                      <Button
+                        variant={item.is_sold_out ? 'success' : 'danger'}
+                        size="sm"
+                        fullWidth
+                        onClick={() => handleToggleSoldOut(item.id, item.is_sold_out)}
+                        className="mt-3 text-[11px] py-1.5"
+                      >
+                        {item.is_sold_out ? 'Mark Available' : 'Sold Out'}
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       ) : (
-        /* Compact Grid View */
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredOrders.map(renderOrderCard)}
-        </div>
-      )}
-
-      {/* Quick Menu Item Availability Section */}
-      <div className="bg-white border border-slate-200 rounded-[2rem] p-5 sm:p-7 shadow-sm mt-6">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
-          <div>
-            <h3 className="font-extrabold text-xl text-slate-800">Quick Menu Availability</h3>
-            <p className="text-xs text-slate-500 mt-0.5">Toggle sold out status instantaneously across student devices</p>
-          </div>
-          <div className="flex items-center gap-2 self-stretch sm:self-auto justify-between sm:justify-end">
-            <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full whitespace-nowrap">
-              {menuItems.filter(m => !m.is_sold_out).length} / {menuItems.length} Available
-            </span>
-          </div>
-        </div>
-
-        {menuItems.length > 6 && (
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-4 pb-3 border-b border-slate-100">
-            <div className="flex items-center gap-1.5">
-              {(['ALL', 'VEG', 'NON_VEG', 'SOLD_OUT'] as const).map((filter) => (
-                <button
-                  key={filter}
-                  onClick={() => setMenuFilter(filter)}
-                  className={`text-xs px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
-                    menuFilter === filter
-                      ? 'bg-indigo-600 text-white shadow-xs'
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                  }`}
-                >
-                  {filter === 'ALL' ? 'All' : filter === 'VEG' ? 'Veg' : filter === 'NON_VEG' ? 'Non-Veg' : 'Sold Out'}
-                </button>
-              ))}
-            </div>
-            <div className="relative min-w-[180px]">
-              <IconSearch className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="Search menu..."
-                value={menuSearch}
-                onChange={(e) => setMenuSearch(e.target.value)}
-                className="w-full pl-8 pr-3 py-1 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              />
-            </div>
-          </div>
-        )}
-
-        <div className="overflow-y-auto max-h-[310px] pr-1.5 custom-scrollbar">
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-            {filteredMenuItems.map(item => (
-              <div 
-                key={item.id} 
-                className={`flex flex-col justify-between p-3.5 rounded-2xl border transition-all text-center ${
-                  item.is_sold_out ? 'bg-slate-50 border-slate-200 opacity-60' : 'bg-white border-slate-200 shadow-sm'
-                }`}
-              >
-                <div>
-                  <div className="flex items-center justify-center gap-1.5 mb-1.5">
-                    <span className={`w-2 h-2 rounded-full ${item.veg_non_veg === 'VEG' ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
-                    <span className="text-[10px] font-bold text-slate-400 uppercase">{item.veg_non_veg === 'VEG' ? 'Veg' : 'Non-Veg'}</span>
-                  </div>
-                  <div className={`text-xs font-bold leading-tight ${item.is_sold_out ? 'text-slate-400 line-through' : 'text-slate-800'}`}>
-                    {item.name}
-                  </div>
-                  <div className="text-[11px] font-extrabold text-indigo-600 mt-1">₹{Number(item.price || 0).toFixed(0)}</div>
+        <>
+          {/* Top Operations Header */}
+          <div className="bg-slate-900 rounded-[2rem] p-5 sm:p-7 text-white shadow-xl relative overflow-hidden">
+            <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 pb-4 border-b border-slate-800">
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="px-3 py-1 bg-indigo-500/20 text-indigo-300 text-xs font-bold uppercase tracking-wider rounded-full border border-indigo-500/30">
+                    Staff Operations Portal
+                  </span>
+                  <span className="px-3 py-1 bg-emerald-500/20 text-emerald-300 text-xs font-bold uppercase tracking-wider rounded-full border border-emerald-500/30 inline-flex items-center gap-1.5">
+                    <Store size={13} className="shrink-0" />
+                    <span>Kitchen Terminal: {assignedCanteen?.name ?? 'Ground Floor Canteen'}</span>
+                  </span>
+                  <span className="text-xs text-slate-400">Lunch Window: 11:30 AM – 2:30 PM</span>
                 </div>
+                <h1 className="text-2xl sm:text-3xl font-extrabold text-white mt-2 leading-tight">
+                  Order Command Center
+                </h1>
+              </div>
 
-                <button 
-                  onClick={() => handleToggleSoldOut(item.id, item.is_sold_out)}
-                  className={`mt-3 w-full text-[11px] py-1.5 rounded-xl font-bold transition-transform active:scale-95 border cursor-pointer ${
-                    item.is_sold_out 
-                      ? 'bg-slate-200 text-slate-700 hover:bg-slate-300 border-slate-300' 
-                      : 'bg-rose-50 text-rose-600 hover:bg-rose-100 border-rose-200'
-                  }`}
-                >
-                  {item.is_sold_out ? 'Mark Available' : 'Sold Out'}
+              {/* Quick Counter Pickup by OTP */}
+              <div className="w-full lg:w-auto flex items-stretch sm:items-center">
+                <form onSubmit={handleQuickOtpSubmit} className="flex gap-2 bg-slate-800/90 p-1.5 rounded-2xl border border-slate-700 shadow-inner items-center">
+                  <InputField
+                    placeholder="6-Digit OTP..."
+                    value={quickOtpInput}
+                    onChange={e => setQuickOtpInput(e.target.value)}
+                    maxLength={6}
+                    size="sm"
+                    fullWidth={false}
+                    containerClassName="w-36 sm:w-44"
+                    className="bg-slate-900 border-slate-700 text-white font-mono rounded-xl tracking-widest text-center text-xs placeholder:text-slate-500 placeholder:tracking-normal placeholder:font-sans focus:border-indigo-400 focus:ring-indigo-400/30"
+                  />
+                  <Button
+                    type="submit"
+                    variant="success"
+                    size="sm"
+                    disabled={quickOtpInput.trim().length !== 6 || quickOtpLoading}
+                    loading={quickOtpLoading}
+                    leftIcon={<IconZap size={14} className="w-3.5 h-3.5" />}
+                    className="rounded-xl shrink-0"
+                  >
+                    Collect
+                  </Button>
+                </form>
+              </div>
+            </div>
+
+            {/* Quick Toast Feedback for Top Bar OTP */}
+            {quickOtpToast && (
+              <div className={`mt-3 p-3 rounded-xl text-xs font-bold flex items-center justify-between gap-2 animate-in fade-in slide-in-from-top-1 ${quickOtpToast.isError
+                  ? 'bg-rose-500/20 border border-rose-500/40 text-rose-200'
+                  : 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-200'
+                }`}>
+                <div className="flex items-center gap-2">
+                  {quickOtpToast.isError ? (
+                    <IconAlertTriangle size={15} className="shrink-0 text-rose-400" />
+                  ) : (
+                    <IconCheckCircle size={15} className="shrink-0 text-emerald-400" />
+                  )}
+                  <span>{quickOtpToast.message}</span>
+                </div>
+                <button onClick={() => setQuickOtpToast(null)} className="text-slate-400 hover:text-white p-1">
+                  <IconX size={14} className="w-3.5 h-3.5" />
                 </button>
               </div>
-            ))}
+            )}
+
+            {/* Live Metrics Row */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
+              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3">
+                <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Total Active</div>
+                <div className="text-2xl font-black text-white mt-0.5">{totalActiveCount}</div>
+              </div>
+              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3">
+                <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Placed (New)</div>
+                <div className="text-2xl font-black text-indigo-400 mt-0.5">
+                  {orders.filter(o => o.status === 'PLACED').length}
+                </div>
+              </div>
+              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3">
+                <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">In Kitchen</div>
+                <div className="text-2xl font-black text-orange-400 mt-0.5">
+                  {orders.filter(o => ['ACCEPTED', 'PREPARING'].includes(o.status)).length}
+                </div>
+              </div>
+              <div className={`rounded-xl p-3 border ${totalOverdueCount > 0
+                  ? 'bg-amber-500/20 border-amber-500/40 text-amber-200'
+                  : 'bg-slate-800/60 border-slate-700/60'
+                }`}>
+                <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Ready / Overdue</div>
+                <div className="text-2xl font-black text-emerald-400 mt-0.5 flex items-center gap-2">
+                  <span>{orders.filter(o => o.status === 'READY').length}</span>
+                  {totalOverdueCount > 0 && (
+                    <span className="text-xs bg-amber-500 text-slate-900 font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <IconAlertTriangle size={12} className="w-3 h-3 text-slate-900 shrink-0" />
+                      <span>{totalOverdueCount} No-Show</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
 
-          {filteredMenuItems.length === 0 && (
-            <div className="text-center py-8 text-sm text-slate-400">
-              No matching menu items found.
+          {/* Control Bar: Slot Filters, Global Search, and View Controls */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-3">
+            {/* Top Controls: Search Bar & View Mode Switcher */}
+            <div className="flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3">
+              {/* Search Bar with Enhanced Contrast & Visibility */}
+              <div className="relative flex-1 group">
+                <div className="relative flex items-center bg-slate-100 hover:bg-slate-50/80 focus-within:bg-white border-2 border-slate-300 focus-within:border-indigo-600 focus-within:ring-4 focus-within:ring-indigo-100 rounded-2xl shadow-sm transition-all overflow-hidden px-4 py-2.5 gap-3">
+                  <IconSearch size={18} className="w-5 h-5 text-indigo-600 shrink-0 pointer-events-none" />
+                  <input
+                    type="text"
+                    placeholder="Search by Order Number, Student Name, Student ID, or OTP..."
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    className="w-full bg-transparent text-sm sm:text-base font-medium text-slate-900 placeholder:text-slate-500 placeholder:font-normal border-none outline-none focus:outline-none focus-visible:outline-none ring-0 focus:ring-0 p-0 pr-24"
+                    style={{ caretColor: 'transparent' }}
+                  />
+                  <div className="absolute right-2.5 flex items-center gap-1.5">
+                    {searchQuery && (
+                      <>
+                        <span className="hidden sm:inline-block px-2 py-0.5 bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold rounded-lg">
+                          {filteredOrders.length} {filteredOrders.length === 1 ? 'match' : 'matches'}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setSearchQuery('')}
+                          className="px-2.5 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors active:scale-95 shadow-sm"
+                          title="Clear search query"
+                        >
+                          <IconX size={12} className="w-3 h-3 text-slate-600" />
+                          <span>Clear</span>
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 self-end md:self-auto shrink-0">
+                <button
+                  onClick={() => setShowBatchSummary(!showBatchSummary)}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold transition-colors border flex items-center gap-1.5 ${showBatchSummary
+                      ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                      : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                >
+                  <IconCooking size={14} className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                  <span>Kitchen Batch Prep</span>
+                </button>
+
+                {/* Sort by Planned Prep Start Time Sequence */}
+                <button
+                  onClick={() => setSortByPrepStart(!sortByPrepStart)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 ${sortByPrepStart
+                      ? 'bg-amber-50 text-amber-900 border-amber-300 shadow-sm'
+                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  title="Sort orders by Planned Preparation Start Time for kitchen cooking sequence"
+                >
+                  <span className={sortByPrepStart ? 'text-amber-600' : 'text-slate-400'}>⚡</span>
+                  <span>{sortByPrepStart ? 'Prep Sequence' : 'Default Order'}</span>
+                </button>
+
+                <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('KANBAN')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${viewMode === 'KANBAN'
+                        ? 'bg-white text-indigo-600 shadow-xs'
+                        : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                  >
+                    <IconKanban size={13} className="w-3.5 h-3.5" />
+                    <span>Kanban</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('GRID')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${viewMode === 'GRID'
+                        ? 'bg-white text-indigo-600 shadow-xs'
+                        : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                  >
+                    <IconGrid size={13} className="w-3.5 h-3.5" />
+                    <span>Grid</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('LIST')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${viewMode === 'LIST'
+                        ? 'bg-white text-indigo-600 shadow-xs'
+                        : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                  >
+                    <LayoutList size={13} className="w-3.5 h-3.5" />
+                    <span>Table</span>
+                  </button>
+                </div>
+
+                {viewMode === 'KANBAN' && (
+                  <button
+                    type="button"
+                    onClick={() => setCompactKanban(!compactKanban)}
+                    className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all border cursor-pointer ${compactKanban
+                        ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    title="Toggle card compactness"
+                  >
+                    {compactKanban ? 'Dense' : 'Normal'}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Cross-Slot Search Notification */}
+            {searchQuery.trim() && otherSlotMatchesCount > 0 && selectedSlot !== 'ALL' && (
+              <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-indigo-50 border border-indigo-200 rounded-xl text-xs font-bold text-indigo-900 animate-in fade-in">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-indigo-600 animate-pulse"></span>
+                  <span>
+                    Found {allSlotMatches.length} matching {allSlotMatches.length === 1 ? 'order' : 'orders'} in other lunch slots.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedSlot('ALL')}
+                  className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors shadow-sm shrink-0"
+                >
+                  Switch to All Slots ({allSlotMatches.length})
+                </button>
+              </div>
+            )}
+
+            {/* Lunch Slot Tabs */}
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
+              <button
+                onClick={() => setSelectedSlot('ALL')}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold shrink-0 transition-all border flex items-center gap-1.5 ${selectedSlot === 'ALL'
+                    ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                  }`}
+              >
+                <span>All Slots</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${selectedSlot === 'ALL' ? 'bg-slate-700 text-white' : 'bg-slate-200 text-slate-700'}`}>
+                  {orders.length}
+                </span>
+              </button>
+
+              {activeLunchSlots.map(slot => {
+                const count = slotCounts[slot.value] || 0;
+                const isSelected = selectedSlot === slot.value;
+                return (
+                  <button
+                    key={slot.value}
+                    onClick={() => setSelectedSlot(slot.value)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 transition-all border flex items-center gap-1.5 ${isSelected
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                        : count > 0
+                          ? 'bg-indigo-50/70 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
+                          : 'bg-slate-50 text-slate-400 border-slate-200 opacity-70'
+                      }`}
+                  >
+                    <span>{slot.rangeLabel || slot.label}</span>
+                    <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${isSelected
+                        ? 'bg-indigo-800 text-white'
+                        : count > 0
+                          ? 'bg-indigo-200 text-indigo-900'
+                          : 'bg-slate-200 text-slate-500'
+                      }`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Live Kitchen Batch Preparation Summary */}
+          {showBatchSummary && (
+            <div className="bg-gradient-to-r from-slate-900 to-indigo-950 rounded-2xl p-4 sm:p-5 text-white shadow-sm border border-indigo-900/40">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-3">
+                <div className="flex items-center gap-2">
+                  <IconCooking size={20} className="w-5 h-5 text-indigo-300 shrink-0" />
+                  <h3 className="font-extrabold text-sm sm:text-base text-white">
+                    Live Kitchen Prep Summary {selectedSlot !== 'ALL' ? `for ${formatPickupTime(selectedSlot)}` : '(All Filtered Orders)'}
+                  </h3>
+                </div>
+                <span className="text-xs text-indigo-300 font-medium">
+                  {batchPrepSummary.reduce((sum, item) => sum + item[1].count, 0)} total meal items to cook &amp; pack
+                </span>
+              </div>
+
+              {batchPrepSummary.length === 0 ? (
+                <div className="text-xs text-slate-400 py-2">No active items in the preparation queue for this selection.</div>
+              ) : (
+                <div className="flex flex-wrap gap-2.5">
+                  {batchPrepSummary.map(([itemName, data]) => (
+                    <div
+                      key={itemName}
+                      className="flex items-center gap-2.5 bg-white/10 backdrop-blur-sm border border-white/15 px-4 py-2.5 rounded-2xl shadow-sm hover:bg-white/15 transition-colors"
+                    >
+                      <span className={`w-3 h-3 rounded-full shrink-0 ${data.veg ? 'bg-emerald-400' : 'bg-rose-400'}`}></span>
+                      <span className="text-sm font-extrabold text-white">{itemName}</span>
+                      <span className="bg-indigo-500 text-white font-mono text-sm font-black px-2.5 py-1 rounded-md shadow-sm">
+                        {data.count}x
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
-        </div>
-      </div>
 
-      {/* Live Camera QR Scanner Modal */}
-      <QRScannerModal
-        isOpen={isScannerOpen}
-        onClose={() => setIsScannerOpen(false)}
-        onScanSuccess={handleQrScanPayload}
-      />
+          {/* Main Order Pipeline: Table vs Kanban vs Grid View */}
+          {loading && orders.length === 0 ? (
+            <div className="bg-white border border-slate-200 rounded-[2rem] p-12 text-center text-slate-500 shadow-sm">
+              Loading live order queue...
+            </div>
+          ) : viewMode === 'LIST' ? (
+            /* Reusable Table Component View */
+            <Table<OrderWithDetails>
+              data={filteredOrders}
+              columns={orderColumns}
+              keyExtractor={(order) => order.id}
+              pagination={true}
+              pageSize={10}
+              emptyMessage={
+                searchQuery
+                  ? `No orders match "${searchQuery}"`
+                  : selectedSlot !== 'ALL'
+                    ? `No orders for the ${formatPickupTime(selectedSlot)} slot.`
+                    : 'No active orders in the queue.'
+              }
+              emptyIcon={<IconPackage size={36} className="text-slate-300" />}
+              hoverable={true}
+            />
+          ) : filteredOrders.length === 0 ? (
+            <div className="bg-white border border-slate-200 rounded-[2rem] p-12 text-center text-slate-500 shadow-sm space-y-3">
+              <IconPackage size={38} className="w-10 h-10 text-slate-300 mx-auto" />
+              <div className="font-extrabold text-slate-800 text-lg">
+                {searchQuery.trim() ? 'No Matching Orders Found' : 'No Orders in Queue'}
+              </div>
+              <div className="text-sm text-slate-500 max-w-md mx-auto">
+                {searchQuery.trim() ? (
+                  <>
+                    No active orders matched <span className="font-semibold text-slate-800 font-mono">"{searchQuery}"</span>
+                    {selectedSlot !== 'ALL' && ` in the ${formatPickupTime(selectedSlot)} slot`}.
+                    <br />
+                    <span className="text-xs text-slate-400 mt-1.5 block">
+                      Staff can search by Order Number (e.g. #4), Student Name, Student ID (including leading zeros), or 6-digit OTP.
+                    </span>
+                  </>
+                ) : selectedSlot !== 'ALL' ? (
+                  `No orders scheduled for the ${formatPickupTime(selectedSlot)} slot.`
+                ) : (
+                  'There are currently no active orders in the kitchen queue.'
+                )}
+              </div>
+
+              {/* Switch to all slots action if matches exist across other slots */}
+              {searchQuery.trim() && otherSlotMatchesCount > 0 && selectedSlot !== 'ALL' && (
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedSlot('ALL')}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all flex items-center gap-2 mx-auto"
+                  >
+                    <span>View {allSlotMatches.length} matching {allSlotMatches.length === 1 ? 'order' : 'orders'} in All Slots</span>
+                  </button>
+                </div>
+              )}
+
+              {(searchQuery || selectedSlot !== 'ALL') && (
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={() => { setSearchQuery(''); setSelectedSlot('ALL'); }}
+                    className="text-xs font-bold text-slate-600 hover:text-indigo-600 underline"
+                  >
+                    Reset Filters &amp; Clear Search
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : viewMode === 'KANBAN' ? (
+            /* 3-Column Kanban Board */
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+              {/* Column 1: Placed / Incoming */}
+              <div className="bg-slate-100/80 border border-slate-200 rounded-2xl p-3 sm:p-4 flex flex-col min-h-[300px]">
+                <div className="flex justify-between items-center mb-3 px-1">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-slate-500"></span>
+                    <h3 className="font-extrabold text-sm text-slate-800 uppercase tracking-wide">
+                      Placed (New)
+                    </h3>
+                    <span className="bg-slate-200 text-slate-700 text-xs font-black px-2 py-0.5 rounded-full">
+                      {placedOrders.length}
+                    </span>
+                  </div>
+                  {placedOrders.length > 1 && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => bulkAcceptOrders(placedOrders.map(o => o.id))}
+                      leftIcon={<IconZap size={12} className="w-3 h-3 text-indigo-600" />}
+                      className="text-[11px] py-1 px-2 rounded-lg"
+                    >
+                      Accept All ({placedOrders.length})
+                    </Button>
+                  )}
+                </div>
+
+                <div className="space-y-3 flex-1 overflow-y-auto max-h-[75vh] pr-1">
+                  {placedOrders.length === 0 ? (
+                    <div className="text-center text-xs text-slate-400 py-10">No incoming new orders</div>
+                  ) : (
+                    placedOrders.map(renderOrderCard)
+                  )}
+                </div>
+              </div>
+
+              {/* Column 2: In Kitchen Queue (Accepted & Preparing) */}
+              <div className="bg-orange-50/50 border border-orange-200/70 rounded-2xl p-3 sm:p-4 flex flex-col min-h-[300px]">
+                <div className="flex justify-between items-center mb-3 px-1">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-orange-500"></span>
+                    <h3 className="font-extrabold text-sm text-orange-950 uppercase tracking-wide">
+                      Kitchen Queue
+                    </h3>
+                    <span className="bg-orange-200 text-orange-900 text-xs font-black px-2 py-0.5 rounded-full">
+                      {kitchenOrders.length}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-3 flex-1 overflow-y-auto max-h-[75vh] pr-1">
+                  {kitchenOrders.length === 0 ? (
+                    <div className="text-center text-xs text-slate-400 py-10">Kitchen queue is clear</div>
+                  ) : (
+                    kitchenOrders.map(renderOrderCard)
+                  )}
+                </div>
+              </div>
+
+              {/* Column 3: Ready for Collection */}
+              <div className="bg-emerald-50/50 border border-emerald-200/70 rounded-2xl p-3 sm:p-4 flex flex-col min-h-[300px]">
+                <div className="flex justify-between items-center mb-3 px-1">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                    <h3 className="font-extrabold text-sm text-emerald-950 uppercase tracking-wide">
+                      Ready at Counter
+                    </h3>
+                    <span className="bg-emerald-200 text-emerald-900 text-xs font-black px-2 py-0.5 rounded-full">
+                      {readyOrders.length}
+                    </span>
+                  </div>
+                  {readyOrders.some(o => getOrderOverdueInfo(o).isOverdue) && (
+                    <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200 animate-pulse flex items-center gap-1">
+                      <IconAlertTriangle size={11} className="w-3 h-3 text-amber-700 shrink-0" />
+                      <span>No-Show Alerts</span>
+                    </span>
+                  )}
+                </div>
+
+                <div className="space-y-3 flex-1 overflow-y-auto max-h-[75vh] pr-1">
+                  {readyOrders.length === 0 ? (
+                    <div className="text-center text-xs text-slate-400 py-10">No orders awaiting pickup</div>
+                  ) : (
+                    readyOrders.map(renderOrderCard)
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* Compact Grid View */
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredOrders.map(renderOrderCard)}
+            </div>
+          )}
+
+          {/* Quick Menu Item Availability Section */}
+          <div className="bg-white border border-slate-200 rounded-[2rem] p-5 sm:p-7 shadow-sm mt-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
+              <div>
+                <h3 className="font-extrabold text-xl text-slate-800">Quick Menu Availability</h3>
+                <p className="text-xs text-slate-500 mt-0.5">Toggle sold out status instantaneously across student devices</p>
+              </div>
+              <div className="flex items-center gap-2 self-stretch sm:self-auto justify-between sm:justify-end">
+                <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full whitespace-nowrap">
+                  {menuItems.filter(m => !m.is_sold_out).length} / {menuItems.length} Available
+                </span>
+              </div>
+            </div>
+
+            {menuItems.length > 6 && (
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-4 pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-1.5">
+                  {(['ALL', 'VEG', 'NON_VEG', 'SOLD_OUT'] as const).map((filter) => (
+                    <button
+                      key={filter}
+                      onClick={() => setMenuFilter(filter)}
+                      className={`text-xs px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${menuFilter === filter
+                          ? 'bg-indigo-600 text-white shadow-xs'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                    >
+                      {filter === 'ALL' ? 'All' : filter === 'VEG' ? 'Veg' : filter === 'NON_VEG' ? 'Non-Veg' : 'Sold Out'}
+                    </button>
+                  ))}
+                </div>
+                <div className="relative min-w-[180px]">
+                  <IconSearch className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="Search menu..."
+                    value={menuSearch}
+                    onChange={(e) => setMenuSearch(e.target.value)}
+                    className="w-full pl-8 pr-3 py-1 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="overflow-y-auto max-h-[310px] pr-1.5 custom-scrollbar">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                {filteredMenuItems.map(item => (
+                  <div
+                    key={item.id}
+                    className={`flex flex-col justify-between p-3.5 rounded-2xl border transition-all text-center ${item.is_sold_out ? 'bg-slate-50 border-slate-200 opacity-60' : 'bg-white border-slate-200 shadow-sm'
+                      }`}
+                  >
+                    <div>
+                      <div className="flex items-center justify-center gap-1.5 mb-1.5">
+                        <span className={`w-2 h-2 rounded-full ${item.veg_non_veg === 'VEG' ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase">{item.veg_non_veg === 'VEG' ? 'Veg' : 'Non-Veg'}</span>
+                      </div>
+                      <div className={`text-xs font-bold leading-tight ${item.is_sold_out ? 'text-slate-400 line-through' : 'text-slate-800'}`}>
+                        {item.name}
+                      </div>
+                      <div className="text-[11px] font-extrabold text-indigo-600 mt-1">₹{Number(item.price || 0).toFixed(0)}</div>
+                    </div>
+
+                    <button
+                      onClick={() => handleToggleSoldOut(item.id, item.is_sold_out)}
+                      className={`mt-3 w-full text-[11px] py-1.5 rounded-xl font-bold transition-transform active:scale-95 border cursor-pointer ${item.is_sold_out
+                          ? 'bg-slate-200 text-slate-700 hover:bg-slate-300 border-slate-300'
+                          : 'bg-rose-50 text-rose-600 hover:bg-rose-100 border-rose-200'
+                        }`}
+                    >
+                      {item.is_sold_out ? 'Mark Available' : 'Sold Out'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {filteredMenuItems.length === 0 && (
+                <div className="text-center py-8 text-sm text-slate-400">
+                  No matching menu items found.
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Live Camera QR Scanner Modal */}
+          <QRScannerModal
+            isOpen={isScannerOpen}
+            onClose={() => setIsScannerOpen(false)}
+            onScanSuccess={handleQrScanPayload}
+          />
+        </>
+      )}
     </div>
   );
 }
