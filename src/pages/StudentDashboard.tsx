@@ -20,12 +20,6 @@ import {
 } from '../components/Icons';
 import { QRCodeSVG } from '../components/QRCode';
 import { calculateOrderLedger } from '../lib/ledger';
-import {
-  CanteenTaxConfig,
-  TaxableCartItem,
-  DEFAULT_CANTEEN_TAX_CONFIG,
-  fetchCanteenTaxConfig,
-} from '../lib/taxService';
 
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 type Order = Database['public']['Tables']['orders']['Row'];
@@ -139,7 +133,6 @@ export default function StudentDashboard() {
 
   // Configurable Lunch Slot Management State
   const [slotConfig, setSlotConfig] = useState<LunchSlotConfig>(DEFAULT_LUNCH_SLOT_CONFIG);
-  const [taxConfig, setTaxConfig] = useState<CanteenTaxConfig>(DEFAULT_CANTEEN_TAX_CONFIG);
 
   useEffect(() => {
     let isMounted = true;
@@ -149,24 +142,13 @@ export default function StudentDashboard() {
       if (isMounted) setSlotConfig(cfg);
     });
 
-    fetchCanteenTaxConfig(canteenId || undefined).then(tcfg => {
-      if (isMounted) setTaxConfig(tcfg);
-    });
-
     const handleConfigUpdate = (e: any) => {
       if (e.detail && isMounted) {
         setSlotConfig(e.detail);
       }
     };
 
-    const handleTaxConfigUpdate = (e: any) => {
-      if (e.detail && isMounted) {
-        setTaxConfig(e.detail);
-      }
-    };
-
     window.addEventListener('lunch_slot_config_updated', handleConfigUpdate);
-    window.addEventListener('canteen_tax_config_updated', handleTaxConfigUpdate);
 
     const slotSub = supabase
       .channel('public:lunch_slot_configs')
@@ -177,21 +159,10 @@ export default function StudentDashboard() {
       })
       .subscribe();
 
-    const taxSub = supabase
-      .channel('public:canteen_tax_configs')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'canteen_tax_configs' }, () => {
-        fetchCanteenTaxConfig(canteenId || undefined).then(tcfg => {
-          if (isMounted) setTaxConfig(tcfg);
-        });
-      })
-      .subscribe();
-
     return () => {
       isMounted = false;
       window.removeEventListener('lunch_slot_config_updated', handleConfigUpdate);
-      window.removeEventListener('canteen_tax_config_updated', handleTaxConfigUpdate);
       slotSub.unsubscribe();
-      taxSub.unsubscribe();
     };
   }, [cart[0]?.item?.canteen_id, profile?.canteen_id]);
 
@@ -424,22 +395,7 @@ export default function StudentDashboard() {
   const cartTotalItems = cart.reduce((acc, c) => acc + c.quantity, 0);
   const cartTotalPrice = cart.reduce((acc, c) => acc + (Number(c.item.price || 0) * c.quantity), 0);
 
-  // Convert cart items for item-level tax calculation
-  const taxableCartItems: TaxableCartItem[] = useMemo(() => {
-    return cart.map(c => ({
-      id: c.item.id,
-      name: c.item.name,
-      quantity: c.quantity,
-      price: Number(c.item.price || 0),
-      gstRatePercent: (c.item as any).gst_rate_percent,
-      hsnCode: (c.item as any).hsn_code,
-    }));
-  }, [cart]);
-
-  // Centralized, tax-aware Order Ledger
-  const ledger = useMemo(() => {
-    return calculateOrderLedger(cartTotalPrice, taxableCartItems, taxConfig);
-  }, [cartTotalPrice, taxableCartItems, taxConfig]);
+  const ledger = useMemo(() => calculateOrderLedger(cartTotalPrice), [cartTotalPrice]);
 
   const addToCart = (item: MenuItem) => {
     if (isSuspended) {
@@ -937,18 +893,6 @@ export default function StudentDashboard() {
                           </span>
                         )}
                       </div>
-                      {((o as any).tax_snapshot || (o as any).total_tax_amount) && (
-                        <div className="text-xs text-slate-500 mt-1 flex flex-wrap gap-2 items-center">
-                          <span className="bg-slate-100 px-2 py-0.5 rounded text-slate-700 font-medium">
-                            GST ({(o as any).tax_snapshot?.effective_food_gst_rate || 5}%): ₹{Number((o as any).total_tax_amount || (o as any).tax_snapshot?.food_gst_amount || 0).toFixed(2)}
-                          </span>
-                          {(o as any).tax_snapshot?.cgst_amount !== undefined && (
-                            <span className="text-[11px] text-slate-400">
-                              (CGST: ₹{Number((o as any).tax_snapshot.cgst_amount).toFixed(2)} + SGST: ₹{Number((o as any).tax_snapshot.sgst_amount).toFixed(2)})
-                            </span>
-                          )}
-                        </div>
-                      )}
                     </div>
                     <div className={`px-3 py-1 rounded-full text-xs font-bold border ${o.status === 'COLLECTED' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
                       {o.status}
@@ -1177,20 +1121,6 @@ export default function StudentDashboard() {
               </div>
             )}
           </div>
-
-          {/* Confirmed Bill & GST Summary */}
-          {((activeOrder as any).tax_snapshot || (activeOrder as any).total_tax_amount) && (
-            <div className="mt-3 pt-3 border-t border-indigo-400/20 flex flex-wrap items-center justify-between gap-2 text-xs text-indigo-100">
-              <span className="font-semibold">
-                Bill Tax ({(activeOrder as any).tax_snapshot?.effective_food_gst_rate || 5}% GST): ₹{Number((activeOrder as any).total_tax_amount || (activeOrder as any).tax_snapshot?.food_gst_amount || 0).toFixed(2)}
-              </span>
-              {(activeOrder as any).tax_snapshot?.cgst_amount !== undefined && (
-                <span className="text-[11px] text-indigo-200 font-mono">
-                  CGST: ₹{Number((activeOrder as any).tax_snapshot.cgst_amount).toFixed(2)} | SGST: ₹{Number((activeOrder as any).tax_snapshot.sgst_amount).toFixed(2)}
-                </span>
-              )}
-            </div>
-          )}
           </div>
         </div>
       ) : (
@@ -1909,86 +1839,26 @@ export default function StudentDashboard() {
 
                       {/* Transparent Customer Order Bill */}
                       {cart.length > 0 && (
-                        <div style={{ marginBottom: '1rem', padding: '0.875rem 1rem', background: '#1e293b', borderRadius: '0.75rem', border: '1px solid #334155' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px solid #334155' }}>
-                            <span style={{ color: '#cbd5e1', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                              Tax Invoice / Order Bill
-                            </span>
-                            <span style={{
-                              color: ledger.tax_mode === 'TAX_INCLUSIVE' ? '#34d399' : '#a5b4fc',
-                              fontSize: '0.65rem',
-                              fontWeight: 700,
-                              background: ledger.tax_mode === 'TAX_INCLUSIVE' ? 'rgba(52,211,153,0.15)' : 'rgba(99,102,241,0.15)',
-                              padding: '2px 6px',
-                              borderRadius: '4px'
-                            }}>
-                              {ledger.tax_mode === 'TAX_INCLUSIVE' ? 'Prices Include GST' : 'GST Added to Base'}
-                            </span>
+                        <div style={{ marginBottom: '1rem', padding: '1rem', background: '#1e293b', borderRadius: '0.75rem', border: '1px solid #334155' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>Food Subtotal</span>
+                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem' }}>₹{ledger.food_subtotal.toFixed(2)}</span>
                           </div>
-
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
-                            <span style={{ color: '#94a3b8', fontSize: '0.8125rem' }}>Food Subtotal</span>
-                            <span style={{ color: '#e2e8f0', fontSize: '0.8125rem', fontWeight: 600 }}>₹{ledger.food_subtotal.toFixed(2)}</span>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>Platform Fee (3%)</span>
+                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem' }}>₹{ledger.commission_fee.toFixed(2)}</span>
                           </div>
-
-                          {ledger.tax_mode === 'TAX_INCLUSIVE' && ledger.taxable_food_amount !== undefined && (
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
-                              <span style={{ color: '#64748b', fontSize: '0.72rem', paddingLeft: '0.5rem' }}>↳ Net Taxable Value</span>
-                              <span style={{ color: '#94a3b8', fontSize: '0.72rem' }}>₹{ledger.taxable_food_amount.toFixed(2)}</span>
-                            </div>
-                          )}
-
-                          {/* Itemized GST Breakdown (CGST / SGST / IGST) */}
-                          <div style={{
-                            margin: '0.5rem 0',
-                            padding: '0.5rem 0.625rem',
-                            background: '#0f172a',
-                            borderRadius: '0.5rem',
-                            border: '1px solid #334155'
-                          }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
-                              <span style={{ color: '#a5b4fc', fontSize: '0.7rem', fontWeight: 700 }}>
-                                GST ({ledger.food_gst_rate || 5}%) {ledger.tax_mode === 'TAX_INCLUSIVE' ? 'Included' : 'Levied'}
-                              </span>
-                              <span style={{ color: '#e2e8f0', fontSize: '0.75rem', fontWeight: 700 }}>
-                                ₹{(ledger.food_gst_amount || 0).toFixed(2)}
-                              </span>
-                            </div>
-
-                            {ledger.supply_type === 'INTRA_STATE' ? (
-                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '0.25rem' }}>
-                                <div style={{ fontSize: '0.6875rem', color: '#94a3b8' }}>
-                                  CGST ({ledger.cgst_rate || 2.5}%): <strong style={{ color: '#cbd5e1' }}>₹{(ledger.cgst_amount || 0).toFixed(2)}</strong>
-                                </div>
-                                <div style={{ fontSize: '0.6875rem', color: '#94a3b8', textAlign: 'right' }}>
-                                  SGST ({ledger.sgst_rate || 2.5}%): <strong style={{ color: '#cbd5e1' }}>₹{(ledger.sgst_amount || 0).toFixed(2)}</strong>
-                                </div>
-                              </div>
-                            ) : (
-                              <div style={{ fontSize: '0.6875rem', color: '#94a3b8', marginTop: '0.25rem' }}>
-                                IGST ({ledger.igst_rate || 5}%): <strong style={{ color: '#cbd5e1' }}>₹{(ledger.igst_amount || 0).toFixed(2)}</strong>
-                              </div>
-                            )}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>Payment Gateway Fee</span>
+                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem' }}>₹{ledger.gateway_fee.toFixed(2)}</span>
                           </div>
-
-                          {/* Service & Gateway Fees */}
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
-                            <span style={{ color: '#94a3b8', fontSize: '0.8125rem' }}>Platform Fee (3%)</span>
-                            <span style={{ color: '#e2e8f0', fontSize: '0.8125rem' }}>₹{ledger.commission_fee.toFixed(2)}</span>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem', paddingBottom: '0.75rem', borderBottom: '1px solid #334155' }}>
+                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>GST</span>
+                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>₹0.00 (Included)</span>
                           </div>
-
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px solid #334155' }}>
-                            <span style={{ color: '#94a3b8', fontSize: '0.8125rem' }}>Payment Gateway Fee</span>
-                            <span style={{ color: '#e2e8f0', fontSize: '0.8125rem' }}>₹{ledger.gateway_fee.toFixed(2)}</span>
-                          </div>
-
-                          {/* Grand Total */}
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <div>
-                              <span style={{ color: '#e2e8f0', fontSize: '0.875rem', fontWeight: 600, display: 'block' }}>Total Payable</span>
-                              <span style={{ color: '#64748b', fontSize: '0.625rem' }}>Includes all taxes and fees</span>
-                            </div>
-                            <span style={{ color: '#38bdf8', fontSize: '1.125rem', fontWeight: 800 }}>₹{ledger.gross_payable.toFixed(2)}</span>
+                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem', fontWeight: 600 }}>Total Amount to Pay</span>
+                            <span style={{ color: '#38bdf8', fontSize: '1.125rem', fontWeight: 700 }}>₹{ledger.gross_payable.toFixed(2)}</span>
                           </div>
                         </div>
                       )}

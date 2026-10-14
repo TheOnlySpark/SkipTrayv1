@@ -13,7 +13,6 @@
  * 10. Order submission payload accurately maps item IDs and quantities.
  */
 
-import { calculateOrderBill, DEFAULT_CANTEEN_TAX_CONFIG, TaxableCartItem } from './lib/taxService';
 import { calculateOrderLedger } from './lib/ledger';
 
 let passed = 0;
@@ -38,7 +37,6 @@ interface MockItem {
   name: string;
   price: number;
   is_sold_out: boolean;
-  gst_rate_percent?: number;
 }
 
 interface CartEntry {
@@ -88,16 +86,6 @@ class CartManager {
 
   getTotalPrice(): number {
     return this.cart.reduce((s, c) => s + (c.item.price * c.quantity), 0);
-  }
-
-  getTaxableCartItems(): TaxableCartItem[] {
-    return this.cart.map(c => ({
-      id: c.item.id,
-      name: c.item.name,
-      quantity: c.quantity,
-      price: c.item.price,
-      gstRatePercent: c.item.gst_rate_percent ?? 5.0,
-    }));
   }
 }
 
@@ -203,24 +191,24 @@ class CartManager {
 }
 
 // -----------------------------------------------------------------------------
-// Test 7: Subtotal, taxes, fees, and grand total recalculate dynamically
+// Test 7: Subtotal, fees, and grand total recalculate dynamically
 // -----------------------------------------------------------------------------
 {
   const cm = new CartManager();
-  const item: MockItem = { id: 'meal-tax', name: 'Thali', price: 80.0, is_sold_out: false, gst_rate_percent: 5.0 };
+  const item: MockItem = { id: 'meal-tax', name: 'Thali', price: 80.0, is_sold_out: false };
 
   // Qty: 1
   cm.addToCart(item);
-  const ledger1 = calculateOrderLedger(cm.getTotalPrice(), cm.getTaxableCartItems(), DEFAULT_CANTEEN_TAX_CONFIG, '29');
+  const ledger1 = calculateOrderLedger(cm.getTotalPrice());
   assert(ledger1.food_subtotal === 80.0, 'Test 7.1: 1 item subtotal is ₹80.00');
-  assert(ledger1.food_gst_amount === 3.81, 'Test 7.2: 1 item food GST is ₹3.81');
+  assert(ledger1.commission_fee === 2.40, 'Test 7.2: Platform fee is 3% = ₹2.40');
   assert(ledger1.gross_payable === 82.89, 'Test 7.3: 1 item grand total is ₹82.89');
 
   // Qty: 2
   cm.addToCart(item);
-  const ledger2 = calculateOrderLedger(cm.getTotalPrice(), cm.getTaxableCartItems(), DEFAULT_CANTEEN_TAX_CONFIG, '29');
+  const ledger2 = calculateOrderLedger(cm.getTotalPrice());
   assert(ledger2.food_subtotal === 160.0, 'Test 7.4: 2 items subtotal dynamically updates to ₹160.00');
-  assert(ledger2.food_gst_amount === 7.62, 'Test 7.5: 2 items food GST updates to ₹7.62');
+  assert(ledger2.commission_fee === 4.80, 'Test 7.5: 2 items platform fee is ₹4.80');
   assert(ledger2.gross_payable === 165.78, `Test 7.6: 2 items grand total updates to ₹165.78 (got ${ledger2.gross_payable})`);
 }
 

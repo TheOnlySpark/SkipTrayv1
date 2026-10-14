@@ -255,9 +255,7 @@ serve(async (req) => {
         status: 'PLACED',
         otp_code: generateOTP(),
         idempotency_key,
-        payment_id: paymentRecord.id,
-        total_tax_amount: Number(ledger?.total_tax_amount ?? ledger?.food_gst_amount ?? 0),
-        tax_snapshot: ledger?.tax_snapshot ?? null
+        payment_id: paymentRecord.id
       })
       .select('id')
       .single();
