@@ -3,13 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { BrowserRouter as Router, Routes, Route, Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, Navigate, useLocation } from 'react-router-dom';
 import { Analytics } from '@vercel/analytics/react';
 import { SpeedInsights } from '@vercel/speed-insights/react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
-import { useState, useEffect } from 'react';
-import { Menu, X, LayoutDashboard, LogOut, History, ShoppingCart, User } from 'lucide-react';
+import { useState } from 'react';
+import { Menu, X, LayoutDashboard, LogOut } from 'lucide-react';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import StudentDashboard from './pages/StudentDashboard';
@@ -22,36 +22,10 @@ import TermsOfService from './pages/TermsOfService';
 import { TenantProvider, useTenant } from './contexts/TenantContext';
 
 function NavigationHeader() {
-  const { user, signOut } = useAuth();
+  const { user } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
-  const [cartCount, setCartCount] = useState(0);
   const location = useLocation();
-  const navigate = useNavigate();
   const isLoginPage = location.pathname === '/login';
-
-  const isHistoryRoute =
-    location.pathname === '/orders' ||
-    location.pathname === '/history' ||
-    new URLSearchParams(location.search).get('tab') === 'history' ||
-    new URLSearchParams(location.search).get('view') === 'history';
-
-  useEffect(() => {
-    const handleCartCount = (e: any) => setCartCount(Number(e.detail) || 0);
-    window.addEventListener('skiptray:cart-count', handleCartCount);
-    return () => window.removeEventListener('skiptray:cart-count', handleCartCount);
-  }, []);
-
-  const handleCartClick = () => {
-    if (location.pathname === '/student') {
-      window.dispatchEvent(new CustomEvent('skiptray:toggle-cart'));
-    } else {
-      navigate('/student');
-      setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('skiptray:open-cart'));
-      }, 150);
-    }
-  };
-
   return (
     <header className="flex flex-col w-full max-w-4xl mb-8 px-4 relative z-40">
       <div className="flex items-center justify-between w-full">
@@ -91,51 +65,6 @@ function NavigationHeader() {
           {!user && !isLoginPage && (
             <Link to="/login" onClick={() => setIsOpen(false)} className="px-4 py-3 bg-indigo-50 text-indigo-700 font-semibold rounded-xl text-center mt-2">Login</Link>
           )}
-          {user && (
-            <>
-              <Link to="/dashboard" onClick={() => setIsOpen(false)} className="px-4 py-3 text-slate-700 font-medium hover:bg-slate-50 rounded-xl flex items-center gap-2">
-                <LayoutDashboard size={18} className="text-slate-500" />
-                <span>Dashboard</span>
-              </Link>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsOpen(false);
-                  handleCartClick();
-                }}
-                className="px-4 py-3 text-slate-700 font-medium hover:bg-slate-50 rounded-xl flex items-center gap-2 text-left w-full"
-              >
-                <ShoppingCart size={18} className="text-slate-500" />
-                <span>Cart</span>
-                {cartCount > 0 && (
-                  <span className="ml-auto px-2 py-0.5 bg-indigo-600 text-white text-xs font-bold rounded-full">
-                    {cartCount}
-                  </span>
-                )}
-              </button>
-              <Link
-                to="/orders"
-                onClick={() => setIsOpen(false)}
-                className={`px-4 py-3 font-semibold rounded-xl flex items-center gap-2 ${
-                  isHistoryRoute ? 'bg-indigo-600 text-white' : 'text-indigo-600 bg-indigo-50 hover:bg-indigo-100'
-                }`}
-              >
-                <History size={18} />
-                <span>Order History</span>
-              </Link>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsOpen(false);
-                  signOut();
-                }}
-                className="px-4 py-3 text-red-600 font-medium hover:bg-red-50 rounded-xl flex items-center gap-2 text-left w-full mt-1 border-t border-slate-100"
-              >
-                <LogOut size={18} />
-                <span>Sign out</span>
-              </button>
-            </>
-          )}
         </div>
       )}
     </header>
@@ -173,129 +102,47 @@ import { NotificationBell } from './components/NotificationBell';
 const queryClient = new QueryClient();
 
 function TopStickyHeader() {
-  const { user, profile, signOut } = useAuth();
+  const { user, signOut } = useAuth();
   const { tenantName, settings, error } = useTenant();
   const location = useLocation();
-  const navigate = useNavigate();
   const isLoginPage = location.pathname === '/login';
 
-  const [cartCount, setCartCount] = useState(0);
-
-  useEffect(() => {
-    const handleCartCount = (e: any) => setCartCount(Number(e.detail) || 0);
-    window.addEventListener('skiptray:cart-count', handleCartCount);
-    return () => window.removeEventListener('skiptray:cart-count', handleCartCount);
-  }, []);
-
-  const isHistoryRoute =
-    location.pathname === '/orders' ||
-    location.pathname === '/history' ||
-    new URLSearchParams(location.search).get('tab') === 'history' ||
-    new URLSearchParams(location.search).get('view') === 'history';
-
-  const handleCartClick = () => {
-    if (location.pathname === '/student') {
-      window.dispatchEvent(new CustomEvent('skiptray:toggle-cart'));
-    } else {
-      navigate('/student');
-      setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('skiptray:open-cart'));
-      }, 150);
-    }
-  };
+  // If there's a tenant error (like NOT_FOUND or INACTIVE), we can still show the signout button
+  // so the user isn't trapped.
 
   return (
-    <header className={`fixed top-0 left-0 w-full z-[100] bg-white border-b border-slate-200 shadow-sm py-2 px-3 md:py-2.5 md:px-6 flex items-center ${isLoginPage ? 'justify-center' : 'justify-between'}`}>
-      {/* 1. Logo / Brand on the far left */}
-      <div className="flex items-center gap-2 md:gap-4 shrink-0">
-        <Link to="/" className="flex items-center gap-2 md:gap-3 group focus:outline-none">
-          {error ? (
-            <span className="font-bold text-base md:text-xl text-slate-400 tracking-tight">System / No Tenant</span>
-          ) : settings?.logo_url ? (
-            <img src={settings.logo_url} alt={tenantName || 'SkipTray'} className="h-7 md:h-9 object-contain" />
-          ) : (
-            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white shadow-sm group-hover:bg-indigo-700 transition">
-              <div className="w-4 h-4 border-2 border-white rounded-sm"></div>
-            </div>
-          )}
-          <span className="font-bold text-base md:text-xl text-slate-800 tracking-tight group-hover:text-indigo-600 transition-colors">
-            {tenantName || 'SkipTray'}
-          </span>
-        </Link>
+    <div className={`fixed top-0 left-0 w-full z-[100] bg-white border-b border-slate-200 shadow-sm py-2 px-3 md:py-3 md:px-6 flex items-center ${isLoginPage ? 'justify-center' : 'justify-between'}`}>
+      <div className="flex items-center gap-2 md:gap-4">
+        {error ? (
+          <span className="font-bold text-lg md:text-xl text-slate-400 tracking-tight">System / No Tenant</span>
+        ) : settings?.logo_url ? (
+          <img src={settings.logo_url} alt={tenantName} className="h-7 md:h-10 object-contain" />
+        ) : (
+          <span className="font-bold text-lg md:text-xl text-slate-800 tracking-tight">{tenantName}</span>
+        )}
       </div>
-
-      {/* Top-Right Header Elements: [Existing Navigation] [Cart] [Order History] [Profile] */}
       {!isLoginPage && user && (
-        <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2.5">
-          {/* [Existing Navigation]: NotificationBell + Dashboard */}
+        <div className="flex items-center gap-1.5 md:gap-3">
           <NotificationBell />
           <Link
             to="/dashboard"
-            className={`px-2.5 py-1.5 md:px-3 md:py-2 text-xs md:text-sm font-semibold rounded-lg transition flex items-center gap-1.5 ${
-              location.pathname === '/dashboard' || (location.pathname === '/student' && !isHistoryRoute)
-                ? 'bg-indigo-50 text-indigo-700'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
+            className="px-2.5 py-1.5 md:px-4 md:py-2 bg-indigo-50 text-indigo-700 text-xs md:text-sm font-semibold rounded-lg hover:bg-indigo-100 transition flex items-center gap-1.5"
             title="Dashboard"
           >
-            <LayoutDashboard size={16} className="shrink-0" />
+            <LayoutDashboard size={16} className="md:w-4 md:h-4" />
             <span className="hidden sm:inline">Dashboard</span>
           </Link>
-
-          {/* [Cart] (immediately before Order History) */}
           <button
-            type="button"
-            onClick={handleCartClick}
-            className="px-2.5 py-1.5 md:px-3 md:py-2 text-xs md:text-sm font-semibold rounded-lg text-slate-600 hover:text-indigo-600 hover:bg-indigo-50/70 transition flex items-center gap-1.5 relative"
-            title="Cart"
-            aria-label="Shopping Cart"
+            onClick={signOut}
+            className="px-2.5 py-1.5 md:px-4 md:py-2 bg-slate-100 text-slate-700 text-xs md:text-sm font-semibold rounded-lg hover:bg-red-50 hover:text-red-600 transition flex items-center gap-1.5"
+            title="Sign out"
           >
-            <ShoppingCart size={16} className="shrink-0" />
-            <span className="hidden sm:inline">Cart</span>
-            {cartCount > 0 && (
-              <span className="min-w-[1.125rem] h-4.5 px-1 bg-indigo-600 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
-                {cartCount}
-              </span>
-            )}
+            <LogOut size={16} className="md:w-4 md:h-4" />
+            <span className="hidden sm:inline">Sign out</span>
           </button>
-
-          {/* [Order History] (immediately after Cart and before Profile) */}
-          <Link
-            to="/orders"
-            className={`px-2.5 py-1.5 md:px-3 md:py-2 text-xs md:text-sm font-semibold rounded-lg transition flex items-center gap-1.5 ${
-              isHistoryRoute
-                ? 'bg-indigo-600 text-white shadow-sm ring-1 ring-indigo-500'
-                : 'text-slate-600 hover:text-indigo-600 hover:bg-indigo-50/70'
-            }`}
-            title="Order History"
-          >
-            <History size={16} className="shrink-0" />
-            <span className="hidden sm:inline">Order History</span>
-          </Link>
-
-          {/* [Profile] (immediately after Order History) */}
-          <div className="flex items-center gap-1 sm:gap-1.5">
-            <div
-              className="px-2 py-1.5 text-xs md:text-sm font-medium text-slate-700 bg-slate-50 border border-slate-200/80 rounded-lg flex items-center gap-1.5"
-              title={`Account: ${profile?.name || user?.email}`}
-            >
-              <User size={15} className="text-slate-500 shrink-0" />
-              <span className="hidden md:inline max-w-[110px] truncate">
-                {profile?.name || user?.email?.split('@')[0] || 'Profile'}
-              </span>
-            </div>
-            <button
-              onClick={signOut}
-              className="px-2.5 py-1.5 md:px-3 md:py-2 bg-slate-100 text-slate-700 text-xs md:text-sm font-semibold rounded-lg hover:bg-red-50 hover:text-red-600 transition flex items-center gap-1.5"
-              title="Sign out"
-            >
-              <LogOut size={16} className="shrink-0" />
-              <span className="hidden sm:inline">Sign out</span>
-            </button>
-          </div>
         </div>
       )}
-    </header>
+    </div>
   );
 }
 
@@ -326,16 +173,6 @@ export default function App() {
                   <Route path="/student" element={
                     <ProtectedRoute allowedRoles={['STUDENT', 'TEACHER']}>
                       <StudentDashboard />
-                    </ProtectedRoute>
-                  } />
-                  <Route path="/orders" element={
-                    <ProtectedRoute allowedRoles={['STUDENT', 'TEACHER', 'STAFF', 'CANTEEN_ADMIN', 'UNI_ADMIN', 'SUPER_ADMIN']}>
-                      <StudentDashboard defaultView="history" />
-                    </ProtectedRoute>
-                  } />
-                  <Route path="/history" element={
-                    <ProtectedRoute allowedRoles={['STUDENT', 'TEACHER', 'STAFF', 'CANTEEN_ADMIN', 'UNI_ADMIN', 'SUPER_ADMIN']}>
-                      <StudentDashboard defaultView="history" />
                     </ProtectedRoute>
                   } />
                   <Route path="/staff" element={

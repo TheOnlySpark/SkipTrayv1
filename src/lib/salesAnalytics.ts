@@ -139,7 +139,7 @@ export const getOrderPaymentStatus = (order: any): PaymentStatusInfo => {
 
   // 3. Rejected or cancelled orders
   if (order.status === 'REJECTED') {
-    return { status: 'REFUNDED', label: 'Cancelled / Refunded', badgeClass: 'bg-rose-50 text-rose-700 border-rose-200' };
+    return { status: 'REFUNDED', label: 'Refunded', badgeClass: 'bg-rose-50 text-rose-700 border-rose-200' };
   }
 
   // 4. Completed/collected orders are confirmed paid

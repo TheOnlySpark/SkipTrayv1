@@ -828,7 +828,7 @@ export default function StaffDashboard() {
             <div className="flex-grow my-1">
               <ul className="space-y-1">
                 {order.order_items.map(item => {
-                  const unitPrice = Number(item.menu_items?.price ?? item.price ?? 0);
+                  const unitPrice = Number(item.menu_items?.price ?? (item as any).price ?? 0);
                   return (
                     <li key={item.id} className="text-xs flex justify-between items-center text-slate-700">
                       <span className="truncate">

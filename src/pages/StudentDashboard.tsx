@@ -1,6 +1,5 @@
 import React from "react";
 import { useState, useEffect, useMemo } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/ModalDialogContext';
 import { supabase } from '../lib/supabase';
@@ -63,32 +62,14 @@ export { formatPickupTime, LUNCH_SLOTS };
 import { getItemCategory, FoodCategory } from '../lib/menuCategories';
 export { getItemCategory, type FoodCategory };
 
-export default function StudentDashboard({ defaultView }: { defaultView?: 'menu' | 'history' } = {}) {
+export default function StudentDashboard() {
   const { profile, signOut } = useAuth();
   const { showAlert, showConfirm } = useDialog();
   const queryClient = useQueryClient();
-  const location = useLocation();
-  const navigate = useNavigate();
-
-  const isHistoryPath =
-    defaultView === 'history' ||
-    location.pathname === '/orders' ||
-    location.pathname === '/history' ||
-    new URLSearchParams(location.search).get('tab') === 'history' ||
-    new URLSearchParams(location.search).get('view') === 'history';
-
   const [activeOrder, setActiveOrder] = useState<Order | null>(null);
   const [pastOrders, setPastOrders] = useState<PastOrder[]>([]);
-  const [showHistory, setShowHistory] = useState(isHistoryPath);
-
-  useEffect(() => {
-    if (isHistoryPath) {
-      setShowHistory(true);
-    } else if (location.pathname === '/student' && !location.search.includes('history')) {
-      setShowHistory(false);
-    }
-  }, [isHistoryPath, location.pathname, location.search]);
-
+  const [showHistory, setShowHistory] = useState(false);
+  
   // Food Search & Filter States
   const [foodSearchQuery, setFoodSearchQuery] = useState('');
   const [foodTypeFilter, setFoodTypeFilter] = useState<'ALL' | 'VEG' | 'NON_VEG'>('ALL');
@@ -109,24 +90,6 @@ export default function StudentDashboard({ defaultView }: { defaultView?: 'menu'
   const [cartOpen, setCartOpen] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
   const [currentTime, setCurrentTime] = useState(Date.now());
-
-  // Listen for cart open/toggle events from the header
-  useEffect(() => {
-    const handleToggleCart = () => setCartOpen(prev => !prev);
-    const handleOpenCart = () => setCartOpen(true);
-    window.addEventListener('skiptray:toggle-cart', handleToggleCart);
-    window.addEventListener('skiptray:open-cart', handleOpenCart);
-    return () => {
-      window.removeEventListener('skiptray:toggle-cart', handleToggleCart);
-      window.removeEventListener('skiptray:open-cart', handleOpenCart);
-    };
-  }, []);
-
-  // Broadcast cart count changes to the header
-  useEffect(() => {
-    const totalCount = cart.reduce((sum, item) => sum + item.quantity, 0);
-    window.dispatchEvent(new CustomEvent('skiptray:cart-count', { detail: totalCount }));
-  }, [cart]);
 
   // Periodically refresh current time every 30s to dynamically update slot cutoffs
   useEffect(() => {
@@ -902,21 +865,11 @@ export default function StudentDashboard({ defaultView }: { defaultView?: 'menu'
               </div>
             )}
           </div>
-          {showHistory && (
-            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto items-stretch sm:items-center">
-              <button
-                onClick={() => {
-                  setShowHistory(false);
-                  if (location.pathname === '/orders' || location.pathname === '/history') {
-                    navigate('/student');
-                  }
-                }}
-                className="flex-1 text-center text-sm font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 px-4 py-3 sm:py-2 rounded-xl border border-indigo-100 transition-colors"
-              >
-                Back to Order
-              </button>
-            </div>
-          )}
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto items-stretch sm:items-center">
+            <button onClick={() => setShowHistory(!showHistory)} className="flex-1 text-center text-sm font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 px-4 py-3 sm:py-2 rounded-xl border border-indigo-100 transition-colors">
+              {showHistory ? 'Back to Order' : 'Order History'}
+            </button>
+          </div>
         </div>
       </div>
 
