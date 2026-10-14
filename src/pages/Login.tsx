@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, Mail, Lock, User, Hash, AlertCircle, CheckCircle, Building, ArrowRight, Search } from 'lucide-react';
+import { Eye, EyeOff, Mail, Lock, User, Hash, AlertCircle, CheckCircle, Building, ArrowRight, ArrowLeft, Search } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useTenant } from '../contexts/TenantContext';
+import { isValidEmail, validateRegistration, formatErrorMessage } from '../utils/validation';
 
 type Step = 'LOGIN' | 'REGISTER' | 'FORGOT_PASSWORD' | 'RESET_SENT';
 
@@ -34,6 +35,7 @@ export default function Login() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState('');
+  const [fieldErrors, setFieldErrors] = useState<{ [key: string]: string }>({});
   const [success, setSuccess] = useState('');
 
   // Dynamic tenant discovery state
@@ -85,38 +87,49 @@ export default function Login() {
     e.preventDefault();
     setLoading(true);
     setError('');
+    setFieldErrors({});
+
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      setFieldErrors({ email: 'Please enter your email address.' });
+      setLoading(false);
+      return;
+    }
+    if (!isValidEmail(trimmedEmail)) {
+      setFieldErrors({ email: 'Please enter a valid email address (e.g., student@university.edu).' });
+      setLoading(false);
+      return;
+    }
+    if (!password) {
+      setFieldErrors({ password: 'Please enter your password.' });
+      setLoading(false);
+      return;
+    }
 
     // 1. Verify they belong to this tenant FIRST (to prevent cross-tenant password guessing)
     const { data: hasAccess, error: accessError } = await supabase.rpc('check_user_tenant_access', {
-      p_email: email,
+      p_email: trimmedEmail,
       p_tenant_id: tenantId
     });
 
     if (accessError) {
       console.error("Access error:", accessError);
-      setError('Error verifying account access. Please try again.');
+      setError('Unable to verify account access. Please check your network connection and try again.');
       setLoading(false);
       return;
     }
 
     if (hasAccess === false) {
-      setError('This account is not registered with this institution.');
+      setError('This account is not registered with this institution. Please check your institution or register a new account.');
       setLoading(false);
       return;
     }
 
     // 2. Only if they belong to this tenant, check their password
-    const { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+    const { error: signInError } = await supabase.auth.signInWithPassword({ email: trimmedEmail, password });
 
     if (signInError) {
-      const errMsg = signInError.message || JSON.stringify(signInError);
-      if (errMsg === '{}' || errMsg.trim() === '') {
-        setError('Invalid login credentials or account does not exist.');
-      } else if (errMsg.toLowerCase().includes('invalid login credentials')) {
-        setError('Invalid email or password. Please try again.');
-      } else {
-        setError(errMsg);
-      }
+      setError(formatErrorMessage(signInError, 'Invalid email or password. Please try again.'));
       setLoading(false);
       return;
     }
@@ -130,33 +143,34 @@ export default function Login() {
     e.preventDefault();
     setLoading(true);
     setError('');
+    setFieldErrors({});
 
-    if (regPassword !== regConfirm) {
-      setError('Passwords do not match.');
-      setLoading(false);
-      return;
-    }
+    const validationErrors = validateRegistration({
+      email: regEmail,
+      name: regName,
+      idNumber: regIdNumber,
+      password: regPassword,
+      confirmPassword: regConfirm
+    });
 
-    if (regPassword.length < 8) {
-      setError('Password must be at least 8 characters.');
+    if (Object.keys(validationErrors).length > 0) {
+      setFieldErrors(validationErrors);
+      const firstError = Object.values(validationErrors)[0];
+      setError(firstError);
       setLoading(false);
       return;
     }
 
     if (!tenantId) {
-      setError('Unable to determine your organization. Please refresh and try again.');
+      setError('Unable to determine your organization. Please refresh the page and try again.');
       setLoading(false);
       return;
     }
 
-    const { error: signUpError, userId } = await signUp(regEmail, regPassword, tenantId);
+    const { error: signUpError, userId } = await signUp(regEmail.trim(), regPassword, tenantId);
 
     if (signUpError) {
-      if (signUpError.message?.toLowerCase().includes('already registered')) {
-        setError('An account with this email already exists. Please log in instead.');
-      } else {
-        setError(signUpError.message || 'Registration failed. Please verify your details and try again.');
-      }
+      setError(formatErrorMessage(signUpError, 'Registration failed. Please check your details and try again.'));
       setLoading(false);
       return;
     }
@@ -165,11 +179,11 @@ export default function Login() {
       // Update profile with name + ID number
       const { error: updateError } = await supabase
         .from('profiles')
-        .update({ name: regName, id_number: regIdNumber })
+        .update({ name: regName.trim(), id_number: regIdNumber.trim() })
         .eq('id', userId);
 
       if (updateError) {
-        setError('Account created but profile setup failed. Please contact support.');
+        setError('Account created, but setting up profile details failed. Please sign in or contact support.');
         setLoading(false);
         return;
       }
@@ -178,7 +192,7 @@ export default function Login() {
     // If email confirmation is required, session might be null
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
-      setSuccess('Account created! Please check your email to verify your account before logging in.');
+      setSuccess('Account created successfully! Please check your email to verify your account before logging in.');
       setStep('LOGIN');
       setLoading(false);
       return;
@@ -193,13 +207,28 @@ export default function Login() {
     e.preventDefault();
     setLoading(true);
     setError('');
+    setFieldErrors({});
 
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
+    const trimmedForgotEmail = forgotEmail.trim();
+    if (!trimmedForgotEmail) {
+      setFieldErrors({ forgotEmail: 'Please enter your registered email address.' });
+      setError('Please enter your registered email address.');
+      setLoading(false);
+      return;
+    }
+    if (!isValidEmail(trimmedForgotEmail)) {
+      setFieldErrors({ forgotEmail: 'Please enter a valid email address.' });
+      setError('Please enter a valid email address.');
+      setLoading(false);
+      return;
+    }
+
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(trimmedForgotEmail, {
       redirectTo: `${window.location.origin}/reset-password`,
     });
 
     if (resetError) {
-      setError(resetError.message);
+      setError(formatErrorMessage(resetError, 'Failed to send password reset link. Please check your email and try again.'));
     } else {
       setStep('RESET_SENT');
     }
@@ -209,7 +238,7 @@ export default function Login() {
   // ── INACTIVE TENANT GUARD ──────────────────────────────────────────────────
   if (!tenantLoading && tenantError === 'INACTIVE') {
     return (
-      <div className="bg-white border border-slate-200 rounded-[2rem] p-8 flex flex-col gap-4 shadow-sm w-full max-w-md mx-auto">
+      <div className="bg-white border border-slate-200 rounded-[2rem] p-8 flex flex-col gap-4 shadow-sm w-full max-w-md mx-auto my-auto">
         <div className="flex flex-col items-center gap-3 text-center py-4">
           <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center">
             <AlertCircle className="w-6 h-6 text-amber-600" />
@@ -231,7 +260,7 @@ export default function Login() {
     );
 
     return (
-      <div className="bg-white border border-slate-200 rounded-[2rem] p-6 md:p-8 flex flex-col gap-5 shadow-sm w-full max-w-md mx-auto">
+      <div className="bg-white border border-slate-200 rounded-[2rem] p-6 md:p-8 flex flex-col gap-5 shadow-sm w-full max-w-md mx-auto my-auto">
         <div className="flex flex-col items-center gap-2 text-center">
           <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center">
             <Building className="w-6 h-6" />
@@ -290,7 +319,7 @@ export default function Login() {
 
   // ── RENDER ─────────────────────────────────────────────────────────────────
   return (
-    <div className="bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 flex flex-col justify-between shadow-sm relative overflow-hidden w-full max-w-md mx-auto">
+    <div className="bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 flex flex-col justify-between shadow-sm relative overflow-hidden w-full max-w-md mx-auto my-auto">
       <div className="z-10 relative">
 
         {/* Tenant branding header */}
@@ -330,7 +359,7 @@ export default function Login() {
 
         {/* ── LOGIN FORM ── */}
         {step === 'LOGIN' && (
-          <form onSubmit={handleLogin} className="space-y-4">
+          <form onSubmit={handleLogin} className="space-y-4" noValidate>
             <div>
               <label className="block text-sm font-bold text-slate-800 mb-2">Email</label>
               <div className="relative">
@@ -340,12 +369,21 @@ export default function Login() {
                   type="email"
                   placeholder="you@example.com"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    if (fieldErrors.email) setFieldErrors(prev => ({ ...prev, email: '' }));
+                  }}
                   autoComplete="email"
                   required
-                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-900"
+                  className={`w-full pl-10 pr-4 py-3 bg-slate-50 border ${fieldErrors.email ? 'border-red-400 ring-1 ring-red-400 bg-red-50/20' : 'border-slate-200'} rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-900`}
                 />
               </div>
+              {fieldErrors.email && (
+                <p className="mt-1.5 text-xs font-medium text-red-600 flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  {fieldErrors.email}
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-bold text-slate-800 mb-2">Password</label>
@@ -356,10 +394,13 @@ export default function Login() {
                   type={showPw ? 'text' : 'password'}
                   placeholder="••••••••"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    if (fieldErrors.password) setFieldErrors(prev => ({ ...prev, password: '' }));
+                  }}
                   autoComplete="current-password"
                   required
-                  className="w-full pl-10 pr-10 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-900"
+                  className={`w-full pl-10 pr-10 py-3 bg-slate-50 border ${fieldErrors.password ? 'border-red-400 ring-1 ring-red-400 bg-red-50/20' : 'border-slate-200'} rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-900`}
                 />
                 <button
                   type="button"
@@ -370,6 +411,12 @@ export default function Login() {
                   {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
+              {fieldErrors.password && (
+                <p className="mt-1.5 text-xs font-medium text-red-600 flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  {fieldErrors.password}
+                </p>
+              )}
             </div>
             <button
               type="submit"
@@ -382,25 +429,26 @@ export default function Login() {
             <div className="flex justify-between items-center pt-1">
               <button
                 type="button"
-                onClick={() => { setStep('FORGOT_PASSWORD'); setError(''); }}
+                onClick={() => { setStep('FORGOT_PASSWORD'); setError(''); setFieldErrors({}); }}
                 className="text-xs text-indigo-600 hover:underline font-semibold"
               >
                 Forgot password?
               </button>
-              <button
-                type="button"
-                onClick={() => { setStep('REGISTER'); setError(''); }}
-                className="text-xs text-slate-500 hover:text-slate-800 font-semibold"
-              >
-                New here? Register →
-              </button>
+                <button
+                  type="button"
+                  onClick={() => { setStep('REGISTER'); setError(''); setFieldErrors({}); }}
+                  className="text-xs text-slate-500 hover:text-slate-800 font-semibold inline-flex items-center gap-1"
+                >
+                  <span>New here? Register</span>
+                  <ArrowRight className="w-3 h-3" />
+                </button>
             </div>
           </form>
         )}
 
         {/* ── REGISTER FORM ── */}
         {step === 'REGISTER' && (
-          <form onSubmit={handleRegister} className="space-y-4">
+          <form onSubmit={handleRegister} className="space-y-4" noValidate>
             <div>
               <label className="block text-sm font-bold text-slate-800 mb-2">Email</label>
               <div className="relative">
@@ -410,12 +458,21 @@ export default function Login() {
                   type="email"
                   placeholder="you@example.com"
                   value={regEmail}
-                  onChange={(e) => setRegEmail(e.target.value)}
+                  onChange={(e) => {
+                    setRegEmail(e.target.value);
+                    if (fieldErrors.email) setFieldErrors(prev => ({ ...prev, email: '' }));
+                  }}
                   autoComplete="email"
                   required
-                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-900"
+                  className={`w-full pl-10 pr-4 py-3 bg-slate-50 border ${fieldErrors.email ? 'border-red-400 ring-1 ring-red-400 bg-red-50/20' : 'border-slate-200'} rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-900`}
                 />
               </div>
+              {fieldErrors.email && (
+                <p className="mt-1.5 text-xs font-medium text-red-600 flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  {fieldErrors.email}
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-bold text-slate-800 mb-2">Full Name</label>
@@ -426,12 +483,21 @@ export default function Login() {
                   type="text"
                   placeholder="John Doe"
                   value={regName}
-                  onChange={(e) => setRegName(e.target.value)}
+                  onChange={(e) => {
+                    setRegName(e.target.value);
+                    if (fieldErrors.name) setFieldErrors(prev => ({ ...prev, name: '' }));
+                  }}
                   maxLength={100}
                   required
-                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-900"
+                  className={`w-full pl-10 pr-4 py-3 bg-slate-50 border ${fieldErrors.name ? 'border-red-400 ring-1 ring-red-400 bg-red-50/20' : 'border-slate-200'} rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-900`}
                 />
               </div>
+              {fieldErrors.name && (
+                <p className="mt-1.5 text-xs font-medium text-red-600 flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  {fieldErrors.name}
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-bold text-slate-800 mb-2">ID Number</label>
@@ -442,12 +508,21 @@ export default function Login() {
                   type="text"
                   placeholder="Employee / Student ID"
                   value={regIdNumber}
-                  onChange={(e) => setRegIdNumber(e.target.value)}
+                  onChange={(e) => {
+                    setRegIdNumber(e.target.value);
+                    if (fieldErrors.idNumber) setFieldErrors(prev => ({ ...prev, idNumber: '' }));
+                  }}
                   maxLength={20}
                   required
-                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-900"
+                  className={`w-full pl-10 pr-4 py-3 bg-slate-50 border ${fieldErrors.idNumber ? 'border-red-400 ring-1 ring-red-400 bg-red-50/20' : 'border-slate-200'} rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-900`}
                 />
               </div>
+              {fieldErrors.idNumber && (
+                <p className="mt-1.5 text-xs font-medium text-red-600 flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  {fieldErrors.idNumber}
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-bold text-slate-800 mb-2">Password</label>
@@ -458,11 +533,14 @@ export default function Login() {
                   type={showRegPw ? 'text' : 'password'}
                   placeholder="Min. 8 characters"
                   value={regPassword}
-                  onChange={(e) => setRegPassword(e.target.value)}
+                  onChange={(e) => {
+                    setRegPassword(e.target.value);
+                    if (fieldErrors.password) setFieldErrors(prev => ({ ...prev, password: '' }));
+                  }}
                   autoComplete="new-password"
                   minLength={8}
                   required
-                  className="w-full pl-10 pr-10 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-900"
+                  className={`w-full pl-10 pr-10 py-3 bg-slate-50 border ${fieldErrors.password ? 'border-red-400 ring-1 ring-red-400 bg-red-50/20' : 'border-slate-200'} rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-900`}
                 />
                 <button
                   type="button"
@@ -473,6 +551,12 @@ export default function Login() {
                   {showRegPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
+              {fieldErrors.password && (
+                <p className="mt-1.5 text-xs font-medium text-red-600 flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  {fieldErrors.password}
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-bold text-slate-800 mb-2">Confirm Password</label>
@@ -483,12 +567,21 @@ export default function Login() {
                   type={showRegPw ? 'text' : 'password'}
                   placeholder="Repeat your password"
                   value={regConfirm}
-                  onChange={(e) => setRegConfirm(e.target.value)}
+                  onChange={(e) => {
+                    setRegConfirm(e.target.value);
+                    if (fieldErrors.confirmPassword) setFieldErrors(prev => ({ ...prev, confirmPassword: '' }));
+                  }}
                   autoComplete="new-password"
                   required
-                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-900"
+                  className={`w-full pl-10 pr-4 py-3 bg-slate-50 border ${fieldErrors.confirmPassword ? 'border-red-400 ring-1 ring-red-400 bg-red-50/20' : 'border-slate-200'} rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-900`}
                 />
               </div>
+              {fieldErrors.confirmPassword && (
+                <p className="mt-1.5 text-xs font-medium text-red-600 flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  {fieldErrors.confirmPassword}
+                </p>
+              )}
             </div>
             <div className="flex items-start gap-2 pt-1">
               <input
@@ -511,17 +604,18 @@ export default function Login() {
             </button>
             <button
               type="button"
-              onClick={() => { setStep('LOGIN'); setError(''); }}
-              className="w-full text-center text-xs font-bold text-slate-500 mt-2 hover:text-slate-800"
+              onClick={() => { setStep('LOGIN'); setError(''); setFieldErrors({}); }}
+              className="w-full inline-flex items-center justify-center gap-1.5 text-xs font-bold text-slate-500 mt-2 hover:text-slate-800"
             >
-              ← Back to Sign in
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Back to Sign in</span>
             </button>
           </form>
         )}
 
         {/* ── FORGOT PASSWORD FORM ── */}
         {step === 'FORGOT_PASSWORD' && (
-          <form onSubmit={handleForgotPassword} className="space-y-4">
+          <form onSubmit={handleForgotPassword} className="space-y-4" noValidate>
             <div>
               <label className="block text-sm font-bold text-slate-800 mb-2">Your Email</label>
               <div className="relative">
@@ -531,11 +625,20 @@ export default function Login() {
                   type="email"
                   placeholder="you@example.com"
                   value={forgotEmail}
-                  onChange={(e) => setForgotEmail(e.target.value)}
+                  onChange={(e) => {
+                    setForgotEmail(e.target.value);
+                    if (fieldErrors.forgotEmail) setFieldErrors(prev => ({ ...prev, forgotEmail: '' }));
+                  }}
                   required
-                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-900"
+                  className={`w-full pl-10 pr-4 py-3 bg-slate-50 border ${fieldErrors.forgotEmail ? 'border-red-400 ring-1 ring-red-400 bg-red-50/20' : 'border-slate-200'} rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-900`}
                 />
               </div>
+              {fieldErrors.forgotEmail && (
+                <p className="mt-1.5 text-xs font-medium text-red-600 flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  {fieldErrors.forgotEmail}
+                </p>
+              )}
             </div>
             <button
               type="submit"
@@ -547,10 +650,11 @@ export default function Login() {
             </button>
             <button
               type="button"
-              onClick={() => { setStep('LOGIN'); setError(''); }}
-              className="w-full text-center text-xs font-bold text-slate-500 mt-2 hover:text-slate-800"
+              onClick={() => { setStep('LOGIN'); setError(''); setFieldErrors({}); }}
+              className="w-full inline-flex items-center justify-center gap-1.5 text-xs font-bold text-slate-500 mt-2 hover:text-slate-800"
             >
-              ← Back to Sign in
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Back to Sign in</span>
             </button>
           </form>
         )}

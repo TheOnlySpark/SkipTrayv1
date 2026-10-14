@@ -18,6 +18,8 @@ import {
 } from '../components/Icons';
 import { QRCodeSVG } from '../components/QRCode';
 import { calculateOrderLedger } from '../lib/ledger';
+import { formatErrorMessage } from '../utils/validation';
+import { Lock, Radio } from 'lucide-react';
 
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 type Order = Database['public']['Tables']['orders']['Row'];
@@ -294,7 +296,14 @@ export default function StudentDashboard() {
       setError('Lunch ordering for today is closed. Orders must be placed at least 30 minutes before the pickup slot.');
       return;
     }
-    if (cart.length === 0 || !pickupTime) return;
+    if (cart.length === 0) {
+      setError('Your tray is empty. Please add items to your tray before checkout.');
+      return;
+    }
+    if (!pickupTime) {
+      setError('Please select a lunch pickup slot before placing your order.');
+      return;
+    }
 
     const slotAvail = getSlotAvailability(pickupTime);
     if (!slotAvail.isAvailable) {
@@ -494,7 +503,7 @@ export default function StudentDashboard() {
     if (error) {
       showAlert({
         title: 'Submission Failed',
-        message: 'Failed to submit review. Please try again.',
+        message: formatErrorMessage(error, 'Failed to submit review. Please try again.'),
         type: 'error'
       });
     } else {
@@ -748,7 +757,10 @@ export default function StudentDashboard() {
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400"></span>
                 </span>
-                <span className="tracking-wide font-mono">🔴 LIVE PASS • {liveTickerTime}</span>
+                <span className="tracking-wide font-mono inline-flex items-center gap-1.5">
+                  <Radio size={12} className="text-emerald-400 shrink-0" />
+                  <span>LIVE PASS • {liveTickerTime}</span>
+                </span>
               </div>
 
               {/* High-Contrast QR Code Card with Pulsing Security Halo */}
@@ -793,7 +805,10 @@ export default function StudentDashboard() {
                 Your food is currently being cooked and boxed.
               </p>
               <div className="mt-4 px-3 py-2 bg-indigo-950/40 rounded-2xl border border-indigo-300/20 text-[11px] text-indigo-200 flex items-center gap-2">
-                <span className="text-amber-300 font-bold">🔒 Secure Pass</span>
+                <span className="text-amber-300 font-bold inline-flex items-center gap-1">
+                  <Lock size={12} className="shrink-0" />
+                  <span>Secure Pass</span>
+                </span>
                 <span>• Unlocks automatically when READY</span>
               </div>
             </div>
@@ -1171,7 +1186,8 @@ export default function StudentDashboard() {
             <div>
               <div className="inline-flex items-center justify-center gap-1.5 bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-[11px] font-extrabold border border-emerald-200 uppercase tracking-wider mb-1">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
-                <span>🔴 LIVE PASS • {liveTickerTime}</span>
+                <Radio size={12} className="text-emerald-600 shrink-0" />
+                <span>LIVE PASS • {liveTickerTime}</span>
               </div>
               <h3 className="text-2xl font-extrabold text-slate-900 mt-1">Order #{activeOrder.order_number}</h3>
               <p className="text-xs text-slate-500 font-mono mt-0.5">ID: {activeOrder.id.split('-')[0].toUpperCase()}</p>

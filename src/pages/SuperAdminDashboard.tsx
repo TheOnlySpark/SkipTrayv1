@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/ModalDialogContext';
 import { Building, Plus, Users, Search, AlertCircle, CheckCircle, Store, ShoppingBag } from 'lucide-react';
+import { isValidEmail, formatErrorMessage } from '../utils/validation';
 
 interface Tenant {
   id: string;
@@ -138,6 +139,37 @@ export default function SuperAdminDashboard() {
     e.preventDefault();
     setError('');
     setSuccess('');
+
+    const trimmedName = newName.trim();
+    const trimmedSlug = newSlug.trim().toLowerCase();
+    const trimmedAdminName = adminName.trim();
+    const trimmedAdminEmail = adminEmail.trim();
+
+    if (!trimmedName) {
+      setError('Please enter the organization name.');
+      return;
+    }
+
+    if (!trimmedSlug || !/^[a-z0-9][a-z0-9\-]{1,38}[a-z0-9]$/.test(trimmedSlug)) {
+      setError('Subdomain slug must be 3–40 characters and contain only lowercase letters, numbers, and hyphens (cannot start or end with a hyphen).');
+      return;
+    }
+
+    if (!trimmedAdminName) {
+      setError('Please enter the administrator\'s full name.');
+      return;
+    }
+
+    if (!trimmedAdminEmail || !isValidEmail(trimmedAdminEmail)) {
+      setError('Please enter a valid email address for the administrator.');
+      return;
+    }
+
+    if (!adminPassword || adminPassword.length < 6) {
+      setError('Administrator password must be at least 6 characters long.');
+      return;
+    }
+
     setCreating(true);
 
     try {
@@ -154,10 +186,10 @@ export default function SuperAdminDashboard() {
           'Authorization': `Bearer ${session?.access_token}`
         },
         body: JSON.stringify({
-          slug: newSlug,
-          name: newName,
-          admin_name: adminName,
-          admin_email: adminEmail,
+          slug: trimmedSlug,
+          name: trimmedName,
+          admin_name: trimmedAdminName,
+          admin_email: trimmedAdminEmail,
           admin_password: adminPassword
         })
       });
@@ -168,7 +200,7 @@ export default function SuperAdminDashboard() {
         throw new Error(result.error || 'Failed to create tenant');
       }
 
-      setSuccess(`Tenant created successfully! Admin invite sent to ${adminEmail}`);
+      setSuccess(`Tenant "${trimmedName}" created successfully! Admin credentials sent to ${trimmedAdminEmail}`);
       setIsCreating(false);
       
       // Reset form
@@ -182,7 +214,7 @@ export default function SuperAdminDashboard() {
       setTimeout(() => setSuccess(''), 5000);
     } catch (err: any) {
       console.error('Create tenant error:', err);
-      setError(err.message);
+      setError(formatErrorMessage(err, 'Failed to provision tenant organization. Please check details and try again.'));
     } finally {
       setCreating(false);
     }
