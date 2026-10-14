@@ -455,13 +455,17 @@ export default function CanteenAdminDashboard() {
   };
 
   const { data: penalizedStudents = [], isLoading: penaltiesLoading } = useQuery({
-    queryKey: ['canteenPenalizedStudents'],
+    queryKey: ['canteenPenalizedStudents', currentTenantId],
+    enabled: !!currentTenantId,
     queryFn: async () => {
-      const { data } = await supabase
+      let query = supabase
         .from('profiles')
         .select('*')
+        .eq('tenant_id', currentTenantId)
+        .in('role', ['STUDENT', 'TEACHER'])
         .or('strike_count.gt.0,suspended_until.not.is.null')
         .order('name');
+      const { data } = await query;
       return (data as any[]) || [];
     }
   });
