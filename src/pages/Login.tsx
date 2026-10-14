@@ -18,30 +18,31 @@ export default function Login() {
   const [step, setStep] = useState<Step>('LOGIN');
 
   // Login fields
-  const [email, setEmail]       = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [showPw, setShowPw]     = useState(false);
+  const [showPw, setShowPw] = useState(false);
 
   // Register fields
-  const [regEmail, setRegEmail]       = useState('');
+  const [regEmail, setRegEmail] = useState('');
   const [regPassword, setRegPassword] = useState('');
-  const [regConfirm, setRegConfirm]   = useState('');
-  const [regName, setRegName]         = useState('');
+  const [regConfirm, setRegConfirm] = useState('');
+  const [regName, setRegName] = useState('');
   const [regIdNumber, setRegIdNumber] = useState('');
-  const [showRegPw, setShowRegPw]     = useState(false);
+  const [showRegPw, setShowRegPw] = useState(false);
+  const [acceptTerms, setAcceptTerms] = useState(false);
 
   // Forgot password
   const [forgotEmail, setForgotEmail] = useState('');
 
   const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState('');
+  const [error, setError] = useState('');
   const [fieldErrors, setFieldErrors] = useState<{ [key: string]: string }>({});
   const [success, setSuccess] = useState('');
 
   // Dynamic tenant discovery state
   const [availableTenants, setAvailableTenants] = useState<TenantOption[]>([]);
-  const [fetchingTenants, setFetchingTenants]   = useState(false);
-  const [searchQuery, setSearchQuery]           = useState('');
+  const [fetchingTenants, setFetchingTenants] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const { user, profile, refreshProfile, signUp } = useAuth();
   const { tenantId, tenantSlug, tenantName, settings, error: tenantError, loading: tenantLoading, switchTenant } = useTenant();
@@ -141,6 +142,10 @@ export default function Login() {
   // ── REGISTER ───────────────────────────────────────────────────────────────
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!acceptTerms) {
+      setError('Please accept the Terms of Service and Privacy Policy to create an account.');
+      return;
+    }
     setLoading(true);
     setError('');
     setFieldErrors({});
@@ -331,16 +336,16 @@ export default function Login() {
           />
         )}
         <h2 className="text-2xl font-extrabold text-slate-900 leading-tight mb-1">
-          {step === 'LOGIN'            && `Welcome to ${tenantName}`}
-          {step === 'REGISTER'         && `Join ${tenantName}`}
-          {step === 'FORGOT_PASSWORD'  && 'Reset your password'}
-          {step === 'RESET_SENT'       && 'Check your email'}
+          {step === 'LOGIN' && `Welcome to ${tenantName}`}
+          {step === 'REGISTER' && `Join ${tenantName}`}
+          {step === 'FORGOT_PASSWORD' && 'Reset your password'}
+          {step === 'RESET_SENT' && 'Check your email'}
         </h2>
         <p className="text-slate-500 mb-6 text-sm">
-          {step === 'LOGIN'           && 'Sign in to pre-order from the canteen.'}
-          {step === 'REGISTER'        && 'Create your account to get started.'}
+          {step === 'LOGIN' && 'Sign in to pre-order from the canteen.'}
+          {step === 'REGISTER' && 'Create your account to get started.'}
           {step === 'FORGOT_PASSWORD' && "We'll send you a password reset link."}
-          {step === 'RESET_SENT'      && `A reset link has been sent to ${forgotEmail}.`}
+          {step === 'RESET_SENT' && `A reset link has been sent to ${forgotEmail}.`}
         </p>
 
         {error && (
@@ -434,14 +439,14 @@ export default function Login() {
               >
                 Forgot password?
               </button>
-                <button
-                  type="button"
-                  onClick={() => { setStep('REGISTER'); setError(''); setFieldErrors({}); }}
-                  className="text-xs text-slate-500 hover:text-slate-800 font-semibold inline-flex items-center gap-1"
-                >
-                  <span>New here? Register</span>
-                  <ArrowRight className="w-3 h-3" />
-                </button>
+              <button
+                type="button"
+                onClick={() => { setStep('REGISTER'); setError(''); setFieldErrors({}); }}
+                className="text-xs text-slate-500 hover:text-slate-800 font-semibold inline-flex items-center gap-1"
+              >
+                <span>New here? Register</span>
+                <ArrowRight className="w-3 h-3" />
+              </button>
             </div>
           </form>
         )}
@@ -587,6 +592,8 @@ export default function Login() {
               <input
                 type="checkbox"
                 id="accept-terms"
+                checked={acceptTerms}
+                onChange={(e) => setAcceptTerms(e.target.checked)}
                 required
                 className="mt-0.5 accent-indigo-600 w-4 h-4 cursor-pointer shrink-0"
               />
@@ -596,9 +603,9 @@ export default function Login() {
             </div>
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || !acceptTerms}
               id="register-submit"
-              className="w-full px-4 py-3 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition-colors shadow-sm disabled:opacity-50 mt-2"
+              className="w-full px-4 py-3 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed mt-2"
             >
               {loading ? 'Creating account…' : 'Create Account'}
             </button>

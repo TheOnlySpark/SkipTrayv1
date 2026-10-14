@@ -10,9 +10,7 @@ html {
 
 button,
 a,
-input,
 select,
-textarea,
 [role="button"] {
   transition: box-shadow 0.2s ease, outline-color 0.2s ease;
 }
@@ -28,6 +26,13 @@ input:focus,
 input:focus-visible,
 select:focus,
 select:focus-visible,
+textarea:focus,
+textarea:focus-visible {
+  outline: none;
+}
+
+input:focus,
+input:focus-visible,
 textarea:focus,
 textarea:focus-visible {
   outline: none;
