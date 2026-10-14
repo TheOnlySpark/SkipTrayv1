@@ -48,7 +48,40 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Forbidden: Requires elevated role' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    const { name, email, password, role, canteen_id } = await req.json();
+    const body = await req.json();
+
+    if (body.action === 'DELETE') {
+      const { user_id } = body;
+      if (!user_id) {
+        return new Response(JSON.stringify({ error: 'Missing user_id' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      const { data: targetProfile } = await adminClient
+        .from('profiles')
+        .select('canteen_id, tenant_id, role')
+        .eq('id', user_id)
+        .single();
+
+      if (targetProfile && callerProfile.role === 'CANTEEN_ADMIN') {
+        if (targetProfile.canteen_id !== callerProfile.canteen_id && targetProfile.canteen_id !== body.canteen_id) {
+          return new Response(JSON.stringify({ error: 'Forbidden: Cannot delete staff from another canteen' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+      }
+
+      // Delete from auth.users (cascades to profiles)
+      const { error: deleteUserError } = await adminClient.auth.admin.deleteUser(user_id);
+      if (deleteUserError) {
+        // Fallback: delete profile directly
+        await adminClient.from('profiles').delete().eq('id', user_id);
+      }
+
+      return new Response(JSON.stringify({ success: true, message: 'User deleted successfully' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 200,
+      });
+    }
+
+    const { name, email, password, role, canteen_id } = body;
 
     if (!name || !email || !password || !role) {
       return new Response(JSON.stringify({ error: 'Missing required fields' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
