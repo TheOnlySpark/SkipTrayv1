@@ -27,7 +27,7 @@ import { Button, InputField, Table } from '../components';
 import type { Column } from '../components';
 import { calculateOrderTotal, getOrderPaymentStatus, formatCurrency } from '../lib/salesAnalytics';
 
-type Order = Database['public']['Tables']['orders']['Row'];
+type Order = Database['public']['Views']['staff_orders']['Row'];
 type OrderItem = Database['public']['Tables']['order_items']['Row'];
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 
@@ -247,14 +247,16 @@ export default function StaffDashboard() {
       .order('veg_non_veg', { ascending: false })
       .order('name');
     if (data) {
-      const sorted = [...data].sort((a, b) => {
-        if (a.veg_non_veg !== b.veg_non_veg) {
-          return a.veg_non_veg === 'VEG' ? -1 : 1;
-        }
-        if (a.name.toLowerCase() === 'veg meals') return -1;
-        if (b.name.toLowerCase() === 'veg meals') return 1;
-        return a.name.localeCompare(b.name);
-      });
+      const sorted = [...data]
+        .filter(item => !item.name.startsWith('[DELETED]') && !item.name.startsWith('[ARCHIVED]'))
+        .sort((a, b) => {
+          if (a.veg_non_veg !== b.veg_non_veg) {
+            return a.veg_non_veg === 'VEG' ? -1 : 1;
+          }
+          if (a.name.toLowerCase() === 'veg meals') return -1;
+          if (b.name.toLowerCase() === 'veg meals') return 1;
+          return a.name.localeCompare(b.name);
+        });
       setMenuItems(sorted);
     }
   };
@@ -267,13 +269,32 @@ export default function StaffDashboard() {
     }
     setLoading(true);
     const { data } = await supabase
-      .from('orders')
+      .from('staff_orders')
       .select(`
-        *,
-        profiles ( name, id_number, strike_count ),
+        id,
+        user_id,
+        tenant_id,
+        canteen_id,
+        order_number,
+        status,
+        created_at,
+        pickup_time,
+        is_takeaway,
+        total_tax_amount,
+        collected_at,
+        requested_pickup_time,
+        planned_prep_start_time,
+        target_ready_by_time,
+        estimated_prep_duration_minutes,
+        idempotency_key,
+        payment_id,
+        profiles ( name, id_number ),
         order_items (
-          *,
-          menu_items ( * )
+          id,
+          order_id,
+          menu_item_id,
+          quantity,
+          menu_items ( id, name, price, is_sold_out, canteen_id, tenant_id )
         )
       `)
       .eq('canteen_id', profile.canteen_id)
@@ -281,7 +302,7 @@ export default function StaffDashboard() {
       .order('pickup_time', { ascending: true })
       .order('order_number', { ascending: true });
 
-    if (data) setOrders(data as OrderWithDetails[]);
+    if (data) setOrders(data as unknown as OrderWithDetails[]);
     setLoading(false);
   };
 
@@ -429,39 +450,57 @@ export default function StaffDashboard() {
     setQuickOtpLoading(true);
     setQuickOtpToast(null);
 
-    // Find the matching order in READY status (or any active order)
-    const matchingOrder = orders.find(o => o.otp_code === cleanOtp);
-    if (!matchingOrder) {
+    const { data, error } = await supabase.rpc('verify_pickup_otp', {
+      p_order_id: null,
+      p_otp: cleanOtp
+    });
+
+    if (error) {
+      if (import.meta.env.DEV) console.error("verify_pickup_otp failed:", error);
       setQuickOtpToast({
-        message: `No active order found matching OTP ${cleanOtp}. Please verify the code.`,
+        message: formatErrorMessage(error, 'Order verification failed. Please check the OTP and try again.'),
         isError: true
       });
       setQuickOtpLoading(false);
       return;
     }
 
-    // Readiness Check (Still Preparing / Placed)
-    if (matchingOrder.status !== 'READY') {
+    const result = data as any;
+    if (result.success) {
       setQuickOtpToast({
-        message: `NOT READY: Order #${matchingOrder.order_number} is currently in status "${matchingOrder.status}". Please mark it as 'READY' first.`,
-        isError: true
-      });
-      setQuickOtpLoading(false);
-      return;
-    }
-
-    const success = await handleVerifyOtp(matchingOrder.id, cleanOtp);
-    if (success) {
-      setQuickOtpToast({
-        message: `Order #${matchingOrder.order_number} for ${matchingOrder.profiles?.name || 'Student'} verified and collected!`,
+        message: `Order #${result.order_number || ''} verified and collected!`,
         isError: false
       });
       setQuickOtpInput('');
+      fetchOrders();
     } else {
-      setQuickOtpToast({
-        message: `Verification rejected for Order #${matchingOrder.order_number}.`,
-        isError: true
-      });
+      if (result.requires_override && result.order_id) {
+        const overrideConfirmed = await showConfirm({
+          title: 'Manual Override',
+          message: result.message + "\n\nDo you want to manually override?",
+          confirmText: 'Override',
+          cancelText: 'Cancel',
+          isDangerous: true
+        });
+        if (overrideConfirmed) {
+          await supabase.rpc('verify_pickup_otp', {
+            p_order_id: result.order_id,
+            p_otp: '',
+            p_is_override: true
+          });
+          setQuickOtpToast({
+            message: `Order #${result.order_number || ''} manually overridden and collected!`,
+            isError: false
+          });
+          setQuickOtpInput('');
+          fetchOrders();
+        }
+      } else {
+        setQuickOtpToast({
+          message: result.message || 'Verification rejected.',
+          isError: true
+        });
+      }
     }
     setQuickOtpLoading(false);
 
@@ -486,11 +525,9 @@ export default function StaffDashboard() {
     } else if (cleanPayload.length === 6 && /^\d+$/.test(cleanPayload)) {
       // 6-digit OTP code scanned directly
       otpCodeToVerify = cleanPayload;
-      const match = orders.find(o => o.otp_code === cleanPayload);
-      if (match) orderIdToVerify = match.id;
     }
 
-    if (!orderIdToVerify) {
+    if (!orderIdToVerify && !otpCodeToVerify) {
       playErrorBuzzer();
       setQuickOtpToast({
         message: `Invalid or unrecognized QR code format: "${cleanPayload}".`,
@@ -499,46 +536,79 @@ export default function StaffDashboard() {
       return false;
     }
 
-    const matchingOrder = orders.find(o => o.id === orderIdToVerify);
-    const orderNum = matchingOrder?.order_number ? `#${matchingOrder.order_number}` : '';
-    const studentName = matchingOrder?.profiles?.name || 'Student';
+    if (orderIdToVerify) {
+      const matchingOrder = orders.find(o => o.id === orderIdToVerify);
+      const orderNum = matchingOrder?.order_number ? `#${matchingOrder.order_number}` : '';
+      const studentName = matchingOrder?.profiles?.name || 'Student';
 
-    // 1. Anti-Replay Attack Check (Already Collected)
-    if (matchingOrder && matchingOrder.status === 'COLLECTED') {
-      playErrorBuzzer();
-      setQuickOtpToast({
-        message: `REPLAY BLOCKED: Order ${orderNum} for ${studentName} was ALREADY collected!`,
-        isError: true
-      });
-      return false;
-    }
+      // 1. Anti-Replay Attack Check (Already Collected)
+      if (matchingOrder && matchingOrder.status === 'COLLECTED') {
+        playErrorBuzzer();
+        setQuickOtpToast({
+          message: `REPLAY BLOCKED: Order ${orderNum} for ${studentName} was ALREADY collected!`,
+          isError: true
+        });
+        return false;
+      }
 
-    // 2. Kitchen Readiness Check (Still Preparing / Placed)
-    if (matchingOrder && matchingOrder.status !== 'READY') {
-      playErrorBuzzer();
-      setQuickOtpToast({
-        message: `NOT READY: Order ${orderNum} is currently in status "${matchingOrder.status}". Kitchen has not boxed it yet.`,
-        isError: true
-      });
-      return false;
-    }
+      // 2. Kitchen Readiness Check (Still Preparing / Placed)
+      if (matchingOrder && matchingOrder.status !== 'READY') {
+        playErrorBuzzer();
+        setQuickOtpToast({
+          message: `NOT READY: Order ${orderNum} is currently in status "${matchingOrder.status}". Kitchen has not boxed it yet.`,
+          isError: true
+        });
+        return false;
+      }
 
-    // 3. Perform atomic verification via RPC
-    const success = await handleVerifyOtp(orderIdToVerify, otpCodeToVerify);
-    if (success) {
-      playSuccessBeep();
-      setQuickOtpToast({
-        message: `QR Verified! Order ${orderNum} for ${studentName} collected successfully!`,
-        isError: false
-      });
-      return true;
+      // 3. Perform atomic verification via RPC
+      const success = await handleVerifyOtp(orderIdToVerify, otpCodeToVerify);
+      if (success) {
+        playSuccessBeep();
+        setQuickOtpToast({
+          message: `QR Verified! Order ${orderNum} for ${studentName} collected successfully!`,
+          isError: false
+        });
+        return true;
+      } else {
+        playErrorBuzzer();
+        setQuickOtpToast({
+          message: `QR verification rejected for order ${orderNum}.`,
+          isError: true
+        });
+        return false;
+      }
     } else {
-      playErrorBuzzer();
-      setQuickOtpToast({
-        message: `QR verification rejected for order ${orderNum}.`,
-        isError: true
+      // Direct 6-digit OTP scanned from QR
+      const { data, error } = await supabase.rpc('verify_pickup_otp', {
+        p_order_id: null,
+        p_otp: otpCodeToVerify
       });
-      return false;
+      if (error) {
+        playErrorBuzzer();
+        setQuickOtpToast({
+          message: formatErrorMessage(error, 'QR verification failed.'),
+          isError: true
+        });
+        return false;
+      }
+      const result = data as any;
+      if (result.success) {
+        playSuccessBeep();
+        setQuickOtpToast({
+          message: `QR Verified! Order #${result.order_number || ''} collected successfully!`,
+          isError: false
+        });
+        fetchOrders();
+        return true;
+      } else {
+        playErrorBuzzer();
+        setQuickOtpToast({
+          message: result.message || 'QR verification rejected.',
+          isError: true
+        });
+        return false;
+      }
     }
   };
 
@@ -643,16 +713,7 @@ export default function StaffDashboard() {
       (idNumberStr.includes(trimmed) || (queryIdClean.length > 0 && idNumberStr.includes(queryIdClean)))
     );
 
-    // 4. OTP:
-    // Safe access: order.otp_code could be null/undefined. Preserves leading zeros.
-    const otpStr = String(order.otp_code ?? '').trim().toLowerCase();
-    const queryOtpClean = trimmed.replace(/^(otp|code|token)\s*[:#\s]*/i, '').trim();
-    const matchesOtp = (
-      otpStr.length > 0 &&
-      (otpStr.includes(trimmed) || (queryOtpClean.length > 0 && otpStr.includes(queryOtpClean)))
-    );
-
-    // 5. Order UUID / ID:
+    // 4. Order UUID / ID:
     const matchesId = (order.id || '').toLowerCase().includes(trimmed);
 
     return (
@@ -660,7 +721,6 @@ export default function StaffDashboard() {
       matchesOrderNumDigits ||
       matchesName ||
       matchesStudentId ||
-      matchesOtp ||
       matchesId
     );
   };
@@ -873,9 +933,10 @@ export default function StaffDashboard() {
           <div className={`px-2.5 py-0.5 rounded-full text-[11px] font-extrabold uppercase tracking-wide border shrink-0 ${order.status === 'PLACED' ? 'bg-slate-100 text-slate-700 border-slate-300' :
               order.status === 'ACCEPTED' ? 'bg-blue-50 text-blue-700 border-blue-200' :
                 order.status === 'PREPARING' ? 'bg-orange-50 text-orange-700 border-orange-200' :
-                  'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  order.status === 'REJECTED' ? 'bg-red-50 text-red-700 border-red-200' :
+                    'bg-emerald-50 text-emerald-700 border-emerald-200'
             }`}>
-            {order.status}
+            {order.status === 'REJECTED' ? 'CANCELLED' : order.status}
           </div>
         </div>
 
@@ -1146,9 +1207,10 @@ export default function StaffDashboard() {
           order.status === 'PLACED' ? 'bg-slate-100 text-slate-700 border-slate-300' :
           order.status === 'ACCEPTED' ? 'bg-blue-50 text-blue-700 border-blue-200' :
           order.status === 'PREPARING' ? 'bg-orange-50 text-orange-700 border-orange-200' :
+          order.status === 'REJECTED' ? 'bg-red-50 text-red-700 border-red-200' :
           'bg-emerald-50 text-emerald-700 border-emerald-200'
         }`}>
-          {order.status}
+          {order.status === 'REJECTED' ? 'CANCELLED' : order.status}
         </span>
       )
     },

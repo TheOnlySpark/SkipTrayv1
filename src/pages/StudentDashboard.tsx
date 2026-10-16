@@ -29,7 +29,11 @@ type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 type Order = Database['public']['Tables']['orders']['Row'];
 type ItemReview = Database['public']['Tables']['item_reviews']['Row'];
 type PastOrder = Order & {
-  order_items: { menu_items: MenuItem | null }[];
+  order_items: {
+    id?: string;
+    quantity: number;
+    menu_items: MenuItem | null;
+  }[];
   item_reviews: ItemReview[];
 };
 
@@ -190,7 +194,18 @@ export default function StudentDashboard() {
       }
     };
 
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key && e.key.startsWith('skiptray_lunch_slot_config') && e.newValue && isMounted) {
+        try {
+          setSlotConfig(JSON.parse(e.newValue));
+        } catch {
+          // ignore
+        }
+      }
+    };
+
     window.addEventListener('lunch_slot_config_updated', handleConfigUpdate);
+    window.addEventListener('storage', handleStorageChange);
 
     const slotSub = supabase
       .channel('public:lunch_slot_configs')
@@ -204,6 +219,7 @@ export default function StudentDashboard() {
     return () => {
       isMounted = false;
       window.removeEventListener('lunch_slot_config_updated', handleConfigUpdate);
+      window.removeEventListener('storage', handleStorageChange);
       slotSub.unsubscribe();
     };
   }, [cart[0]?.item?.canteen_id, profile?.canteen_id]);
@@ -228,12 +244,15 @@ export default function StudentDashboard() {
 
   // Convert cart items for concurrent kitchen preparation scheduling
   const scheduledCartItems: ScheduledCartItem[] = useMemo(() => {
-    return cart.map(c => ({
-      id: c.item.id,
-      name: c.item.name,
-      quantity: c.quantity,
-      prepTimeMinutes: (c.item as any).prep_time_minutes || slotConfig.defaultPrepTimeMinutes || 10
-    }));
+    return cart.map(c => {
+      const isPacked = (c.item as any).category === 'Packed Food' || c.item.name.toLowerCase().includes('packed') || getItemCategory(c.item) === 'Packed Food';
+      return {
+        id: c.item.id,
+        name: c.item.name,
+        quantity: c.quantity,
+        prepTimeMinutes: isPacked ? 0 : ((c.item as any).prep_time_minutes || slotConfig.defaultPrepTimeMinutes || 10)
+      };
+    });
   }, [cart, slotConfig.defaultPrepTimeMinutes]);
 
   // Available service dates based on canteen business rules
@@ -383,14 +402,37 @@ export default function StudentDashboard() {
         .select('*')
         .order('veg_non_veg', { ascending: false })
         .order('name');
-      return (data || []).sort((a, b) => {
-        if (a.veg_non_veg !== b.veg_non_veg) {
-          return a.veg_non_veg === 'VEG' ? -1 : 1;
-        }
-        if (a.name.toLowerCase() === 'veg meals') return -1;
-        if (b.name.toLowerCase() === 'veg meals') return 1;
-        return a.name.localeCompare(b.name);
-      });
+
+      let metaMap: Record<string, any> = {};
+      try {
+        const globalMeta = localStorage.getItem('skiptray_menu_meta_global');
+        if (globalMeta) metaMap = JSON.parse(globalMeta);
+      } catch {}
+
+      return (data || [])
+        .filter(item => !item.name.startsWith('[DELETED]') && !item.name.startsWith('[ARCHIVED]'))
+        .map(item => {
+          const meta = metaMap[item.id] || {};
+          const isPacked = meta.category === 'Packed Food' || (item as any).category === 'Packed Food' || item.name.toLowerCase().includes('packed') || getItemCategory(item) === 'Packed Food';
+          const stock = (item as any).stock_quantity ?? meta.stock_quantity ?? (isPacked ? 20 : null);
+          const isSoldOut = item.is_sold_out || (isPacked && stock !== null && stock <= 0);
+
+          return {
+            ...item,
+            category: (item as any).category || meta.category || (isPacked ? 'Packed Food' : 'Meals'),
+            prep_time_minutes: (item as any).prep_time_minutes ?? meta.prep_time_minutes ?? (isPacked ? 0 : 10),
+            stock_quantity: stock,
+            is_sold_out: isSoldOut,
+          };
+        })
+        .sort((a, b) => {
+          if (a.veg_non_veg !== b.veg_non_veg) {
+            return a.veg_non_veg === 'VEG' ? -1 : 1;
+          }
+          if (a.name.toLowerCase() === 'veg meals') return -1;
+          if (b.name.toLowerCase() === 'veg meals') return 1;
+          return a.name.localeCompare(b.name);
+        });
     },
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
@@ -436,6 +478,7 @@ export default function StudentDashboard() {
         .select(`
           *,
           order_items (
+            *,
             menu_items (*)
           ),
           item_reviews (*)
@@ -483,26 +526,10 @@ export default function StudentDashboard() {
       });
       return;
     }
-    if (isSunday) {
-      showAlert({
-        title: 'Canteen Closed',
-        message: 'Orders cannot be placed on Sundays. The canteen is closed.',
-        type: 'warning'
-      });
-      return;
-    }
-    if (isBeforeOpeningTime) {
-      showAlert({
-        title: 'Ordering Not Open Yet',
-        message: 'Lunch booking opens at 9:30 AM in the morning.',
-        type: 'warning'
-      });
-      return;
-    }
     if (isLunchClosedForToday) {
       showAlert({
-        title: 'Booking Window Closed',
-        message: `Lunch ordering for today is closed. Orders must be placed at least ${slotConfig.minNoticeMinutes || 30} minutes in advance of Lunch slots (${formatPickupTime(slotConfig.serviceStartTime)} – ${formatPickupTime(slotConfig.serviceEndTime)}).`,
+        title: 'Lunch Ordering Closed',
+        message: `Lunch service has ended for today (Closed at ${formatSingleTime(slotConfig.serviceEndTime)}). Orders cannot be placed at this time.`,
         type: 'warning'
       });
       return;
@@ -518,6 +545,16 @@ export default function StudentDashboard() {
     }
 
     const existing = cart.find(c => c.item.id === item.id);
+    const stock = (item as any).stock_quantity;
+    if (stock !== null && stock !== undefined && stock <= (existing?.quantity || 0)) {
+      showAlert({
+        title: 'Out of Stock',
+        message: `Sorry, only ${stock} ${stock === 1 ? 'item is' : 'items are'} available for "${item.name}".`,
+        type: 'warning'
+      });
+      return;
+    }
+
     if (existing) {
       setCart(cart.map(c => c.item.id === item.id ? { ...c, quantity: c.quantity + 1 } : c));
     } else {
@@ -537,6 +574,11 @@ export default function StudentDashboard() {
   const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (cart.length === 0) return;
+
+    if (isLunchClosedForToday) {
+      setError(`Lunch ordering has ended for today (Service closed at ${formatSingleTime(slotConfig.serviceEndTime)}).`);
+      return;
+    }
 
     if (!smartSchedule.isValid) {
       setError(smartSchedule.reason || 'Please select a valid lunch pickup time.');
@@ -886,6 +928,9 @@ export default function StudentDashboard() {
       case 'ACCEPTED': return 'bg-blue-100 text-blue-600';
       case 'PREPARING': return 'bg-orange-100 text-orange-600';
       case 'READY': return 'bg-green-100 text-green-600';
+      case 'COLLECTED': return 'bg-green-100 text-green-700';
+      case 'REJECTED':
+      case 'CANCELLED': return 'bg-red-100 text-red-600';
       default: return 'bg-slate-100 text-slate-600';
     }
   };
@@ -965,52 +1010,71 @@ export default function StudentDashboard() {
             <div className="text-slate-500">No past orders found.</div>
           ) : (
             <div className="space-y-4">
-              {pastOrders.map(o => (
-                <div key={o.id} className="p-4 rounded-xl border border-slate-200 flex flex-col gap-4 shadow-sm">
-                  <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-                    <div>
-                      <div className="font-bold text-slate-800 text-lg">Order #{o.order_number}</div>
-                      <div className="text-xs text-slate-500 font-mono font-medium mb-1">ID: {o.id.split('-')[0].toUpperCase()}</div>
-                      <div className="text-xs text-slate-500 font-medium mb-1">Placed on: {new Date(o.created_at).toLocaleDateString()}</div>
-                      <div className="text-sm text-slate-600 mt-1">
-                        Pickup: {formatPickupTime((o as any).requested_pickup_time || o.pickup_time)} (Lunch)
-                        {(o as any).estimated_prep_duration_minutes && (
-                          <span className="text-xs text-slate-400 ml-2">
-                            • Prep: {(o as any).estimated_prep_duration_minutes}m
-                          </span>
-                        )}
+              {pastOrders.map(o => {
+                const totalAmount = (o.order_items || []).reduce((sum, oi) => {
+                  const price = Number(oi.menu_items?.price ?? 0);
+                  const qty = Number(oi.quantity) > 0 ? Number(oi.quantity) : 1;
+                  return sum + (price * qty);
+                }, 0);
+
+                return (
+                  <div key={o.id} className="p-4 rounded-xl border border-slate-200 flex flex-col gap-4 shadow-sm">
+                    <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                      <div>
+                        <div className="font-bold text-slate-800 text-lg">Order #{o.order_number}</div>
+                        <div className="text-xs text-slate-500 font-mono font-medium mb-1">ID: {o.id.split('-')[0].toUpperCase()}</div>
+                        <div className="text-xs text-slate-500 font-medium mb-1">Placed on: {new Date(o.created_at).toLocaleDateString()}</div>
+                        <div className="text-sm text-slate-600 mt-1">
+                          Pickup: {formatPickupTime((o as any).requested_pickup_time || o.pickup_time)} (Lunch)
+                          {(o as any).estimated_prep_duration_minutes && (
+                            <span className="text-xs text-slate-400 ml-2">
+                              • Prep: {(o as any).estimated_prep_duration_minutes}m
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className={`px-3 py-1 rounded-full text-xs font-bold border shrink-0 ${o.status === 'COLLECTED' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+                        {o.status === 'REJECTED' ? 'CANCELLED' : o.status}
                       </div>
                     </div>
-                    <div className={`px-3 py-1 rounded-full text-xs font-bold border ${o.status === 'COLLECTED' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
-                      {o.status}
-                    </div>
-                  </div>
 
-                  {o.order_items && o.order_items.length > 0 && (
-                    <div className="space-y-3">
-                      {o.order_items.map((oi, idx) => {
-                        const menuItem = oi.menu_items;
-                        if (!menuItem) return null;
-                        const existingReview = o.item_reviews?.find(r => r.menu_item_id === menuItem.id);
+                    {o.order_items && o.order_items.length > 0 && (
+                      <div className="space-y-3">
+                        {o.order_items.map((oi, idx) => {
+                          const menuItem = oi.menu_items;
+                          if (!menuItem) return null;
+                          const existingReview = o.item_reviews?.find(r => r.menu_item_id === menuItem.id);
+                          const qty = Number(oi.quantity) > 0 ? Number(oi.quantity) : 1;
+                          const unitPrice = Number(menuItem.price ?? 0);
+                          const itemTotal = unitPrice * qty;
 
-                        return (
-                          <div key={idx} className="flex flex-col gap-2 p-3 bg-slate-50 rounded-lg border border-slate-100">
-                            <div className="flex justify-between items-center">
-                              <span className="font-medium text-slate-700">
-                                {menuItem.name}
-                                {menuItem.price !== undefined && menuItem.price !== null && (
-                                  <span className="text-xs text-indigo-600 font-bold ml-2">₹{Number(menuItem.price).toFixed(2)}</span>
-                                )}
-                              </span>
-                              {o.status === 'COLLECTED' && !existingReview && reviewingItem?.menuItemId !== menuItem.id && (
-                                <button
-                                  onClick={() => setReviewingItem({ orderId: o.id, menuItemId: menuItem.id, itemName: menuItem.name })}
-                                  className="text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors"
-                                >
-                                  Leave Review
-                                </button>
-                              )}
-                            </div>
+                          return (
+                            <div key={idx} className="flex flex-col gap-2 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                              <div className="flex justify-between items-center gap-2">
+                                <div className="flex items-baseline gap-2 flex-wrap">
+                                  <span className="font-semibold text-slate-800 text-sm">
+                                    {menuItem.name} *{qty}
+                                  </span>
+                                  {qty > 1 && (
+                                    <span className="text-xs text-slate-400 font-normal">
+                                      (@₹{unitPrice.toFixed(2)})
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-3 shrink-0">
+                                  <span className="text-sm font-bold text-indigo-600 font-mono">
+                                    ₹{itemTotal.toFixed(2)}
+                                  </span>
+                                  {o.status === 'COLLECTED' && !existingReview && reviewingItem?.menuItemId !== menuItem.id && (
+                                    <button
+                                      onClick={() => setReviewingItem({ orderId: o.id, menuItemId: menuItem.id, itemName: menuItem.name })}
+                                      className="text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors"
+                                    >
+                                      Leave Review
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
 
                             {/* Existing Review Display */}
                             {existingReview && (
@@ -1090,8 +1154,22 @@ export default function StudentDashboard() {
                       })}
                     </div>
                   )}
+
+                  {/* Order Total Summary Footer */}
+                  {o.order_items && o.order_items.length > 0 && (
+                    <div className="flex justify-between items-center pt-2 px-1 border-t border-slate-100">
+                      <span className="text-xs text-slate-500 font-medium">
+                        {o.order_items.reduce((s, i) => s + (Number(i.quantity) > 0 ? Number(i.quantity) : 1), 0)} items
+                      </span>
+                      <div className="text-right">
+                        <span className="text-xs text-slate-500 font-medium">Total: </span>
+                        <span className="text-base font-extrabold text-slate-900 font-mono">₹{totalAmount.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              ))}
+              );
+            })}
             </div>
           )}
         </div>
@@ -1120,7 +1198,7 @@ export default function StudentDashboard() {
             <p className="text-indigo-200 font-medium tracking-wide mb-4 text-sm">Your Order Status</p>
 
             <div className={`mt-2 px-6 py-2 rounded-full font-bold text-sm tracking-wider uppercase ${getStatusColor(activeOrder.status).replace('100', '900').replace('600', '100')}`}>
-              {activeOrder.status}
+              {activeOrder.status === 'REJECTED' ? 'CANCELLED' : activeOrder.status}
             </div>
 
             {/* Security Gatekeeper: Live Anti-Screenshot Pass only illuminates when READY */}
@@ -1238,7 +1316,7 @@ export default function StudentDashboard() {
               ) : isLunchClosedForToday ? (
                 <span className="self-start sm:self-auto px-3 py-1 bg-rose-50 text-rose-700 border border-rose-200 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm">
                   <IconClock size={14} className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                  <span>Lunch Ordering Closed Today</span>
+                  <span>Lunch Ordering Closed (Ended at {formatSingleTime(slotConfig.serviceEndTime)})</span>
                 </span>
               ) : (
                 <span className="self-start sm:self-auto px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm">
@@ -1403,17 +1481,36 @@ export default function StudentDashboard() {
               </div>
             ) : (
               <div className="grid grid-cols-3 gap-2 sm:gap-4">
-                {filteredMenuItems.map(item => (
-                  <div key={item.id} className={`flex flex-col justify-between p-5 rounded-2xl border transition-all ${item.is_sold_out ? 'bg-slate-50 border-slate-100 opacity-60' : 'bg-white border-slate-200 hover:border-indigo-300 hover:shadow-md'}`}>
+                {filteredMenuItems.map(item => {
+                  const isPacked = (item as any).category === 'Packed Food' || item.name.toLowerCase().includes('packed') || getItemCategory(item) === 'Packed Food';
+                  const stock = (item as any).stock_quantity ?? (isPacked ? 20 : null);
+                  const prepMinutes = (item as any).prep_time_minutes ?? (isPacked ? 0 : 10);
+                  const isSoldOut = item.is_sold_out || (isPacked && stock !== null && stock <= 0);
+
+                  return (
+                  <div key={item.id} className={`flex flex-col justify-between p-5 rounded-2xl border transition-all ${isSoldOut ? 'bg-slate-50 border-slate-100 opacity-60' : 'bg-white border-slate-200 hover:border-indigo-300 hover:shadow-md'}`}>
                     <div>
-                      <div className="flex items-center justify-between gap-2 mb-3">
-                        <div className="flex items-center gap-2">
-                          <div className={`w-2.5 h-2.5 rounded-full shadow-sm ${item.veg_non_veg === 'VEG' ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                          <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">
+                      <div className="flex items-center justify-between gap-1.5 mb-3 flex-wrap">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <div className={`w-2.5 h-2.5 rounded-full shadow-sm shrink-0 ${item.veg_non_veg === 'VEG' ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                          <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
                             {getItemCategory(item)}
                           </span>
+                          {isPacked ? (
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                              stock !== null && stock <= 5
+                                ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                : 'bg-purple-50 text-purple-700 border-purple-200'
+                            }`}>
+                              📦 {stock !== null ? `${stock} left` : 'Packed'}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+                              ⏱️ {prepMinutes}m prep
+                            </span>
+                          )}
                         </div>
-                        {item.is_sold_out && <span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full uppercase tracking-wider">Sold Out</span>}
+                        {isSoldOut && <span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full uppercase tracking-wider">Sold Out</span>}
                       </div>
                       <h3 className="font-bold text-slate-800 leading-tight">{item.name}</h3>
                       <div className="text-sm font-extrabold text-indigo-600 mt-1.5">₹{Number(item.price || 0).toFixed(2)}</div>
@@ -1421,10 +1518,11 @@ export default function StudentDashboard() {
 
                     <div className="mt-4 flex items-center justify-between gap-1">
                       <span className="text-xs font-medium text-slate-400 shrink-0">{item.veg_non_veg === 'VEG' ? 'Veg' : 'Non-Veg'}</span>
-                      {!item.is_sold_out ? (
+                      {!isSoldOut ? (
                         (() => {
                           const cartEntry = cart.find(c => c.item.id === item.id);
                           const quantity = cartEntry?.quantity || 0;
+                          const isMaxStockReached = stock !== null && quantity >= stock;
 
                           if (quantity > 0) {
                             return (
@@ -1447,9 +1545,9 @@ export default function StudentDashboard() {
                                 <button
                                   type="button"
                                   onClick={() => addToCart(item)}
-                                  disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cartTotalItems >= 5}
+                                  disabled={isSuspended || isLunchClosedForToday || cartTotalItems >= 5 || isMaxStockReached}
                                   aria-label={`Increase quantity of ${item.name}`}
-                                  title={`Increase quantity of ${item.name}`}
+                                  title={isLunchClosedForToday ? `Lunch closed at ${formatSingleTime(slotConfig.serviceEndTime)}` : isMaxStockReached ? `Only ${stock} available in stock` : `Increase quantity of ${item.name}`}
                                   className="w-8 h-8 flex items-center justify-center text-indigo-600 hover:bg-indigo-600 hover:text-white rounded-lg font-bold text-sm transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-indigo-600 active:scale-90"
                                 >
                                   <span className="leading-none text-base font-semibold">+</span>
@@ -1462,9 +1560,9 @@ export default function StudentDashboard() {
                             <button
                               type="button"
                               onClick={() => addToCart(item)}
-                              disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cartTotalItems >= 5}
+                              disabled={isSuspended || isLunchClosedForToday || cartTotalItems >= 5 || isMaxStockReached}
                               aria-label={`Add ${item.name} to order`}
-                              title={`Add ${item.name} to order`}
+                              title={isLunchClosedForToday ? `Lunch closed at ${formatSingleTime(slotConfig.serviceEndTime)}` : isMaxStockReached ? 'Out of stock' : `Add ${item.name} to order`}
                               className="w-10 h-10 flex items-center justify-center bg-indigo-50 text-indigo-600 rounded-xl font-bold hover:bg-indigo-600 hover:text-white transition-colors disabled:opacity-50 disabled:hover:bg-indigo-50 disabled:hover:text-indigo-600 shadow-sm text-base active:scale-95"
                             >
                               +
@@ -1476,7 +1574,8 @@ export default function StudentDashboard() {
                       )}
                     </div>
                   </div>
-                ))}
+                );
+              })}
               </div>
             )}
           </div>
@@ -1977,41 +2076,49 @@ export default function StudentDashboard() {
                         >
                           Cancel
                         </button>
-                        <button
-                          type="submit"
-                          disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out)}
-                          style={{
-                            flex: 1,
-                            padding: '0.875rem',
-                            background: isSuspended
-                              ? '#ef4444'
-                              : isSunday
-                                ? '#64748b'
-                                : isBeforeOpeningTime
-                                  ? '#4f46e5'
-                                  : isLunchClosedForToday
+                        {(() => {
+                          const isSelectedDateToday = selectedDate === getISTDateTime(currentTime).dateStr;
+                          const isSelectedSlotClosed = isLunchClosedForToday;
+                          const isOrderDisabled = isSuspended || isSunday || isBeforeOpeningTime || isSelectedSlotClosed || cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out);
+
+                          return (
+                            <button
+                              type="submit"
+                              disabled={isOrderDisabled}
+                              style={{
+                                flex: 1,
+                                padding: '0.875rem',
+                                background: isSuspended
+                                  ? '#ef4444'
+                                  : isSunday
                                     ? '#64748b'
-                                    : (cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out))
-                                      ? 'rgba(99,102,241,0.4)' : '#6366f1',
-                            color: 'white',
-                            borderRadius: '0.875rem',
-                            fontWeight: 700,
-                            fontSize: '0.875rem',
-                            border: 'none',
-                            cursor: isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cart.length === 0 || !pickupTime || submitting ? 'not-allowed' : 'pointer',
-                            transition: 'background 0.2s',
-                          }}
-                        >
-                          {isSuspended
-                            ? 'Account Deactivated (3-Day Penalty)'
-                            : isSunday
-                              ? 'Closed on Sundays'
-                              : isBeforeOpeningTime
-                                ? 'Lunch Booking Opens at 9:30 AM'
-                                : isLunchClosedForToday
-                                  ? 'Lunch Ordering Closed Today'
-                                  : (submitting ? 'Placing...' : `Place Order (${cartTotalItems} items • ₹${ledger.gross_payable.toFixed(2)})`)}
-                        </button>
+                                    : isBeforeOpeningTime
+                                      ? '#4f46e5'
+                                      : isSelectedSlotClosed
+                                        ? '#64748b'
+                                        : (cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out))
+                                          ? 'rgba(99,102,241,0.4)' : '#6366f1',
+                                color: 'white',
+                                borderRadius: '0.875rem',
+                                fontWeight: 700,
+                                fontSize: '0.875rem',
+                                border: 'none',
+                                cursor: isOrderDisabled ? 'not-allowed' : 'pointer',
+                                transition: 'background 0.2s',
+                              }}
+                            >
+                              {isSuspended
+                                ? 'Account Deactivated (3-Day Penalty)'
+                                : isSunday
+                                  ? 'Closed on Sundays'
+                                  : isBeforeOpeningTime
+                                    ? 'Lunch Booking Opens at 9:30 AM'
+                                    : isSelectedSlotClosed
+                                      ? `Lunch Ordering Closed (Ended at ${formatSingleTime(slotConfig.serviceEndTime)})`
+                                      : (submitting ? 'Placing...' : `Place Order (${cartTotalItems} items • ₹${ledger.gross_payable.toFixed(2)})`)}
+                            </button>
+                          );
+                        })()}
                       </div>
                     </form>
                   </div>

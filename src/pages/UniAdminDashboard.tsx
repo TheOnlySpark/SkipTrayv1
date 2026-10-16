@@ -167,6 +167,7 @@ export default function UniAdminDashboard() {
 
   const handleCreateCanteenAdmin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (creatingAdmin) return;
     if (!selectedCanteenId) {
       showAlert({ title: 'Canteen Selection Required', message: 'Please select a canteen first before creating an admin.', type: 'warning' });
       return;

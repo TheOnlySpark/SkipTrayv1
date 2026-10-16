@@ -107,32 +107,39 @@ export default function Login() {
       return;
     }
 
-    // 1. Verify they belong to this tenant FIRST (to prevent cross-tenant password guessing)
-    const { data: hasAccess, error: accessError } = await supabase.rpc('check_user_tenant_access', {
-      p_email: trimmedEmail,
-      p_tenant_id: tenantId
+    // Authenticate credentials directly with Supabase Auth (eliminates pre-auth email enumeration)
+    const { data: authData, error: signInError } = await supabase.auth.signInWithPassword({
+      email: trimmedEmail,
+      password,
     });
-
-    if (accessError) {
-      console.error("Access error:", accessError);
-      setError('Unable to verify account access. Please check your network connection and try again.');
-      setLoading(false);
-      return;
-    }
-
-    if (hasAccess === false) {
-      setError('This account is not registered with this institution. Please check your institution or register a new account.');
-      setLoading(false);
-      return;
-    }
-
-    // 2. Only if they belong to this tenant, check their password
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email: trimmedEmail, password });
 
     if (signInError) {
       setError(formatErrorMessage(signInError, 'Invalid email or password. Please try again.'));
       setLoading(false);
       return;
+    }
+
+    // Once authenticated, verify that the user belongs to this tenant (or is Super Admin)
+    if (authData?.user) {
+      const { data: userProfile, error: profileErr } = await supabase
+        .from('profiles')
+        .select('role, tenant_id')
+        .eq('id', authData.user.id)
+        .single();
+
+      if (profileErr || !userProfile) {
+        await supabase.auth.signOut();
+        setError('Unable to load user profile. Please try again or contact support.');
+        setLoading(false);
+        return;
+      }
+
+      if (userProfile.role !== 'SUPER_ADMIN' && tenantId && userProfile.tenant_id !== tenantId) {
+        await supabase.auth.signOut();
+        setError('This account is not registered with this institution. Please check your institution or register a new account.');
+        setLoading(false);
+        return;
+      }
     }
 
     await refreshProfile();
