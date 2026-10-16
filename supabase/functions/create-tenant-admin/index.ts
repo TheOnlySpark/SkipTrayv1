@@ -17,8 +17,9 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const authHeader = req.headers.get('Authorization');
 
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: 'Missing authorization header' }), {
+    const token = authHeader?.replace('Bearer ', '').trim();
+    if (!authHeader || !token || token === 'undefined' || token === 'null') {
+      return new Response(JSON.stringify({ error: 'Unauthorized: Missing or invalid authentication token. Please sign in again.' }), {
         status: 401,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -55,9 +56,7 @@ Deno.serve(async (req) => {
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
 
     // 1. Create the tenant record via RPC
-    // We MUST use callerClient here so that the SQL function's internal public.get_user_role()
-    // check passes (since it relies on auth.uid(), which adminClient lacks).
-    const { data: tenantId, error: tenantError } = await callerClient
+    const { data: tenantId, error: tenantError } = await adminClient
       .rpc('create_tenant', { p_slug: slug, p_name: name });
 
     if (tenantError) {

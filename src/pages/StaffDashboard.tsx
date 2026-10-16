@@ -312,37 +312,52 @@ export default function StaffDashboard() {
     setQuickOtpLoading(true);
     setQuickOtpToast(null);
 
-    // Find the matching order in READY status (or any active order)
-    const matchingOrder = orders.find(o => o.otp_code === cleanOtp);
-    if (!matchingOrder) {
-      setQuickOtpToast({
-        message: `No active order found matching OTP ${cleanOtp}. Please verify the code.`,
-        isError: true
-      });
+    // If there is an active order with matching legacy/cached otp_code, use it directly
+    const directMatch = orders.find(o => o.otp_code === cleanOtp);
+    if (directMatch) {
+      const success = await handleVerifyOtp(directMatch.id, cleanOtp);
+      if (success) {
+        setQuickOtpToast({
+          message: `Order #${directMatch.order_number} for ${directMatch.profiles?.name || 'Student'} verified and collected!`,
+          isError: false
+        });
+        setQuickOtpInput('');
+      } else {
+        setQuickOtpToast({
+          message: `Verification rejected for Order #${directMatch.order_number}.`,
+          isError: true
+        });
+      }
       setQuickOtpLoading(false);
+      setTimeout(() => setQuickOtpToast(null), 5000);
       return;
     }
 
-    // Readiness Check (Still Preparing / Placed)
-    if (matchingOrder.status !== 'READY') {
-      setQuickOtpToast({
-        message: `⚠️ NOT READY: Order #${matchingOrder.order_number} is currently in status "${matchingOrder.status}". Please mark it as 'READY' first.`,
-        isError: true
+    // Otherwise, check READY orders for this canteen using verify_pickup_otp
+    const readyOrders = orders.filter(o => o.status === 'READY');
+    let verifiedOrder: OrderWithDetails | null = null;
+
+    for (const readyOrder of readyOrders) {
+      const { data, error } = await supabase.rpc('verify_pickup_otp', {
+        p_order_id: readyOrder.id,
+        p_otp: cleanOtp
       });
-      setQuickOtpLoading(false);
-      return;
+      if (!error && (data as any)?.success) {
+        verifiedOrder = readyOrder;
+        break;
+      }
     }
 
-    const success = await handleVerifyOtp(matchingOrder.id, cleanOtp);
-    if (success) {
+    if (verifiedOrder) {
       setQuickOtpToast({
-        message: `Order #${matchingOrder.order_number} for ${matchingOrder.profiles?.name || 'Student'} verified and collected!`,
+        message: `Order #${verifiedOrder.order_number} for ${verifiedOrder.profiles?.name || 'Student'} verified and collected!`,
         isError: false
       });
       setQuickOtpInput('');
+      fetchOrders();
     } else {
       setQuickOtpToast({
-        message: `Verification rejected for Order #${matchingOrder.order_number}.`,
+        message: `No ready order found matching OTP ${cleanOtp}. Please verify the code or check order status.`,
         isError: true
       });
     }
@@ -370,7 +385,27 @@ export default function StaffDashboard() {
       // 6-digit OTP code scanned directly
       otpCodeToVerify = cleanPayload;
       const match = orders.find(o => o.otp_code === cleanPayload);
-      if (match) orderIdToVerify = match.id;
+      if (match) {
+        orderIdToVerify = match.id;
+      } else {
+        // If otp_code is hashed, check ready orders by trying verify_pickup_otp directly
+        const readyOrders = orders.filter(o => o.status === 'READY');
+        for (const ro of readyOrders) {
+          const { data, error } = await supabase.rpc('verify_pickup_otp', {
+            p_order_id: ro.id,
+            p_otp: cleanPayload
+          });
+          if (!error && (data as any)?.success) {
+            const studentName = ro.profiles?.name || 'Student';
+            setQuickOtpToast({
+              message: `QR Verified! Order #${ro.order_number} for ${studentName} collected successfully!`,
+              isError: false
+            });
+            fetchOrders();
+            return true;
+          }
+        }
+      }
     }
 
     if (!orderIdToVerify) {
@@ -482,7 +517,7 @@ export default function StaffDashboard() {
         const matchesName = (order.profiles?.name || '').toLowerCase().includes(query);
         const matchesIdNumber = (order.profiles?.id_number || '').toLowerCase().includes(query);
         const matchesId = order.id.toLowerCase().includes(query);
-        const matchesOtp = order.otp_code.toLowerCase().includes(query);
+        const matchesOtp = order.otp_code ? order.otp_code.toLowerCase().includes(query) : false;
         if (!matchesNumber && !matchesName && !matchesIdNumber && !matchesId && !matchesOtp) {
           return false;
         }

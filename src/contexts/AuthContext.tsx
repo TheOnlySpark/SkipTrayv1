@@ -79,6 +79,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   const signOut = async () => {
+    if (user?.id) {
+      try {
+        localStorage.removeItem(`skiptray_active_otp_${user.id}`);
+      } catch {
+        // ignore localStorage access errors
+      }
+    }
     await supabase.auth.signOut();
   };
 

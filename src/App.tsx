@@ -14,6 +14,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import StudentDashboard from './pages/StudentDashboard';
 import StaffDashboard from './pages/StaffDashboard';
+import AdminDashboard from './pages/AdminDashboard';
 import UniAdminDashboard from './pages/UniAdminDashboard';
 import CanteenAdminDashboard from './pages/CanteenAdminDashboard';
 import SuperAdminDashboard from './pages/SuperAdminDashboard';
@@ -176,18 +177,23 @@ export default function App() {
                     </ProtectedRoute>
                   } />
                   <Route path="/staff" element={
-                    <ProtectedRoute allowedRoles={['STAFF', 'CANTEEN_ADMIN', 'UNI_ADMIN', 'SUPER_ADMIN']}>
+                    <ProtectedRoute allowedRoles={['STAFF', 'ADMIN']}>
                       <StaffDashboard />
+                    </ProtectedRoute>
+                  } />
+                  <Route path="/admin" element={
+                    <ProtectedRoute allowedRoles={['ADMIN', 'SUPER_ADMIN']}>
+                      <AdminDashboard />
+                    </ProtectedRoute>
+                  } />
+                  <Route path="/uni-admin" element={
+                    <ProtectedRoute allowedRoles={['UNI_ADMIN', 'SUPER_ADMIN']}>
+                      <UniAdminDashboard />
                     </ProtectedRoute>
                   } />
                   <Route path="/canteen-admin" element={
                     <ProtectedRoute allowedRoles={['CANTEEN_ADMIN', 'UNI_ADMIN', 'SUPER_ADMIN']}>
                       <CanteenAdminDashboard />
-                    </ProtectedRoute>
-                  } />
-                  <Route path="/uni-admin" element={
-                    <ProtectedRoute allowedRoles={['UNI_ADMIN', 'SUPER_ADMIN', 'ADMIN']}>
-                      <UniAdminDashboard />
                     </ProtectedRoute>
                   } />
                   <Route path="/super-admin" element={
