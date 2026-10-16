@@ -35,6 +35,14 @@ export function NotificationToast() {
           progress: 'bg-emerald-500',
           Icon: Sparkles,
         };
+      case 'COLLECTED':
+        return {
+          wrapper: 'border-teal-400 bg-white/98 text-slate-800 shadow-teal-500/25 ring-2 ring-teal-400/40',
+          iconBg: 'bg-teal-100 text-teal-700',
+          badge: 'bg-teal-50 text-teal-700 border-teal-300',
+          progress: 'bg-teal-500',
+          Icon: CheckCircle2,
+        };
       default:
         return {
           wrapper: 'border-indigo-200 bg-white text-slate-800 shadow-indigo-500/15',

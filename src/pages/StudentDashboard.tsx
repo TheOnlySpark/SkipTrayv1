@@ -21,7 +21,9 @@ import {
 import { QRCodeSVG } from '../components/QRCode';
 import { calculateOrderLedger } from '../lib/ledger';
 import { formatErrorMessage } from '../utils/validation';
-import { Lock, Radio } from 'lucide-react';
+import { Lock, Radio, CheckCircle2, Sparkles, ShieldCheck, Star, X as LucideX, ArrowLeft } from 'lucide-react';
+import { playStatusChime, triggerHapticFeedback } from '../utils/notificationSound';
+import { useSearchParams } from 'react-router-dom';
 
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 type Order = Database['public']['Tables']['orders']['Row'];
@@ -72,7 +74,19 @@ export default function StudentDashboard() {
   const queryClient = useQueryClient();
   const [activeOrder, setActiveOrder] = useState<Order | null>(null);
   const [pastOrders, setPastOrders] = useState<PastOrder[]>([]);
-  const [showHistory, setShowHistory] = useState(false);
+
+  // Order History Navigation linked with URL search params
+  const [searchParams, setSearchParams] = useSearchParams();
+  const showHistory = searchParams.get('tab') === 'history';
+  const setShowHistory = (show: boolean) => {
+    const next = new URLSearchParams(searchParams);
+    if (show) {
+      next.set('tab', 'history');
+    } else {
+      next.delete('tab');
+    }
+    setSearchParams(next, { replace: false });
+  };
 
   // Food Search & Filter States
   const [foodSearchQuery, setFoodSearchQuery] = useState('');
@@ -110,6 +124,12 @@ export default function StudentDashboard() {
   const [showQrModal, setShowQrModal] = useState(false);
   const [currentTime, setCurrentTime] = useState(Date.now());
 
+  // Immediate Confirmation Modal State on OTP Verification / Order Collection
+  const [collectedOrderConfirmation, setCollectedOrderConfirmation] = useState<{
+    order: Order;
+    items?: { menuItemId?: string; name: string; quantity: number; price?: number }[];
+  } | null>(null);
+
   // Close cart on Escape key press
   useEffect(() => {
     if (!cartOpen) return;
@@ -119,6 +139,16 @@ export default function StudentDashboard() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [cartOpen]);
+
+  // Close confirmation modal on Escape key press
+  useEffect(() => {
+    if (!collectedOrderConfirmation) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setCollectedOrderConfirmation(null);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [collectedOrderConfirmation]);
 
   // Periodically refresh current time every 30s to dynamically update slot cutoffs
   useEffect(() => {
@@ -371,12 +401,12 @@ export default function StudentDashboard() {
         schema: 'public',
         table: 'orders',
         filter: `user_id=eq.${profile.id}`
-      }, (payload) => {
+      }, async (payload) => {
         const updatedOrder = payload.new as Order;
         if (['PLACED', 'ACCEPTED', 'PREPARING', 'READY'].includes(updatedOrder?.status)) {
           fetchActive();
         } else {
-          // If collected or rejected, clear active order and refresh history
+          // If rejected or cancelled, clear active order and refresh history
           setActiveOrder(null);
           queryClient.invalidateQueries({ queryKey: ['pastOrders'] });
         }
@@ -972,11 +1002,6 @@ export default function StudentDashboard() {
               </div>
             )}
           </div>
-          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto items-stretch sm:items-center">
-            <button onClick={() => setShowHistory(!showHistory)} className="flex-1 text-center text-sm font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 px-4 py-3 sm:py-2 rounded-xl border border-indigo-100 transition-colors">
-              {showHistory ? 'Back to Order' : 'Order History'}
-            </button>
-          </div>
         </div>
       </div>
 
@@ -1002,7 +1027,20 @@ export default function StudentDashboard() {
         <div className="col-span-12 text-center text-slate-500">Loading...</div>
       ) : showHistory ? (
         <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-6 sm:p-8 shadow-sm">
-          <h2 className="text-xl font-bold text-slate-800 mb-6">Past Orders</h2>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 pb-4 border-b border-slate-100">
+            <div>
+              <h2 className="text-xl font-bold text-slate-800">Past Orders & Receipts</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Review collected meals, verification records, and rate your dishes</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowHistory(false)}
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-4 py-2.5 rounded-xl border border-indigo-100 transition-colors shadow-2xs self-start sm:self-auto"
+            >
+              <ArrowLeft size={14} />
+              <span>Back to Food Menu</span>
+            </button>
+          </div>
           {pastOrders.length === 0 ? (
             <div className="text-slate-500">No past orders found.</div>
           ) : (
@@ -2260,6 +2298,136 @@ export default function StudentDashboard() {
             <p className="text-xs text-slate-400 font-medium">
               Requested Slot: <strong className="text-slate-700">{formatPickupTime(activeOrder.pickup_time)} (Lunch)</strong>
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* Immediate Order Collected & OTP Verified Confirmation Modal */}
+      {collectedOrderConfirmation && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="collection-modal-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setCollectedOrderConfirmation(null);
+            }
+          }}
+        >
+          <div className="bg-white rounded-[2rem] p-6 sm:p-8 max-w-sm sm:max-w-md w-full shadow-2xl border border-slate-100 relative overflow-hidden animate-in zoom-in-95 duration-200">
+            {/* Decorative ambient gradient backdrop */}
+            <div className="absolute top-0 left-0 right-0 h-36 bg-gradient-to-b from-emerald-500/15 via-teal-500/5 to-transparent pointer-events-none" />
+
+            {/* Close button */}
+            <button
+              onClick={() => setCollectedOrderConfirmation(null)}
+              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-700 rounded-full hover:bg-slate-100 transition-colors z-10"
+              aria-label="Close confirmation"
+            >
+              <LucideX size={20} className="w-5 h-5" />
+            </button>
+
+            <div className="flex flex-col items-center text-center relative z-10">
+              {/* Animated Celebration Icon with Dual Glowing Rings */}
+              <div className="relative mb-3 flex items-center justify-center">
+                <div className="w-20 h-20 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 shadow-[0_0_30px_rgba(16,185,129,0.35)] ring-8 ring-emerald-50">
+                  <CheckCircle2 size={40} className="w-10 h-10 text-emerald-600 animate-in zoom-in duration-300" />
+                </div>
+                <div className="absolute -top-1 -right-1 bg-amber-400 text-white p-1.5 rounded-full shadow-md animate-bounce">
+                  <Sparkles size={16} className="w-4 h-4 fill-white" />
+                </div>
+              </div>
+
+              {/* Status Badge */}
+              <div className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-xs font-black border border-emerald-200 uppercase tracking-wider mb-2">
+                <ShieldCheck size={14} className="text-emerald-600" />
+                <span>OTP Verified • Collected</span>
+              </div>
+
+              {/* Main Title */}
+              <h3 id="collection-modal-title" className="text-2xl font-black text-slate-900 tracking-tight">
+                Order Collected! 🎉
+              </h3>
+              <p className="text-sm text-slate-600 mt-1.5 leading-relaxed max-w-xs sm:max-w-sm">
+                Your OTP was verified at the counter and your meal has been handed over.
+              </p>
+
+              {/* Order Details Receipt Card */}
+              <div className="w-full bg-slate-50 border border-slate-200/80 rounded-2xl p-4 mt-5 text-left shadow-inner">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-200/70">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Order Number</span>
+                    <span className="text-lg font-black text-slate-800">#{collectedOrderConfirmation.order.order_number}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Verified OTP</span>
+                    <span className="font-mono text-base font-extrabold text-emerald-700 bg-emerald-100/70 px-2 py-0.5 rounded-md border border-emerald-200">
+                      {collectedOrderConfirmation.order.otp_code || 'Verified'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Items Summary if available */}
+                {collectedOrderConfirmation.items && collectedOrderConfirmation.items.length > 0 && (
+                  <div className="py-2.5 border-b border-slate-200/70 space-y-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">Items Collected</span>
+                    {collectedOrderConfirmation.items.map((it, idx) => (
+                      <div key={idx} className="flex justify-between items-center text-xs text-slate-700">
+                        <span className="font-medium text-slate-800">{it.quantity}x {it.name}</span>
+                        {it.price && <span className="text-slate-500 font-semibold">₹{(Number(it.price) * it.quantity).toFixed(2)}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between pt-2.5 text-xs text-slate-500">
+                  <span>Collected At:</span>
+                  <span className="font-semibold text-slate-700">
+                    {new Date((collectedOrderConfirmation.order as any).collected_at || Date.now()).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                  </span>
+                </div>
+
+                {collectedOrderConfirmation.items && collectedOrderConfirmation.items.length > 0 && (
+                  <div className="flex items-center justify-between pt-2 text-xs border-t border-slate-200/60 mt-2">
+                    <span className="font-bold text-slate-600">Total Paid:</span>
+                    <span className="font-black text-slate-900 text-sm">
+                      ₹{collectedOrderConfirmation.items.reduce((sum, it) => sum + (Number(it.price || 0) * it.quantity), 0).toFixed(2)}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="w-full flex flex-col gap-2.5 mt-6">
+                <button
+                  onClick={() => {
+                    const currentOrder = collectedOrderConfirmation.order;
+                    const items = collectedOrderConfirmation.items;
+                    setCollectedOrderConfirmation(null);
+                    setShowHistory(true);
+                    if (items && items.length > 0 && items[0].menuItemId) {
+                      setReviewingItem({
+                        orderId: currentOrder.id,
+                        menuItemId: items[0].menuItemId,
+                        itemName: items[0].name
+                      });
+                    }
+                  }}
+                  className="w-full py-3.5 px-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-extrabold rounded-xl shadow-lg shadow-emerald-600/25 hover:shadow-emerald-600/35 active:scale-[0.99] transition-all flex items-center justify-center gap-2 text-sm"
+                >
+                  <Star size={16} className="fill-amber-300 text-amber-300" />
+                  <span>Rate Your Meal</span>
+                </button>
+
+                <button
+                  onClick={() => setCollectedOrderConfirmation(null)}
+                  className="w-full py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-colors text-sm"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

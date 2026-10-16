@@ -16,7 +16,8 @@ import {
   Users,
   BarChart3,
   MessageSquare,
-  ClipboardList
+  ClipboardList,
+  History
 } from 'lucide-react';
 
 export interface SideBarProps {
@@ -62,6 +63,15 @@ export default function SideBar({
       badge: 'Menu',
       badgeColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
       description: 'Browse canteens & pre-order',
+      roles: ['STUDENT', 'TEACHER', 'SUPER_ADMIN']
+    },
+    {
+      name: 'Order History',
+      href: '/student?tab=history',
+      icon: History,
+      badge: 'Receipts',
+      badgeColor: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+      description: 'View past orders & reviews',
       roles: ['STUDENT', 'TEACHER', 'SUPER_ADMIN']
     },
     // Staff (Kitchen)
@@ -214,7 +224,10 @@ export default function SideBar({
     return (
       <ul className="space-y-1.5">
         {items.map((item) => {
-          const isActive = location.pathname === item.href;
+          const currentFullUrl = location.pathname + (location.search || '');
+          const isActive = item.href.includes('?')
+            ? currentFullUrl === item.href
+            : location.pathname === item.href && !location.search;
           const Icon = item.icon;
 
           return (

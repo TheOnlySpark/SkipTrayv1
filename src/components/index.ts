@@ -13,3 +13,5 @@ export type { ModalProps, ModalVariant, ModalSize, ModalAction } from './Modal';
 
 export { Table } from './Table';
 export type { TableProps, Column } from './Table';
+
+export { default as ScrollToTop } from './ScrollToTop';
