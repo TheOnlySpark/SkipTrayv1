@@ -8,6 +8,7 @@ import { Database } from '../types/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatPickupTime } from './StudentDashboard';
 import { isValidEmail, formatErrorMessage } from '../utils/validation';
+import { getItemCategory } from '../lib/menuCategories';
 import {
   IconAlertTriangle,
   IconBan,
@@ -370,10 +371,17 @@ export default function CanteenAdminDashboard() {
   // Filtered menu items based on menuSearch and menuTypeFilter
   const filteredMenuItems = useMemo(() => {
     return menuItems.filter(item => {
+      // Exclude items that are marked as deleted or archived
+      const lowerName = (item.name || '').toLowerCase();
+      if (lowerName.includes('[deleted]') || lowerName.includes('[archived]')) {
+        return false;
+      }
+
       // Type/Status filter
       if (menuTypeFilter === 'VEG' && item.veg_non_veg !== 'VEG') return false;
       if (menuTypeFilter === 'NON_VEG' && item.veg_non_veg !== 'NON_VEG') return false;
-      if (menuTypeFilter === 'PACKED' && !item.name.toLowerCase().includes('packed')) return false;
+      const isPacked = (item as any).category === 'Packed Food' || (item as any).category === 'PACKED' || getItemCategory(item) === 'Packed Food' || (item.name || '').toLowerCase().includes('packed');
+      if (menuTypeFilter === 'PACKED' && !isPacked) return false;
       if (menuTypeFilter === 'AVAILABLE' && item.is_sold_out) return false;
       if (menuTypeFilter === 'SOLD_OUT' && !item.is_sold_out) return false;
 
@@ -752,8 +760,51 @@ export default function CanteenAdminDashboard() {
   const [newItemName, setNewItemName] = useState('');
   const [newItemPrice, setNewItemPrice] = useState('');
   const [newItemType, setNewItemType] = useState<FoodType>('VEG');
+  const [newItemCategory, setNewItemCategory] = useState<'FRESH' | 'PACKED'>('FRESH');
   const [newItemPrepTime, setNewItemPrepTime] = useState('10');
+  const [newItemQuantity, setNewItemQuantity] = useState('20');
   const [priceError, setPriceError] = useState<string | null>(null);
+
+  const saveItemMetadata = (itemId: string, meta: { category?: string; prep_time_minutes?: number; stock_quantity?: number | null }) => {
+    try {
+      const key = `canteen_menu_meta_${currentCanteenId}`;
+      const existing = localStorage.getItem(key);
+      const map = existing ? JSON.parse(existing) : {};
+      map[itemId] = { ...(map[itemId] || {}), ...meta };
+      localStorage.setItem(key, JSON.stringify(map));
+
+      const globalMapKey = 'skiptray_menu_meta_global';
+      const globalExisting = localStorage.getItem(globalMapKey);
+      const globalMap = globalExisting ? JSON.parse(globalExisting) : {};
+      globalMap[itemId] = { ...(globalMap[itemId] || {}), ...meta };
+      localStorage.setItem(globalMapKey, JSON.stringify(globalMap));
+    } catch {}
+  };
+
+  const handleUpdateStock = async (itemId: string, newStock: number) => {
+    const stock = Math.max(0, newStock);
+    const shouldMarkSoldOut = stock === 0;
+
+    try {
+      await (supabase.from('menu_items') as any).update({
+        stock_quantity: stock,
+        is_sold_out: shouldMarkSoldOut
+      }).eq('id', itemId);
+    } catch {}
+
+    saveItemMetadata(itemId, { stock_quantity: stock });
+
+    setMenuItems(prev => prev.map(item => {
+      if (item.id === itemId) {
+        return {
+          ...item,
+          stock_quantity: stock,
+          is_sold_out: shouldMarkSoldOut
+        } as any;
+      }
+      return item;
+    }));
+  };
 
   // Lunch Pickup Time Slots Management State
   const [slotConfig, setSlotConfig] = useState<LunchSlotConfig>(DEFAULT_LUNCH_SLOT_CONFIG);
@@ -897,7 +948,37 @@ export default function CanteenAdminDashboard() {
       .eq('canteen_id', currentCanteenId)
       .order('created_at', { ascending: false });
     if (data) {
-      setMenuItems(data);
+      const stored = localStorage.getItem(`canteen_deleted_menu_${currentCanteenId}`);
+      const deletedIds: string[] = stored ? JSON.parse(stored) : [];
+
+      let metaMap: Record<string, any> = {};
+      try {
+        const metaStored = localStorage.getItem(`canteen_menu_meta_${currentCanteenId}`);
+        const globalMeta = localStorage.getItem('skiptray_menu_meta_global');
+        metaMap = {
+          ...(globalMeta ? JSON.parse(globalMeta) : {}),
+          ...(metaStored ? JSON.parse(metaStored) : {})
+        };
+      } catch {}
+
+      setMenuItems(data
+        .filter(item => {
+          if (deletedIds.includes(item.id)) return false;
+          const lowerName = (item.name || '').toLowerCase();
+          if (lowerName.includes('[deleted]') || lowerName.includes('[archived]')) return false;
+          return true;
+        })
+        .map(item => {
+          const meta = metaMap[item.id] || {};
+          const isPacked = meta.category === 'Packed Food' || (item as any).category === 'Packed Food' || getItemCategory(item) === 'Packed Food';
+          return {
+            ...item,
+            category: (item as any).category || meta.category || (isPacked ? 'Packed Food' : 'Meals'),
+            prep_time_minutes: (item as any).prep_time_minutes ?? meta.prep_time_minutes ?? (isPacked ? 0 : 10),
+            stock_quantity: (item as any).stock_quantity ?? meta.stock_quantity ?? (isPacked ? 20 : null),
+          } as any;
+        })
+      );
     }
     setLoading(false);
   };
@@ -965,25 +1046,26 @@ export default function CanteenAdminDashboard() {
 
     setPriceError(null);
 
-    const parsedPrepTime = Number(newItemPrepTime) || 10;
+    const isPacked = newItemCategory === 'PACKED';
+    const parsedPrepTime = isPacked ? 0 : (Number(newItemPrepTime) || 10);
+    const parsedStock = isPacked ? Math.max(0, parseInt(newItemQuantity, 10) || 0) : null;
+    const categoryLabel = isPacked ? 'Packed Food' : 'Meals';
 
-    const insertPayload: Database['public']['Tables']['menu_items']['Insert'] = {
+    const insertPayload: any = {
       name: newItemName.trim(),
       veg_non_veg: newItemType,
       price: parsedPrice,
+      category: categoryLabel,
       prep_time_minutes: parsedPrepTime,
+      stock_quantity: parsedStock,
       tenant_id: currentTenantId,
       canteen_id: currentCanteenId
     };
 
     let { data, error } = await supabase.from('menu_items').insert(insertPayload).select().single();
 
-    // Graceful fallback: If 'prep_time_minutes' is not yet present in the database or schema cache, retry without it
-    if (error && (
-      error.message?.includes('prep_time_minutes') ||
-      (error as any)?.details?.includes('prep_time_minutes') ||
-      error.code === 'PGRST204'
-    )) {
+    // Graceful fallback: If extended columns are not yet present in the remote DB schema, fallback to core columns
+    if (error) {
       const fallbackPayload = {
         name: newItemName.trim(),
         veg_non_veg: newItemType,
@@ -1002,11 +1084,30 @@ export default function CanteenAdminDashboard() {
     }
 
     if (data) {
-      setMenuItems([data, ...menuItems]);
+      const enhancedItem = {
+        ...data,
+        category: categoryLabel,
+        prep_time_minutes: parsedPrepTime,
+        stock_quantity: parsedStock,
+      };
+
+      saveItemMetadata(data.id, {
+        category: categoryLabel,
+        prep_time_minutes: parsedPrepTime,
+        stock_quantity: parsedStock,
+      });
+
+      setMenuItems([enhancedItem as any, ...menuItems]);
       setNewItemName('');
       setNewItemPrice('');
       setNewItemPrepTime('10');
+      setNewItemQuantity('20');
       setPriceError(null);
+      showAlert({
+        title: 'Item Added',
+        message: `Successfully added ${newItemName.trim()} (${isPacked ? `Packed Food • Stock: ${parsedStock} pcs` : `Fresh Food • Prep: ${parsedPrepTime}m`}).`,
+        type: 'success'
+      });
     }
   };
 
@@ -1029,17 +1130,114 @@ export default function CanteenAdminDashboard() {
     });
     if (!confirmed) return;
 
-    const { error } = await supabase
-      .from('menu_items')
-      .delete()
-      .eq('id', id);
+    let dbDeleted = false;
 
-    if (error) {
-      showAlert({ title: 'Delete Failed', message: `Could not delete "${name}": ${error.message}`, type: 'error' });
-    } else {
-      setMenuItems(prev => prev.filter(item => item.id !== id));
-      showAlert({ title: 'Item Deleted', message: `"${name}" was removed from the menu.`, type: 'success' });
+    // 1. Try RPC function canteen_admin_delete_menu_item (if installed on DB)
+    try {
+      const { data: rpcData, error: rpcError } = await (supabase.rpc as any)('canteen_admin_delete_menu_item', { p_item_id: id });
+      if (!rpcError && (rpcData?.success || rpcData === true)) {
+        dbDeleted = true;
+      }
+    } catch (e) {
+      console.warn('[DeleteMenuItem] RPC note:', e);
     }
+
+    // 2. Try direct delete
+    if (!dbDeleted) {
+      try {
+        const { error } = await supabase
+          .from('menu_items')
+          .delete()
+          .eq('id', id);
+
+        if (!error) {
+          dbDeleted = true;
+        }
+      } catch (e) {
+        console.warn('[DeleteMenuItem] Direct delete note:', e);
+      }
+    }
+
+    // 3. If direct delete is blocked by foreign key (linked to past orders), deactivate in DB
+    if (!dbDeleted) {
+      try {
+        const cleanName = name.replace(/^(\[(?:DELETED|ARCHIVED)\]\s*)+/gi, '').trim();
+        await supabase
+          .from('menu_items')
+          .update({
+            is_sold_out: true,
+            name: `[DELETED] ${cleanName}`
+          })
+          .eq('id', id);
+      } catch (e) {
+        console.warn('[DeleteMenuItem] DB tag note:', e);
+      }
+    }
+
+    // 4. Persist to local canteen deleted IDs list so it never appears in the UI
+    try {
+      const key = `canteen_deleted_menu_${currentCanteenId}`;
+      const stored = localStorage.getItem(key);
+      const list: string[] = stored ? JSON.parse(stored) : [];
+      if (!list.includes(id)) {
+        list.push(id);
+        localStorage.setItem(key, JSON.stringify(list));
+      }
+    } catch { }
+
+    // 5. Update local state immediately
+    setMenuItems(prev => prev.filter(item => item.id !== id));
+    queryClient.invalidateQueries({ queryKey: ['menuItems'] });
+
+    showAlert({
+      title: 'Item Deleted',
+      message: `"${name}" was successfully removed from the menu.`,
+      type: 'success'
+    });
+  };
+
+  const handleCleanArchivedItems = async () => {
+    const archivedItems = menuItems.filter(i => i.name.startsWith('[ARCHIVED]') || i.name.startsWith('[DELETED]'));
+    if (archivedItems.length === 0) return;
+
+    const confirmed = await showConfirm({
+      title: 'Clean Up Archived Items',
+      message: `Remove all ${archivedItems.length} archived/test items from the menu view?`,
+      confirmText: 'Remove All',
+      cancelText: 'Cancel',
+      isDangerous: true,
+    });
+    if (!confirmed) return;
+
+    const key = `canteen_deleted_menu_${currentCanteenId}`;
+    const stored = localStorage.getItem(key);
+    const list: string[] = stored ? JSON.parse(stored) : [];
+
+    for (const item of archivedItems) {
+      if (!list.includes(item.id)) list.push(item.id);
+      try {
+        await (supabase.rpc as any)('canteen_admin_delete_menu_item', { p_item_id: item.id });
+      } catch {}
+      try {
+        await supabase.from('menu_items').delete().eq('id', item.id);
+      } catch {}
+      try {
+        await supabase.from('menu_items').update({ is_sold_out: true, name: `[DELETED] ${item.name}` }).eq('id', item.id);
+      } catch {}
+    }
+
+    try {
+      localStorage.setItem(key, JSON.stringify(list));
+    } catch {}
+
+    setMenuItems(prev => prev.filter(i => !archivedItems.some(a => a.id === i.id)));
+    queryClient.invalidateQueries({ queryKey: ['menuItems'] });
+
+    showAlert({
+      title: 'Clean Up Complete',
+      message: `Removed ${archivedItems.length} archived items from the menu.`,
+      type: 'success'
+    });
   };
 
   if (!currentCanteenId) {
@@ -1576,23 +1774,61 @@ export default function CanteenAdminDashboard() {
   ) : isMenuView ? (
     /* Dedicated View 2: Manage Menu */
     <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 sm:p-8 shadow-sm flex flex-col">
-        <div className="flex justify-between items-center mb-5 shrink-0">
-          <h2 className="text-xl font-bold text-slate-800">Manage Menu</h2>
-          <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">
-            {menuItems.length} {menuItems.length === 1 ? 'item' : 'items'}
-          </span>
+        <div className="flex justify-between items-center mb-5 shrink-0 flex-wrap gap-2">
+          <div className="flex items-center gap-2.5">
+            <h2 className="text-xl font-bold text-slate-800">Manage Menu</h2>
+            <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">
+              {filteredMenuItems.length} {filteredMenuItems.length === 1 ? 'item' : 'items'}
+            </span>
+          </div>
         </div>
-        <form onSubmit={handleAddItem} className="flex flex-col gap-3 mb-5 bg-slate-50 p-4 rounded-xl border border-slate-100 shrink-0">
+        <form onSubmit={handleAddItem} className="flex flex-col gap-3.5 mb-5 bg-slate-50 p-4.5 rounded-2xl border border-slate-200/80 shadow-xs shrink-0">
+          {/* Category Selector: Fresh Food vs Packed Food */}
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Category:</span>
+            <div className="inline-flex p-1 bg-white border border-slate-200 rounded-xl gap-1 shadow-2xs">
+              <button
+                type="button"
+                onClick={() => setNewItemCategory('FRESH')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all ${
+                  newItemCategory === 'FRESH'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                }`}
+              >
+                <span>🍳 Fresh Food</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${newItemCategory === 'FRESH' ? 'bg-emerald-700 text-emerald-100' : 'bg-slate-100 text-slate-500'}`}>
+                  Prep Time
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setNewItemCategory('PACKED')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all ${
+                  newItemCategory === 'PACKED'
+                    ? 'bg-purple-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                }`}
+              >
+                <span>📦 Packed Food</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${newItemCategory === 'PACKED' ? 'bg-purple-700 text-purple-100' : 'bg-slate-100 text-slate-500'}`}>
+                  Quantity
+                </span>
+              </button>
+            </div>
+          </div>
+
           <input
             type="text"
-            placeholder="Item Name"
+            placeholder={newItemCategory === 'FRESH' ? 'Fresh Food Name (e.g., Sambar Rice, KFC Chicken, Paneer Dosa, Meals)' : 'Packed Food Name (e.g., Lays Classic, Oreo Biscuits, Amul Lassi, Packed Chips)'}
             value={newItemName}
             onChange={(e) => setNewItemName(e.target.value)}
             maxLength={100}
-            className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm text-slate-800"
+            className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm text-slate-800 placeholder:text-slate-400 font-medium"
           />
+
           <div className="flex flex-col gap-1">
-            <div className="flex gap-2 items-center">
+            <div className="flex gap-2 items-center flex-wrap sm:flex-nowrap">
               <input
                 type="number"
                 placeholder="Price (₹)"
@@ -1603,31 +1839,73 @@ export default function CanteenAdminDashboard() {
                 }}
                 min="0.01"
                 step="any"
-                className={`w-28 px-3.5 py-2 bg-white border ${priceError ? 'border-rose-400 ring-1 ring-rose-400' : 'border-slate-200'} rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm text-slate-800`}
+                className={`w-28 px-3.5 py-2.5 bg-white border ${priceError ? 'border-rose-400 ring-1 ring-rose-400' : 'border-slate-200'} rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm font-semibold text-slate-800`}
               />
-              <input
-                type="number"
-                placeholder="Prep (m)"
-                title="Estimated preparation duration in minutes"
-                value={newItemPrepTime}
-                onChange={(e) => setNewItemPrepTime(e.target.value)}
-                min="1"
-                max="60"
-                className="w-20 px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm text-slate-800"
-              />
+
+              {/* Conditional Input: Fresh Food has Preparation Time; Packed Food has Select Quantity */}
+              {newItemCategory === 'FRESH' ? (
+                <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 py-1.5">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider shrink-0">⏱️ Prep:</span>
+                  <input
+                    type="number"
+                    placeholder="10"
+                    title="Estimated kitchen preparation duration in minutes"
+                    value={newItemPrepTime}
+                    onChange={(e) => setNewItemPrepTime(e.target.value)}
+                    min="1"
+                    max="60"
+                    className="w-12 px-1 py-1 text-sm font-bold text-slate-800 text-center border-none outline-none focus:ring-0"
+                  />
+                  <span className="text-[11px] font-semibold text-slate-400">mins</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 py-1.5">
+                  <span className="text-[11px] font-bold text-purple-600 uppercase tracking-wider shrink-0">📦 Qty:</span>
+                  <input
+                    type="number"
+                    placeholder="20"
+                    title="Available stock quantity in pieces"
+                    value={newItemQuantity}
+                    onChange={(e) => setNewItemQuantity(e.target.value)}
+                    min="0"
+                    max="1000"
+                    className="w-14 px-1 py-1 text-sm font-bold text-slate-800 text-center border-none outline-none focus:ring-0"
+                  />
+                  <select
+                    value={newItemQuantity}
+                    onChange={(e) => setNewItemQuantity(e.target.value)}
+                    className="text-xs font-semibold text-slate-600 bg-slate-50 border border-slate-200 rounded px-1.5 py-1 cursor-pointer"
+                    title="Quick preset quantity options"
+                  >
+                    <option value="5">5 pcs</option>
+                    <option value="10">10 pcs</option>
+                    <option value="15">15 pcs</option>
+                    <option value="20">20 pcs</option>
+                    <option value="25">25 pcs</option>
+                    <option value="50">50 pcs</option>
+                    <option value="100">100 pcs</option>
+                  </select>
+                </div>
+              )}
+
               <select
                 value={newItemType}
                 onChange={(e) => setNewItemType(e.target.value as FoodType)}
-                className="w-28 px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm text-slate-800"
+                className="w-28 px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm font-semibold text-slate-800"
               >
-                <option value="VEG">Veg</option>
-                <option value="NON_VEG">Non-Veg</option>
+                <option value="VEG">🟢 Veg</option>
+                <option value="NON_VEG">🔴 Non-Veg</option>
               </select>
+
               <button
                 type="submit"
-                className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 active:scale-95 transition-all shrink-0 cursor-pointer"
+                className={`px-5 py-2.5 text-white rounded-xl text-sm font-bold active:scale-95 transition-all shrink-0 cursor-pointer shadow-xs ${
+                  newItemCategory === 'FRESH'
+                    ? 'bg-emerald-600 hover:bg-emerald-700'
+                    : 'bg-purple-600 hover:bg-purple-700'
+                }`}
               >
-                Add Item
+                + Add {newItemCategory === 'FRESH' ? 'Fresh Food' : 'Packed Item'}
               </button>
             </div>
             {priceError && (
@@ -1699,61 +1977,99 @@ export default function CanteenAdminDashboard() {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            {filteredMenuItems.map(item => (
-              <div
-                key={item.id}
-                className={`p-3.5 rounded-2xl border transition-all flex flex-col justify-between gap-2 shadow-xs ${item.is_sold_out
-                    ? 'bg-slate-50/60 border-slate-200 opacity-70'
-                    : 'bg-white border-slate-200/90 hover:border-emerald-300'
-                  }`}
-              >
-                <div className="flex justify-between items-start gap-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <h4 className="font-extrabold text-slate-900 text-sm truncate">{item.name}</h4>
-                      <span className={`text-[10px] px-1.5 py-0.2 rounded font-black border ${item.veg_non_veg === 'VEG'
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          : 'bg-rose-50 text-rose-700 border-rose-200'
-                        }`}>
-                        {item.veg_non_veg === 'VEG' ? 'VEG' : 'NON-VEG'}
-                      </span>
-                      {item.name.toLowerCase().includes('packed') && (
-                        <span className="text-[10px] px-1.5 py-0.2 rounded font-black bg-purple-50 text-purple-700 border border-purple-200">
-                          PACKED
+            {filteredMenuItems.map(item => {
+              const isPacked = (item as any).category === 'Packed Food' || item.name.toLowerCase().includes('packed') || getItemCategory(item) === 'Packed Food';
+              const stock = (item as any).stock_quantity ?? (isPacked ? 20 : null);
+              const prepMinutes = (item as any).prep_time_minutes ?? (isPacked ? 0 : 10);
+
+              return (
+                <div
+                  key={item.id}
+                  className={`p-3.5 rounded-2xl border transition-all flex flex-col justify-between gap-2 shadow-xs ${item.is_sold_out
+                      ? 'bg-slate-50/60 border-slate-200 opacity-70'
+                      : 'bg-white border-slate-200/90 hover:border-emerald-300'
+                    }`}
+                >
+                  <div className="flex justify-between items-start gap-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <h4 className="font-extrabold text-slate-900 text-sm truncate">{item.name}</h4>
+                        <span className={`text-[10px] px-1.5 py-0.2 rounded font-black border ${item.veg_non_veg === 'VEG'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : 'bg-rose-50 text-rose-700 border-rose-200'
+                          }`}>
+                          {item.veg_non_veg === 'VEG' ? 'VEG' : 'NON-VEG'}
                         </span>
-                      )}
+                        {isPacked ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-black bg-purple-50 text-purple-700 border border-purple-200">
+                            📦 PACKED
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-black bg-amber-50 text-amber-700 border border-amber-200">
+                            🍳 FRESH • {prepMinutes}m prep
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                        <span className="font-black text-emerald-700 text-sm">
+                          ₹{Number(item.price).toFixed(2)}
+                        </span>
+                        {isPacked && (
+                          <div className="inline-flex items-center gap-1.5 bg-purple-50/70 border border-purple-200/80 px-2 py-0.5 rounded-lg">
+                            <span className="text-[10px] font-bold text-purple-700">Stock:</span>
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateStock(item.id, Math.max(0, (stock ?? 0) - 1))}
+                              disabled={(stock ?? 0) <= 0}
+                              className="w-5 h-5 flex items-center justify-center rounded bg-white border border-purple-200 hover:bg-purple-100 text-xs font-black text-purple-900 disabled:opacity-30 cursor-pointer shadow-2xs"
+                              title="Decrease stock by 1"
+                            >
+                              −
+                            </button>
+                            <span className={`text-xs font-black min-w-[20px] text-center ${(stock ?? 0) === 0 ? 'text-rose-600 font-extrabold' : 'text-purple-900'}`}>
+                              {stock ?? 0}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateStock(item.id, (stock ?? 0) + 1)}
+                              className="w-5 h-5 flex items-center justify-center rounded bg-white border border-purple-200 hover:bg-purple-100 text-xs font-black text-purple-900 cursor-pointer shadow-2xs"
+                              title="Increase stock by 1"
+                            >
+                              +
+                            </button>
+                            <span className="text-[10px] text-purple-600 font-semibold">pcs</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <div className="font-black text-emerald-700 text-sm mt-0.5">
-                      ₹{Number(item.price).toFixed(2)}
-                    </div>
+
+                    <button
+                      onClick={() => handleDeleteMenuItem(item.id, item.name)}
+                      className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 transition-colors"
+                      title="Delete item"
+                    >
+                      <Trash2 size={15} />
+                    </button>
                   </div>
 
-                  <button
-                    onClick={() => handleDeleteMenuItem(item.id, item.name)}
-                    className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 transition-colors"
-                    title="Delete item"
-                  >
-                    <Trash2 size={15} />
-                  </button>
+                  <div className="flex justify-between items-center pt-2 border-t border-slate-100">
+                    <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold ${item.is_sold_out ? 'text-rose-600' : 'text-emerald-600'}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${item.is_sold_out ? 'bg-rose-500' : 'bg-emerald-500'}`} />
+                      <span>{item.is_sold_out ? 'Sold Out' : 'Available'}</span>
+                    </span>
+                    <button
+                      onClick={() => handleToggleSoldOut(item.id, item.is_sold_out)}
+                      className={`px-3 py-1 rounded-xl text-xs font-bold transition-all border ${item.is_sold_out
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                          : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
+                        }`}
+                    >
+                      {item.is_sold_out ? 'Mark Available' : 'Mark Sold Out'}
+                    </button>
+                  </div>
                 </div>
-
-                <div className="flex justify-between items-center pt-2 border-t border-slate-100">
-                  <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold ${item.is_sold_out ? 'text-rose-600' : 'text-emerald-600'}`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${item.is_sold_out ? 'bg-rose-500' : 'bg-emerald-500'}`} />
-                    <span>{item.is_sold_out ? 'Sold Out' : 'Available'}</span>
-                  </span>
-                  <button
-                    onClick={() => handleToggleSoldOut(item.id, item.is_sold_out)}
-                    className={`px-3 py-1 rounded-xl text-xs font-bold transition-all border ${item.is_sold_out
-                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                        : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
-                      }`}
-                  >
-                    {item.is_sold_out ? 'Mark Available' : 'Mark Sold Out'}
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

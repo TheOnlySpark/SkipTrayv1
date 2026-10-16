@@ -97,6 +97,9 @@ export function formatErrorMessage(err: unknown, fallbackMessage = 'An unexpecte
   if (lower.includes('jwt expired') || lower.includes('session expired')) {
     return 'Your session has expired. Please log in again to continue.';
   }
+  if (lower.includes('violates foreign key constraint') && lower.includes('order_items')) {
+    return 'This item cannot be deleted because it is linked to past customer order history. Mark it as "Sold Out" instead.';
+  }
   if (lower.includes('permission denied') || lower.includes('new row violates row-level security')) {
     return 'Access denied. You do not have permission to perform this action.';
   }
