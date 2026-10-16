@@ -52,11 +52,27 @@ export default function Login() {
     }
   }, [user, profile, navigate, tenantId]);
 
+  // ── VALIDATION HELPERS ──────────────────────────────────────────────────
+  const EMAIL_DOT_COM_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.com$/i;
+
   // ── LOGIN ──────────────────────────────────────────────────────────────────
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
+
+    // Pre-flight client validation: email format ____@____.com and password length >= 8
+    if (!EMAIL_DOT_COM_REGEX.test(email.trim())) {
+      setError('Invalid Email');
+      setLoading(false);
+      return;
+    }
+
+    if (password.length < 8) {
+      setError('Password must be at least 8 digits/characters long.');
+      setLoading(false);
+      return;
+    }
 
     // 1. Verify they belong to this tenant FIRST (to prevent cross-tenant password guessing)
     const { data: hasAccess, error: accessError } = await supabase.rpc('check_user_tenant_access', {
@@ -103,6 +119,13 @@ export default function Login() {
     setLoading(true);
     setError('');
 
+    // Pre-flight client validation: email format ____@____.com
+    if (!EMAIL_DOT_COM_REGEX.test(regEmail.trim())) {
+      setError('Invalid Email');
+      setLoading(false);
+      return;
+    }
+
     if (regPassword !== regConfirm) {
       setError('Passwords do not match.');
       setLoading(false);
@@ -110,7 +133,7 @@ export default function Login() {
     }
 
     if (regPassword.length < 8) {
-      setError('Password must be at least 8 characters.');
+      setError('Password must be at least 8 digits/characters long.');
       setLoading(false);
       return;
     }
@@ -165,6 +188,12 @@ export default function Login() {
     e.preventDefault();
     setLoading(true);
     setError('');
+
+    if (!EMAIL_DOT_COM_REGEX.test(forgotEmail.trim())) {
+      setError('Invalid Email');
+      setLoading(false);
+      return;
+    }
 
     const { error: resetError } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
       redirectTo: `${window.location.origin}/reset-password`,
@@ -266,6 +295,8 @@ export default function Login() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   autoComplete="email"
+                  pattern="[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[cC][oO][mM]"
+                  title="Email must follow the format ____@____.com"
                   required
                   className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-900"
                 />
@@ -282,6 +313,7 @@ export default function Login() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   autoComplete="current-password"
+                  minLength={8}
                   required
                   className="w-full pl-10 pr-10 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-900"
                 />
@@ -336,6 +368,8 @@ export default function Login() {
                   value={regEmail}
                   onChange={(e) => setRegEmail(e.target.value)}
                   autoComplete="email"
+                  pattern="[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[cC][oO][mM]"
+                  title="Email must follow the format ____@____.com"
                   required
                   className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-900"
                 />
@@ -409,6 +443,7 @@ export default function Login() {
                   value={regConfirm}
                   onChange={(e) => setRegConfirm(e.target.value)}
                   autoComplete="new-password"
+                  minLength={8}
                   required
                   className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-900"
                 />
@@ -456,6 +491,8 @@ export default function Login() {
                   placeholder="you@example.com"
                   value={forgotEmail}
                   onChange={(e) => setForgotEmail(e.target.value)}
+                  pattern="[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[cC][oO][mM]"
+                  title="Email must follow the format ____@____.com"
                   required
                   className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-900"
                 />
