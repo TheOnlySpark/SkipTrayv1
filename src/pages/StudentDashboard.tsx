@@ -1255,6 +1255,20 @@ export default function StudentDashboard() {
                 </div>
               )}
             </div>
+
+            {/* Confirmed Bill & GST Summary */}
+            {((activeOrder as any).tax_snapshot || (activeOrder as any).total_tax_amount) && (
+              <div className="mt-3 pt-3 border-t border-indigo-400/20 flex flex-wrap items-center justify-between gap-2 text-xs text-indigo-100">
+                <span className="font-semibold">
+                  Bill Tax ({(activeOrder as any).tax_snapshot?.effective_food_gst_rate || 5}% GST): ₹{Number((activeOrder as any).total_tax_amount || (activeOrder as any).tax_snapshot?.food_gst_amount || 0).toFixed(2)}
+                </span>
+                {(activeOrder as any).tax_snapshot?.cgst_amount !== undefined && (
+                  <span className="text-[11px] text-indigo-200 font-mono">
+                    CGST: ₹{Number((activeOrder as any).tax_snapshot.cgst_amount).toFixed(2)} | SGST: ₹{Number((activeOrder as any).tax_snapshot.sgst_amount).toFixed(2)}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         </div>
       ) : (
