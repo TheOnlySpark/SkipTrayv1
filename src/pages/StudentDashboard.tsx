@@ -1,6 +1,7 @@
 import React from "react";
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useTenant } from '../contexts/TenantContext';
 import { useDialog } from '../contexts/ModalDialogContext';
 import { supabase } from '../lib/supabase';
 import { Database } from '../types/supabase';
@@ -21,20 +22,20 @@ import { QRCodeSVG } from '../components/QRCode';
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 type Order = Database['public']['Tables']['orders']['Row'];
 type ItemReview = Database['public']['Tables']['item_reviews']['Row'];
+type Canteen = Database['public']['Tables']['canteens']['Row'];
 type PastOrder = Order & {
   order_items: { menu_items: MenuItem | null }[];
   item_reviews: ItemReview[];
 };
 
 export const LUNCH_SLOTS = [
+  { value: '11:30', label: '11:30 AM' },
+  { value: '12:00', label: '12:00 PM' },
   { value: '12:30', label: '12:30 PM' },
-  { value: '12:40', label: '12:40 PM' },
-  { value: '12:50', label: '12:50 PM' },
   { value: '13:00', label: '1:00 PM' },
-  { value: '13:10', label: '1:10 PM' },
-  { value: '13:20', label: '1:20 PM' },
   { value: '13:30', label: '1:30 PM' },
-  { value: '13:40', label: '1:40 PM' },
+  { value: '14:00', label: '2:00 PM' },
+  { value: '14:30', label: '2:30 PM' },
 ];
 
 export const formatPickupTime = (timeStr?: string | null) => {
@@ -48,12 +49,18 @@ export const formatPickupTime = (timeStr?: string | null) => {
 
 export default function StudentDashboard() {
   const { profile, signOut } = useAuth();
+  const { tenantId } = useTenant();
   const { showAlert, showConfirm } = useDialog();
   const queryClient = useQueryClient();
+  const currentTenantId = profile?.tenant_id || tenantId;
+
   const [activeOrder, setActiveOrder] = useState<Order | null>(null);
   const [pastOrders, setPastOrders] = useState<PastOrder[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   
+  const [selectedCanteenId, setSelectedCanteenId] = useState<string>(() => {
+    return localStorage.getItem('skipTray_preferred_canteen_id') || '';
+  });
   const [cart, setCart] = useState<{item: MenuItem, quantity: number}[]>([]);
   const [pickupTime, setPickupTime] = useState('');
   const [isTakeaway, setIsTakeaway] = useState<boolean>(false);
@@ -134,6 +141,14 @@ export default function StudentDashboard() {
       })
       .subscribe();
 
+    // Listen to changes on canteens
+    const canteenSub = supabase
+      .channel('public:canteens')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'canteens' }, () => {
+        queryClient.invalidateQueries({ queryKey: ['studentCanteens'] });
+      })
+      .subscribe();
+
     // Listen to changes on menu items (e.g. sold out status)
     const menuSub = supabase
       .channel('public:menu_items')
@@ -157,19 +172,72 @@ export default function StudentDashboard() {
 
     return () => {
       orderSub.unsubscribe();
+      canteenSub.unsubscribe();
       menuSub.unsubscribe();
       reviewSub.unsubscribe();
     };
   }, [profile?.id, queryClient]);
 
-  const { data: menuItems = [], isLoading: menuLoading } = useQuery({
-    queryKey: ['menuItems'],
+  // Fetch active canteens for this student's institution
+  const { data: canteens = [], isLoading: canteensLoading } = useQuery({
+    queryKey: ['studentCanteens', currentTenantId],
     queryFn: async () => {
-      const { data } = await supabase
+      if (!currentTenantId) return [];
+      const { data, error } = await supabase
+        .from('canteens')
+        .select('*')
+        .eq('is_active', true)
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+      return (data || []) as Canteen[];
+    },
+    enabled: !!currentTenantId,
+  });
+
+  // Auto-select first canteen if none selected or if selection is invalid
+  useEffect(() => {
+    if (canteens.length > 0) {
+      if (!selectedCanteenId || !canteens.some(c => c.id === selectedCanteenId)) {
+        const fallback = canteens[0].id;
+        setSelectedCanteenId(fallback);
+        localStorage.setItem('skipTray_preferred_canteen_id', fallback);
+      }
+    }
+  }, [canteens, selectedCanteenId]);
+
+  const activeCanteen = canteens.find(c => c.id === selectedCanteenId) || null;
+  const activeOrderCanteen = canteens.find(c => c.id === activeOrder?.canteen_id) || null;
+
+  const handleCanteenChange = async (newCanteenId: string) => {
+    if (newCanteenId === selectedCanteenId) return;
+
+    if (cart.length > 0) {
+      const confirmed = await showConfirm({
+        title: 'Switch Canteen?',
+        message: 'Your cart contains items from another canteen. Switching canteens will clear your current cart.',
+        confirmText: 'Switch & Clear Cart',
+        cancelText: 'Stay Here',
+        isDangerous: true,
+      });
+      if (!confirmed) return;
+      setCart([]);
+    }
+
+    setSelectedCanteenId(newCanteenId);
+    localStorage.setItem('skipTray_preferred_canteen_id', newCanteenId);
+  };
+
+  const { data: menuItems = [], isLoading: menuLoading } = useQuery({
+    queryKey: ['menuItems', selectedCanteenId],
+    queryFn: async () => {
+      if (!selectedCanteenId) return [];
+      const { data, error } = await supabase
         .from('menu_items')
         .select('*')
+        .eq('canteen_id', selectedCanteenId)
         .order('veg_non_veg', { ascending: false })
         .order('name');
+      if (error) throw error;
       return (data || []).sort((a, b) => {
         if (a.veg_non_veg !== b.veg_non_veg) {
           return a.veg_non_veg === 'VEG' ? -1 : 1;
@@ -179,6 +247,7 @@ export default function StudentDashboard() {
         return a.name.localeCompare(b.name);
       });
     },
+    enabled: !!selectedCanteenId,
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 
@@ -255,7 +324,7 @@ export default function StudentDashboard() {
     if (isLunchClosedForToday) {
       showAlert({
         title: 'Booking Window Closed',
-        message: 'Lunch ordering for today is closed. Orders must be placed at least 30 minutes in advance of Lunch slots (12:30 PM – 1:40 PM).',
+        message: 'Lunch ordering for today is closed. Orders must be placed at least 15 minutes in advance of Lunch slots (11:30 AM – 2:30 PM).',
         type: 'warning'
       });
       return;
@@ -291,7 +360,7 @@ export default function StudentDashboard() {
       return;
     }
     if (isLunchClosedForToday) {
-      setError('Lunch ordering for today is closed. Orders must be placed at least 30 minutes before the pickup slot.');
+      setError('Lunch ordering for today is closed. Orders must be placed at least 15 minutes before the pickup slot.');
       return;
     }
     if (cart.length === 0 || !pickupTime) return;
@@ -315,7 +384,7 @@ export default function StudentDashboard() {
         p_pickup_time: pickupTime,
         p_items: itemsJson,
         p_is_takeaway: isTakeaway,
-        p_canteen_id: cart[0]?.item.canteen_id || null
+        p_canteen_id: selectedCanteenId || cart[0]?.item.canteen_id || null
       });
 
       if (rpcError) throw rpcError;
@@ -440,6 +509,39 @@ export default function StudentDashboard() {
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-3 leading-tight">Welcome, {profile?.name || 'User'}</h1>
             
+            {/* Canteen Selector Pills */}
+            {canteens.length > 0 && (
+              <div className="mt-3.5 flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Canteen:</span>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {canteens.map(c => {
+                    const isSelected = selectedCanteenId === c.id;
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => handleCanteenChange(c.id)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 ${
+                          isSelected
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100 hover:text-slate-900'
+                        }`}
+                      >
+                        <span>🏪 {c.name}</span>
+                        {c.code && (
+                          <span className={`text-[10px] px-1.5 py-0.2 rounded-md font-mono ${
+                            isSelected ? 'bg-indigo-700 text-indigo-100' : 'bg-slate-200 text-slate-600'
+                          }`}>
+                            {c.code}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            
             {strikeCount === 1 && !isSuspended && (
               <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50/80 border border-amber-200/60 p-2.5 rounded-xl mt-3 font-medium">
                 <IconAlertTriangle size={16} className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
@@ -493,6 +595,11 @@ export default function StudentDashboard() {
                       <div className="text-xs text-slate-500 font-medium mb-1">Placed on: {new Date(o.created_at).toLocaleDateString()}</div>
                       <div className="flex items-center gap-2 mt-1">
                         <span className="text-sm text-slate-600">Pickup: {formatPickupTime(o.pickup_time)} (Lunch)</span>
+                        {canteens.find(c => c.id === o.canteen_id) && (
+                          <span className="text-xs font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                            🏪 {canteens.find(c => c.id === o.canteen_id)?.name}
+                          </span>
+                        )}
                         <span className={`px-2 py-0.5 rounded text-xs font-semibold ${o.is_takeaway ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'bg-sky-100 text-sky-800 border border-sky-200'}`}>
                           {o.is_takeaway ? '🛍️ Takeaway' : '🍽️ Dine-in'}
                         </span>
@@ -706,6 +813,11 @@ export default function StudentDashboard() {
           )}
           
           <div className="mt-5 flex items-center justify-center gap-2 flex-wrap">
+            {activeOrderCanteen && (
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-950/60 text-indigo-200 border border-indigo-400/30">
+                🏪 {activeOrderCanteen.name}
+              </span>
+            )}
             <p className="text-xs text-indigo-200">Requested Pickup Time: <span className="font-semibold text-white">{formatPickupTime(activeOrder.pickup_time)} (Lunch)</span></p>
             <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${activeOrder.is_takeaway ? 'bg-amber-400 text-amber-950 shadow-sm' : 'bg-sky-400 text-sky-950 shadow-sm'}`}>
               {activeOrder.is_takeaway ? '🛍️ Takeaway' : '🍽️ Dine-in'}
@@ -719,8 +831,16 @@ export default function StudentDashboard() {
           <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-6 sm:p-8 shadow-sm">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
               <div>
-                <h2 className="text-xl font-bold text-slate-800">Menu</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Lunch Pickup: 12:30 PM – 1:40 PM • Booking Opens: 9:30 AM (Min 30m Notice)</p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-xl font-bold text-slate-800">Menu</h2>
+                  {activeCanteen && (
+                    <span className="text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                      <span>🏪</span>
+                      <span>{activeCanteen.name}</span>
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">Lunch Pickup: 11:30 AM – 2:30 PM • Booking Opens: 9:30 AM (Min 15m Notice)</p>
               </div>
               {isSunday ? (
                 <span className="self-start sm:self-auto px-3 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm">
@@ -740,13 +860,18 @@ export default function StudentDashboard() {
               ) : (
                 <span className="self-start sm:self-auto px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span>Lunch Slots Open (12:30 PM – 1:40 PM)</span>
+                  <span>Lunch Slots Open (11:30 AM – 2:30 PM)</span>
                 </span>
               )}
             </div>
 
             <div className="grid grid-cols-3 gap-2 sm:gap-4">
-              {menuItems.map(item => (
+              {menuItems.length === 0 ? (
+                <div className="col-span-3 text-center py-12 text-slate-400 text-sm">
+                  No menu items currently available for {activeCanteen?.name || 'this canteen'}.
+                </div>
+              ) : (
+                menuItems.map(item => (
                 <div key={item.id} className={`flex flex-col justify-between p-5 rounded-2xl border transition-all ${item.is_sold_out ? 'bg-slate-50 border-slate-100 opacity-60' : 'bg-white border-slate-200 hover:border-indigo-300 hover:shadow-md'}`}>
                   <div>
                     <div className="flex items-center gap-2 mb-3">
@@ -772,7 +897,8 @@ export default function StudentDashboard() {
                     )}
                   </div>
                 </div>
-              ))}
+              ))
+            )}
             </div>
           </div>
 
@@ -833,7 +959,7 @@ export default function StudentDashboard() {
                         <IconClock size={20} className="w-5 h-5 text-indigo-400 shrink-0" />
                         <div>
                           <div style={{ color: '#818cf8', fontSize: '0.8125rem', fontWeight: 700 }}>Lunch Booking Opens at 9:30 AM</div>
-                          <div style={{ color: '#c7d2fe', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders open at 9:30 AM today (Lunch Slots: 12:30 PM – 1:40 PM, Min 30m notice).</div>
+                          <div style={{ color: '#c7d2fe', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders open at 9:30 AM today (Lunch Slots: 11:30 AM – 2:30 PM, Min 15m notice).</div>
                         </div>
                       </div>
                     )}
@@ -844,7 +970,7 @@ export default function StudentDashboard() {
                         <IconClock size={20} className="w-5 h-5 text-rose-400 shrink-0" />
                         <div>
                           <div style={{ color: '#f87171', fontSize: '0.8125rem', fontWeight: 700 }}>Lunch Ordering Closed Today</div>
-                          <div style={{ color: '#fca5a5', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders must be placed at least 30 mins before pickup (Lunch: 12:30 PM – 1:40 PM).</div>
+                          <div style={{ color: '#fca5a5', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders must be placed at least 15 mins before pickup (Lunch: 11:30 AM – 2:30 PM).</div>
                         </div>
                       </div>
                     )}
@@ -979,10 +1105,10 @@ export default function StudentDashboard() {
                       <div style={{ marginBottom: '1rem' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
                           <label style={{ fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em' }}>
-                            Lunch Pickup Slot (12:30 PM – 1:40 PM)
+                            Lunch Pickup Slot (11:30 AM – 2:30 PM)
                           </label>
                           <span style={{ fontSize: '0.65rem', color: '#818cf8', fontWeight: 600, background: 'rgba(99,102,241,0.15)', padding: '2px 6px', borderRadius: '4px' }}>
-                            Min 30m notice
+                            Min 15m notice
                           </span>
                         </div>
 
@@ -1010,7 +1136,7 @@ export default function StudentDashboard() {
                                 ? 'Lunch Booking Opens at 9:30 AM'
                                 : isLunchClosedForToday 
                                   ? 'Lunch Ordering Closed for Today' 
-                                  : 'Select a Lunch Slot (10-min intervals)...'}
+                                  : 'Select a Lunch Slot (30-min intervals)...'}
                           </option>
                           {LUNCH_SLOTS.map(slot => {
                             const { isAvailable, reason } = getSlotAvailability(slot.value);

@@ -69,8 +69,8 @@ BEGIN
     RAISE EXCEPTION 'Invalid pickup slot. Lunch pickup slots are available only between 11:30 AM and 2:30 PM in 30-minute intervals.';
   END IF;
 
-  IF (v_now_ist::date + p_pickup_time::time) < (v_now_ist + INTERVAL '29 minutes') THEN
-    RAISE EXCEPTION 'Orders must be placed at least 30 minutes in advance of the pickup slot.';
+  IF (v_now_ist::date + p_pickup_time::time) < (v_now_ist + INTERVAL '14 minutes') THEN
+    RAISE EXCEPTION 'Orders must be placed at least 15 minutes in advance of the pickup slot.';
   END IF;
 
   IF p_items IS NULL OR json_array_length(p_items) = 0 THEN
