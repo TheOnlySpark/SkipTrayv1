@@ -321,6 +321,9 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     } else if (status === 'READY') {
       title = `Order #${orderNumber} is Ready!`;
       message = 'Your food is ready for pickup! Show your QR pass at the counter.';
+    } else if (status === 'COLLECTED') {
+      title = `Order #${orderNumber} Collected Successfully! 🎉`;
+      message = 'Your OTP was verified and your order has been handed over. Enjoy your meal!';
     }
 
     const newNotification: OrderNotification = {
@@ -408,11 +411,12 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
           if (!initialFetchDoneRef.current && !prevStatus) return;
           if (prevStatus === currentStatus) return;
 
-          // Only alert when advancing to ACCEPTED, PREPARING, or READY
+          // Only alert when advancing to ACCEPTED, PREPARING, READY, or COLLECTED
           if (
             currentStatus === 'ACCEPTED' ||
             currentStatus === 'PREPARING' ||
-            currentStatus === 'READY'
+            currentStatus === 'READY' ||
+            currentStatus === 'COLLECTED'
           ) {
             dispatchNotification(
               currentStatus as OrderNotificationStatus,
