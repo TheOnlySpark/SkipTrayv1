@@ -17,7 +17,6 @@ import {
   IconMaximize
 } from '../components/Icons';
 import { QRCodeSVG } from '../components/QRCode';
-import { calculateOrderLedger } from '../lib/ledger';
 
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 type Order = Database['public']['Tables']['orders']['Row'];
@@ -306,142 +305,37 @@ export default function StudentDashboard() {
     setSubmitting(true);
     setError('');
 
-    const itemsJson = cart.map(c => ({
-      id: c.item.id,
-      quantity: c.quantity
-    }));
-
-    // 1. Generate Idempotency Key
-    const idempotencyKey = crypto.randomUUID();
-
-    // 2. Save cart state in case of redirect
-    localStorage.setItem('pending_order', JSON.stringify({ cart, pickupTime, isTakeaway, idempotencyKey }));
-
     try {
-      const ledger = calculateOrderLedger(cartTotalPrice);
+      const itemsJson = cart.map(c => ({
+        menu_item_id: c.item.id,
+        quantity: c.quantity
+      }));
 
-      // 3. Create ZohoPay Session
-      const { data: createData, error: createError } = await supabase.functions.invoke('create-zohopay-order', {
-        body: { 
-          items: itemsJson,
-          total_amount: ledger.gross_payable,
-          idempotency_key: idempotencyKey,
-          is_takeaway: isTakeaway
-        }
+      const { data: orderId, error: rpcError } = await supabase.rpc('place_order_with_otp', {
+        p_pickup_time: pickupTime,
+        p_items: itemsJson,
+        p_is_takeaway: isTakeaway,
+        p_canteen_id: cart[0]?.item.canteen_id || null
       });
 
-      if (createError) throw createError;
+      if (rpcError) throw rpcError;
 
-      // 4. Initialize ZohoPay Widget Popup
-      // 4. Initialize ZohoPay Widget Popup
-      if (!(window as any).ZohoPay) {
-        console.warn("ZohoPay SDK is not loaded. Mocking visual payment popup.");
-        
-        // Create a visual mock ZohoPay popup
-        (window as any).ZohoPay = {
-          checkout: (options: any) => {
-            const overlay = document.createElement('div');
-            overlay.style.position = 'fixed';
-            overlay.style.top = '0';
-            overlay.style.left = '0';
-            overlay.style.width = '100vw';
-            overlay.style.height = '100vh';
-            overlay.style.backgroundColor = 'rgba(0,0,0,0.5)';
-            overlay.style.display = 'flex';
-            overlay.style.alignItems = 'center';
-            overlay.style.justifyContent = 'center';
-            overlay.style.zIndex = '9999';
+      // Fetch the newly created order
+      const { data: newOrder } = await supabase
+        .from('orders')
+        .select('*')
+        .eq('id', orderId)
+        .single();
 
-            const modal = document.createElement('div');
-            modal.style.backgroundColor = 'white';
-            modal.style.padding = '32px';
-            modal.style.borderRadius = '16px';
-            modal.style.textAlign = 'center';
-            modal.style.boxShadow = '0 10px 25px -5px rgba(0, 0, 0, 0.1)';
-            
-            modal.innerHTML = `
-              <h2 style="font-size: 24px; font-weight: bold; margin-bottom: 8px;">ZohoPay Mock Popup</h2>
-              <p style="color: #64748b; margin-bottom: 24px;">This is a test payment screen.</p>
-              <div style="display: flex; gap: 12px; justify-content: center;">
-                <button id="mock-success-btn" style="background-color: #22c55e; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold;">Pay ₹${calculateOrderLedger(cartTotalPrice).gross_payable.toFixed(2)}</button>
-                <button id="mock-cancel-btn" style="background-color: #ef4444; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold;">Cancel</button>
-              </div>
-            `;
-            
-            overlay.appendChild(modal);
-            document.body.appendChild(overlay);
-
-            document.getElementById('mock-success-btn')?.addEventListener('click', () => {
-              document.body.removeChild(overlay);
-              if (options.onSuccess) {
-                options.onSuccess({ payment_id: `MOCK_PAYMENT_${Date.now()}` });
-              }
-            });
-
-            document.getElementById('mock-cancel-btn')?.addEventListener('click', () => {
-              document.body.removeChild(overlay);
-              if (options.onCancel) {
-                options.onCancel();
-              }
-            });
-          }
-        };
+      if (newOrder) {
+        setActiveOrder(newOrder);
       }
-
-      const zohoOptions = {
-        sessionId: createData.session_id,
-        onSuccess: async function (response: any) {
-          try {
-            // 5. Verify and Create Order
-            const { data: verifyData, error: verifyError } = await supabase.functions.invoke('verify-zohopay-order', {
-              body: {
-                payment_id: response.payment_id || response.transaction_id || `ZOHO_${Date.now()}`,
-                idempotency_key: idempotencyKey,
-                cart_items: itemsJson,
-                total_amount: calculateOrderLedger(cartTotalPrice).gross_payable,
-                ledger: calculateOrderLedger(cartTotalPrice),
-                pickup_time: pickupTime,
-                is_takeaway: isTakeaway,
-                canteen_id: cart[0]?.item.canteen_id,
-                tenant_id: cart[0]?.item.tenant_id
-              }
-            });
-
-            if (verifyError) throw verifyError;
-
-            if (verifyData.success) {
-              // Fetch the newly created order
-              const { data: newOrder } = await supabase.from('orders').select('*').eq('id', verifyData.order_id).single();
-              if (newOrder) {
-                setActiveOrder(newOrder);
-              }
-              setCart([]);
-              setPickupTime('');
-              setIsTakeaway(false);
-              localStorage.removeItem('pending_order');
-            } else {
-              throw new Error(verifyData.error || 'Payment verification failed');
-            }
-          } catch (err: any) {
-            setError(err.message || 'An error occurred during payment verification');
-          } finally {
-            setSubmitting(false);
-          }
-        },
-        onCancel: function () {
-          setSubmitting(false);
-          setError('Payment was cancelled.');
-        },
-        onError: function (err: any) {
-          setSubmitting(false);
-          setError(err.message || 'Payment failed.');
-        }
-      };
-
-      (window as any).ZohoPay.checkout(zohoOptions);
-
+      setCart([]);
+      setPickupTime('');
+      setIsTakeaway(false);
     } catch (err: any) {
-      setError(err.message || 'An error occurred during checkout');
+      setError(err.message || 'An error occurred while placing the order');
+    } finally {
       setSubmitting(false);
     }
   };
@@ -1132,17 +1026,9 @@ export default function StudentDashboard() {
                       {/* Total Amount Summary */}
                       {cart.length > 0 && (
                         <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', background: '#1e293b', borderRadius: '0.75rem' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>Food Subtotal</span>
-                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem' }}>₹{calculateOrderLedger(cartTotalPrice).food_subtotal.toFixed(2)}</span>
-                          </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem', paddingBottom: '0.75rem', borderBottom: '1px solid #334155' }}>
-                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>GST and other</span>
-                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem' }}>₹{(calculateOrderLedger(cartTotalPrice).commission_fee + calculateOrderLedger(cartTotalPrice).gateway_fee).toFixed(2)}</span>
-                          </div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem', fontWeight: 600 }}>Total Amount to Pay</span>
-                            <span style={{ color: '#38bdf8', fontSize: '1.125rem', fontWeight: 700 }}>₹{calculateOrderLedger(cartTotalPrice).gross_payable.toFixed(2)}</span>
+                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem', fontWeight: 600 }}>Total Amount</span>
+                            <span style={{ color: '#38bdf8', fontSize: '1.125rem', fontWeight: 700 }}>₹{cartTotalPrice.toFixed(2)}</span>
                           </div>
                         </div>
                       )}
@@ -1181,7 +1067,7 @@ export default function StudentDashboard() {
                               ? 'Lunch Booking Opens at 9:30 AM'
                               : isLunchClosedForToday
                                 ? 'Lunch Ordering Closed Today'
-                                : (submitting ? 'Placing...' : `Place Order (${cartTotalItems} items • ₹${calculateOrderLedger(cartTotalPrice).gross_payable.toFixed(2)})`)}
+                                : (submitting ? 'Placing...' : `Place Order (${cartTotalItems} items • ₹${cartTotalPrice.toFixed(2)})`)}
                       </button>
                     </form>
                   </div>
@@ -1216,7 +1102,7 @@ export default function StudentDashboard() {
                     <span style={{ color: '#f1f5f9', fontWeight: 700, fontSize: '0.95rem' }}>Your Order</span>
                     {cartTotalItems > 0 && (
                       <span style={{ color: '#818cf8', fontSize: '0.75rem', fontWeight: 600 }}>
-                        ₹{calculateOrderLedger(cartTotalPrice).gross_payable.toFixed(2)} • {cartTotalItems} item{cartTotalItems > 1 ? 's' : ''}
+                        ₹{cartTotalPrice.toFixed(2)} • {cartTotalItems} item{cartTotalItems > 1 ? 's' : ''}
                       </span>
                     )}
                   </div>
