@@ -27,7 +27,7 @@ import { Button, InputField, Table } from '../components';
 import type { Column } from '../components';
 import { calculateOrderTotal, getOrderPaymentStatus, formatCurrency } from '../lib/salesAnalytics';
 
-type Order = Database['public']['Tables']['orders']['Row'];
+type Order = Database['public']['Views']['staff_orders']['Row'];
 type OrderItem = Database['public']['Tables']['order_items']['Row'];
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 
@@ -221,14 +221,16 @@ export default function StaffDashboard() {
       .order('veg_non_veg', { ascending: false })
       .order('name');
     if (data) {
-      const sorted = [...data].sort((a, b) => {
-        if (a.veg_non_veg !== b.veg_non_veg) {
-          return a.veg_non_veg === 'VEG' ? -1 : 1;
-        }
-        if (a.name.toLowerCase() === 'veg meals') return -1;
-        if (b.name.toLowerCase() === 'veg meals') return 1;
-        return a.name.localeCompare(b.name);
-      });
+      const sorted = [...data]
+        .filter(item => !item.name.startsWith('[DELETED]') && !item.name.startsWith('[ARCHIVED]'))
+        .sort((a, b) => {
+          if (a.veg_non_veg !== b.veg_non_veg) {
+            return a.veg_non_veg === 'VEG' ? -1 : 1;
+          }
+          if (a.name.toLowerCase() === 'veg meals') return -1;
+          if (b.name.toLowerCase() === 'veg meals') return 1;
+          return a.name.localeCompare(b.name);
+        });
       setMenuItems(sorted);
     }
   };
@@ -241,13 +243,32 @@ export default function StaffDashboard() {
     }
     setLoading(true);
     const { data } = await supabase
-      .from('orders')
+      .from('staff_orders')
       .select(`
-        *,
+        id,
+        user_id,
+        tenant_id,
+        canteen_id,
+        order_number,
+        status,
+        created_at,
+        pickup_time,
+        is_takeaway,
+        total_tax_amount,
+        collected_at,
+        requested_pickup_time,
+        planned_prep_start_time,
+        target_ready_by_time,
+        estimated_prep_duration_minutes,
+        idempotency_key,
+        payment_id,
         profiles ( name, id_number ),
         order_items (
-          *,
-          menu_items ( * )
+          id,
+          order_id,
+          menu_item_id,
+          quantity,
+          menu_items ( id, name, price, is_sold_out, canteen_id, tenant_id )
         )
       `)
       .eq('canteen_id', profile.canteen_id)
@@ -255,7 +276,7 @@ export default function StaffDashboard() {
       .order('pickup_time', { ascending: true })
       .order('order_number', { ascending: true });
 
-    if (data) setOrders(data as OrderWithDetails[]);
+    if (data) setOrders(data as unknown as OrderWithDetails[]);
     setLoading(false);
   };
 
@@ -563,7 +584,31 @@ export default function StaffDashboard() {
         message: `❌ ${res?.message || 'QR verification rejected.'}`,
         isError: true
       });
-      return false;
+      if (error) {
+        playErrorBuzzer();
+        setQuickOtpToast({
+          message: formatErrorMessage(error, 'QR verification failed.'),
+          isError: true
+        });
+        return false;
+      }
+      const result = data as any;
+      if (result.success) {
+        playSuccessBeep();
+        setQuickOtpToast({
+          message: `QR Verified! Order #${result.order_number || ''} collected successfully!`,
+          isError: false
+        });
+        fetchOrders();
+        return true;
+      } else {
+        playErrorBuzzer();
+        setQuickOtpToast({
+          message: result.message || 'QR verification rejected.',
+          isError: true
+        });
+        return false;
+      }
     }
   };
 
@@ -869,9 +914,10 @@ export default function StaffDashboard() {
           <div className={`px-2.5 py-0.5 rounded-full text-[11px] font-extrabold uppercase tracking-wide border shrink-0 ${order.status === 'PLACED' ? 'bg-slate-100 text-slate-700 border-slate-300' :
               order.status === 'ACCEPTED' ? 'bg-blue-50 text-blue-700 border-blue-200' :
                 order.status === 'PREPARING' ? 'bg-orange-50 text-orange-700 border-orange-200' :
-                  'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  order.status === 'REJECTED' ? 'bg-red-50 text-red-700 border-red-200' :
+                    'bg-emerald-50 text-emerald-700 border-emerald-200'
             }`}>
-            {order.status}
+            {order.status === 'REJECTED' ? 'CANCELLED' : order.status}
           </div>
         </div>
 
@@ -1137,9 +1183,10 @@ export default function StaffDashboard() {
           order.status === 'PLACED' ? 'bg-slate-100 text-slate-700 border-slate-300' :
           order.status === 'ACCEPTED' ? 'bg-blue-50 text-blue-700 border-blue-200' :
           order.status === 'PREPARING' ? 'bg-orange-50 text-orange-700 border-orange-200' :
+          order.status === 'REJECTED' ? 'bg-red-50 text-red-700 border-red-200' :
           'bg-emerald-50 text-emerald-700 border-emerald-200'
         }`}>
-          {order.status}
+          {order.status === 'REJECTED' ? 'CANCELLED' : order.status}
         </span>
       )
     },

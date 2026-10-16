@@ -173,6 +173,7 @@ export interface Database {
           name: string
           price: number
           prep_time_minutes: number | null
+          stock_quantity: number | null
           gst_rate_percent: number | null
           hsn_code: string | null
           updated_at: string
@@ -188,6 +189,7 @@ export interface Database {
           name: string
           price?: number
           prep_time_minutes?: number | null
+          stock_quantity?: number | null
           gst_rate_percent?: number | null
           hsn_code?: string | null
           updated_at?: string
@@ -203,6 +205,7 @@ export interface Database {
           name?: string
           price?: number
           prep_time_minutes?: number | null
+          stock_quantity?: number | null
           gst_rate_percent?: number | null
           hsn_code?: string | null
           updated_at?: string
@@ -310,6 +313,12 @@ export interface Database {
             foreignKeyName: "order_items_order_id_fkey"
             columns: ["order_id"]
             referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "order_items_staff_order_id_fkey"
+            columns: ["order_id"]
+            referencedRelation: "staff_orders"
             referencedColumns: ["id"]
           }
         ]
@@ -845,7 +854,50 @@ export interface Database {
       }
     }
     Views: {
-      [_ in never]: never
+      staff_orders: {
+        Row: {
+          id: string
+          user_id: string
+          tenant_id: string
+          canteen_id: string | null
+          order_number: number
+          status: Database["public"]["Enums"]["order_status"]
+          created_at: string
+          pickup_time: string
+          is_takeaway: boolean
+          total_tax_amount: number | null
+          collected_at: string | null
+          requested_pickup_time: string | null
+          planned_prep_start_time: string | null
+          target_ready_by_time: string | null
+          estimated_prep_duration_minutes: number | null
+          idempotency_key: string | null
+          payment_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "orders_canteen_id_fkey"
+            columns: ["canteen_id"]
+            isOneToOne: false
+            referencedRelation: "canteens"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "orders_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "orders_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
     }
     Functions: {
       toggle_sold_out: {
