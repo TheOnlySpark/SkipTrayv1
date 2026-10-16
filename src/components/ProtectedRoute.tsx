@@ -22,6 +22,11 @@ export function ProtectedRoute({ children, allowedRoles }: { children: React.Rea
     return <Navigate to="/login" replace />; 
   }
 
+  // Enforce mandatory first-login password setup before accessing any protected dashboard
+  if (profile?.must_change_password) {
+    return <Navigate to="/reset-password?first_login=true" replace />;
+  }
+
   // Wait for profile to load before checking roles — prevents brief unauthorized render
   if (allowedRoles && !profile) {
     return (

@@ -64,6 +64,7 @@ export default function StaffDashboard() {
   // Card-level OTP Verification state
   const [selectedOrderForOtp, setSelectedOrderForOtp] = useState<string | null>(null);
   const [otpInput, setOtpInput] = useState('');
+  const [transitioningOrderIds, setTransitioningOrderIds] = useState<Set<string>>(new Set());
 
   // Quick Menu Availability Filter State
   const [menuSearch, setMenuSearch] = useState('');
@@ -261,6 +262,9 @@ export default function StaffDashboard() {
   };
 
   const updateOrderStatus = async (orderId: string, status: string) => {
+    if (transitioningOrderIds.has(orderId)) return;
+    setTransitioningOrderIds(prev => new Set(prev).add(orderId));
+
     // Optimistic update for instant UI feedback
     setOrders(prev => prev.map(order => 
       order.id === orderId ? { ...order, status: status as any } : order
@@ -271,11 +275,17 @@ export default function StaffDashboard() {
       p_status: status as any
     });
 
+    setTransitioningOrderIds(prev => {
+      const next = new Set(prev);
+      next.delete(orderId);
+      return next;
+    });
+
     if (error) {
       if (import.meta.env.DEV) console.error("Failed to update order status:", error);
       showAlert({
         title: 'Status Update Failed',
-        message: 'Failed to update order status. Please try again.',
+        message: error.message || 'Failed to update order status. Please try again.',
         type: 'error'
       });
       fetchOrders();
@@ -326,9 +336,28 @@ export default function StaffDashboard() {
 
   const handleVerifyOtp = async (orderId: string, customOtp?: string) => {
     const codeToVerify = customOtp !== undefined ? customOtp : otpInput;
+    const cleanCode = (codeToVerify || '').trim();
+    if (cleanCode.length !== 6 || !/^\d{6}$/.test(cleanCode)) {
+      showAlert({
+        title: 'Invalid OTP',
+        message: 'Please enter a valid 6-digit numeric OTP code.',
+        type: 'warning'
+      });
+      return false;
+    }
+
+    if (transitioningOrderIds.has(orderId)) return false;
+    setTransitioningOrderIds(prev => new Set(prev).add(orderId));
+
     const { data, error } = await supabase.rpc('verify_pickup_otp', {
       p_order_id: orderId,
-      p_otp: codeToVerify
+      p_otp: cleanCode
+    });
+
+    setTransitioningOrderIds(prev => {
+      const next = new Set(prev);
+      next.delete(orderId);
+      return next;
     });
 
     if (error) {
@@ -342,35 +371,55 @@ export default function StaffDashboard() {
     }
 
     const result = data as any;
-    if (result.success) {
+    if (result?.success) {
       setSelectedOrderForOtp(null);
       setOtpInput('');
       fetchOrders();
       return true;
     } else {
-      if (result.requires_override) {
-        const overrideConfirmed = await showConfirm({
-          title: 'Manual Override',
-          message: result.message + "\n\nDo you want to manually override?",
-          confirmText: 'Override',
-          cancelText: 'Cancel',
-          isDangerous: true
-        });
-        if (overrideConfirmed) {
-          await supabase.rpc('verify_pickup_otp', {
-            p_order_id: orderId,
-            p_otp: '',
-            p_is_override: true
+      if (result?.locked || result?.requires_override) {
+        const isAdmin = profile?.role && ['CANTEEN_ADMIN', 'UNI_ADMIN', 'SUPER_ADMIN'].includes(profile.role);
+        if (isAdmin) {
+          const resetConfirmed = await showConfirm({
+            title: 'Reset OTP Attempt Counter',
+            message: `${result.message}\n\nAs a cafeteria administrator, do you want to reset the failed OTP attempt counter for this order so the customer can attempt verification again?`,
+            confirmText: 'Reset Attempts',
+            cancelText: 'Cancel',
+            isDangerous: false
           });
-          setSelectedOrderForOtp(null);
-          setOtpInput('');
-          fetchOrders();
-          return true;
+          if (resetConfirmed) {
+            const { data: resetData, error: resetErr } = await supabase.rpc('reset_order_otp_attempts', {
+              p_order_id: orderId
+            });
+            if (resetErr) {
+              showAlert({
+                title: 'Reset Failed',
+                message: resetErr.message,
+                type: 'error'
+              });
+              return false;
+            }
+            setSelectedOrderForOtp(null);
+            setOtpInput('');
+            fetchOrders();
+            showAlert({
+              title: 'Attempt Counter Reset',
+              message: (resetData as any)?.message || 'Attempt counter reset to 0. Customer can now re-attempt OTP verification.',
+              type: 'info'
+            });
+            return false;
+          }
+        } else {
+          showAlert({
+            title: 'Verification Locked',
+            message: `${result.message}\n\nPlease escalate to a cafeteria administrator to reset the attempt counter.`,
+            type: 'error'
+          });
         }
       } else {
         showAlert({
           title: 'Verification Rejected',
-          message: result.message,
+          message: result?.message || 'Invalid OTP.',
           type: 'warning'
         });
       }
@@ -381,54 +430,56 @@ export default function StaffDashboard() {
   const handleQuickOtpSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanOtp = quickOtpInput.trim();
-    if (cleanOtp.length !== 6) return;
+    if (cleanOtp.length !== 6 || !/^\d{6}$/.test(cleanOtp)) {
+      setQuickOtpToast({
+        message: 'Please enter a valid 6-digit numeric OTP code.',
+        isError: true
+      });
+      return;
+    }
 
     setQuickOtpLoading(true);
     setQuickOtpToast(null);
 
-    // Find the matching order in READY status (or any active order)
-    const matchingOrder = orders.find(o => o.otp_code === cleanOtp);
-    if (!matchingOrder) {
+    const { data, error } = await supabase.rpc('verify_pickup_otp', {
+      p_order_id: null,
+      p_otp: cleanOtp
+    });
+
+    setQuickOtpLoading(false);
+
+    if (error) {
+      playErrorBuzzer();
       setQuickOtpToast({
-        message: `No active order found matching OTP ${cleanOtp}. Please verify the code.`,
+        message: `Verification error: ${error.message}`,
         isError: true
       });
-      setQuickOtpLoading(false);
       return;
     }
 
-    // Readiness Check (Still Preparing / Placed)
-    if (matchingOrder.status !== 'READY') {
+    const res = data as any;
+    if (res?.success) {
+      playSuccessBeep();
       setQuickOtpToast({
-        message: `⚠️ NOT READY: Order #${matchingOrder.order_number} is currently in status "${matchingOrder.status}". Please mark it as 'READY' first.`,
-        isError: true
-      });
-      setQuickOtpLoading(false);
-      return;
-    }
-
-    const success = await handleVerifyOtp(matchingOrder.id, cleanOtp);
-    if (success) {
-      setQuickOtpToast({
-        message: `Order #${matchingOrder.order_number} for ${matchingOrder.profiles?.name || 'Student'} verified and collected!`,
+        message: `Order #${res.order_number || ''} verified and collected successfully!`,
         isError: false
       });
       setQuickOtpInput('');
+      fetchOrders();
     } else {
+      playErrorBuzzer();
       setQuickOtpToast({
-        message: `Verification rejected for Order #${matchingOrder.order_number}.`,
+        message: res?.message || `Verification rejected for OTP ${cleanOtp}.`,
         isError: true
       });
     }
-    setQuickOtpLoading(false);
 
-    // Clear toast message after 5 seconds
     setTimeout(() => {
       setQuickOtpToast(null);
     }, 5000);
   };
 
-  // QR Code Scanner Payload Handler (Hardened with Anti-Replay & Status Gate)
+  // QR Code Scanner Payload Handler (Server-Authoritative Anti-Replay & Status Gate)
   const handleQrScanPayload = async (payload: string): Promise<boolean> => {
     let orderIdToVerify: string | null = null;
     let otpCodeToVerify: string = '';
@@ -440,14 +491,11 @@ export default function StaffDashboard() {
         orderIdToVerify = parts[1];
         otpCodeToVerify = parts[2];
       }
-    } else if (cleanPayload.length === 6 && /^\d+$/.test(cleanPayload)) {
-      // 6-digit OTP code scanned directly
+    } else if (cleanPayload.length === 6 && /^\d{6}$/.test(cleanPayload)) {
       otpCodeToVerify = cleanPayload;
-      const match = orders.find(o => o.otp_code === cleanPayload);
-      if (match) orderIdToVerify = match.id;
     }
 
-    if (!orderIdToVerify) {
+    if (!otpCodeToVerify) {
       playErrorBuzzer();
       setQuickOtpToast({
         message: `Invalid or unrecognized QR code format: "${cleanPayload}".`,
@@ -456,43 +504,58 @@ export default function StaffDashboard() {
       return false;
     }
 
-    const matchingOrder = orders.find(o => o.id === orderIdToVerify);
-    const orderNum = matchingOrder?.order_number ? `#${matchingOrder.order_number}` : '';
-    const studentName = matchingOrder?.profiles?.name || 'Student';
+    if (orderIdToVerify) {
+      const matchingOrder = orders.find(o => o.id === orderIdToVerify);
+      const orderNum = matchingOrder?.order_number ? `#${matchingOrder.order_number}` : '';
+      const studentName = matchingOrder?.profiles?.name || 'Student';
 
-    // 1. Anti-Replay Attack Check (Already Collected)
-    if (matchingOrder && matchingOrder.status === 'COLLECTED') {
+      if (matchingOrder && matchingOrder.status === 'COLLECTED') {
+        playErrorBuzzer();
+        setQuickOtpToast({
+          message: `⚠️ REPLAY BLOCKED: Order ${orderNum} for ${studentName} was ALREADY collected!`,
+          isError: true
+        });
+        return false;
+      }
+
+      if (matchingOrder && matchingOrder.status !== 'READY') {
+        playErrorBuzzer();
+        setQuickOtpToast({
+          message: `⚠️ NOT READY: Order ${orderNum} is in status "${matchingOrder.status}". Kitchen has not boxed it yet.`,
+          isError: true
+        });
+        return false;
+      }
+    }
+
+    // Perform atomic verification via RPC
+    const { data, error } = await supabase.rpc('verify_pickup_otp', {
+      p_order_id: orderIdToVerify || null,
+      p_otp: otpCodeToVerify
+    });
+
+    if (error) {
       playErrorBuzzer();
       setQuickOtpToast({
-        message: `⚠️ REPLAY BLOCKED: Order ${orderNum} for ${studentName} was ALREADY collected!`,
+        message: `❌ Verification error: ${error.message}`,
         isError: true
       });
       return false;
     }
 
-    // 2. Kitchen Readiness Check (Still Preparing / Placed)
-    if (matchingOrder && matchingOrder.status !== 'READY') {
-      playErrorBuzzer();
-      setQuickOtpToast({
-        message: `⚠️ NOT READY: Order ${orderNum} is currently in status "${matchingOrder.status}". Kitchen has not boxed it yet.`,
-        isError: true
-      });
-      return false;
-    }
-
-    // 3. Perform atomic verification via RPC
-    const success = await handleVerifyOtp(orderIdToVerify, otpCodeToVerify);
-    if (success) {
+    const res = data as any;
+    if (res?.success) {
       playSuccessBeep();
       setQuickOtpToast({
-        message: `✅ QR Verified! Order ${orderNum} for ${studentName} collected successfully!`,
+        message: `✅ QR Verified! Order #${res.order_number || ''} collected successfully!`,
         isError: false
       });
+      fetchOrders();
       return true;
     } else {
       playErrorBuzzer();
       setQuickOtpToast({
-        message: `❌ QR verification rejected for order ${orderNum}.`,
+        message: `❌ ${res?.message || 'QR verification rejected.'}`,
         isError: true
       });
       return false;
@@ -581,16 +644,7 @@ export default function StaffDashboard() {
       (idNumberStr.includes(trimmed) || (queryIdClean.length > 0 && idNumberStr.includes(queryIdClean)))
     );
 
-    // 4. OTP:
-    // Safe access: order.otp_code could be null/undefined. Preserves leading zeros.
-    const otpStr = String(order.otp_code ?? '').trim().toLowerCase();
-    const queryOtpClean = trimmed.replace(/^(otp|code|token)\s*[:#\s]*/i, '').trim();
-    const matchesOtp = (
-      otpStr.length > 0 &&
-      (otpStr.includes(trimmed) || (queryOtpClean.length > 0 && otpStr.includes(queryOtpClean)))
-    );
-
-    // 5. Order UUID / ID:
+    // 4. Order UUID / ID:
     const matchesId = (order.id || '').toLowerCase().includes(trimmed);
 
     return (
@@ -598,7 +652,6 @@ export default function StaffDashboard() {
       matchesOrderNumDigits ||
       matchesName ||
       matchesStudentId ||
-      matchesOtp ||
       matchesId
     );
   };
@@ -1114,7 +1167,7 @@ export default function StaffDashboard() {
               <IconSearch size={18} className="w-5 h-5 text-indigo-600 shrink-0 pointer-events-none" />
               <input
                 type="text"
-                placeholder="Search by Order Number, Student Name, Student ID, or OTP..."
+                placeholder="Search by Order Number, Student Name, Student ID, or Order ID..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 className="w-full bg-transparent text-sm sm:text-base font-medium text-slate-900 placeholder:text-slate-500 placeholder:font-normal border-none outline-none focus:outline-none focus-visible:outline-none ring-0 focus:ring-0 p-0 pr-24"
@@ -1340,7 +1393,7 @@ export default function StaffDashboard() {
                 {selectedSlot !== 'ALL' && ` in the ${formatPickupTime(selectedSlot)} slot`}.
                 <br />
                 <span className="text-xs text-slate-400 mt-1.5 block">
-                  Staff can search by Order Number (e.g. #4), Student Name, Student ID (including leading zeros), or 6-digit OTP.
+                  Staff can search by Order Number (e.g. #4), Student Name, Student ID (including leading zeros), or Order ID.
                 </span>
               </>
             ) : selectedSlot !== 'ALL' ? (

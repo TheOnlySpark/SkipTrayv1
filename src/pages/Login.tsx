@@ -72,6 +72,11 @@ export default function Login() {
         return;
       }
 
+      if (profile.must_change_password) {
+        navigate('/reset-password?first_login=true');
+        return;
+      }
+
       if (profile.id_number || ['STAFF', 'ADMIN', 'SUPER_ADMIN', 'UNI_ADMIN', 'CANTEEN_ADMIN'].includes(profile.role)) {
         console.log("Navigating to /dashboard");
         navigate('/dashboard');
