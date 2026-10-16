@@ -258,9 +258,10 @@ export default function StaffDashboard() {
     });
 
     if (error) {
+      if (import.meta.env.DEV) console.error("verify_pickup_otp failed:", error);
       showAlert({
         title: 'Verification Error',
-        message: 'Verification failed. Please try again.',
+        message: `Verification failed: ${error.message || JSON.stringify(error)}`,
         type: 'error'
       });
       return false;
@@ -595,8 +596,13 @@ export default function StaffDashboard() {
               <span className="text-xs font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">
                 {formatPickupTime(order.pickup_time)}
               </span>
-              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase ${order.is_takeaway ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-emerald-100 text-emerald-700 border border-emerald-200'}`}>
-                {order.is_takeaway ? 'TAKEAWAY' : 'DINE-IN'}
+              <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full flex items-center gap-1 uppercase tracking-wider ${
+                order.is_takeaway 
+                  ? 'bg-amber-100 text-amber-800 border border-amber-300' 
+                  : 'bg-sky-100 text-sky-800 border border-sky-300'
+              }`}>
+                <span>{order.is_takeaway ? '🛍️' : '🍽️'}</span>
+                <span>{order.is_takeaway ? 'Takeaway' : 'Dine-in'}</span>
               </span>
             </div>
             <h4 className="font-bold text-sm text-slate-800 truncate mt-1">{order.profiles?.name || 'Student'}</h4>

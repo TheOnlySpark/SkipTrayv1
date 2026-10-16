@@ -137,6 +137,17 @@ export default function SuperAdminDashboard() {
     e.preventDefault();
     setError('');
     setSuccess('');
+
+    const EMAIL_DOT_COM_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.com$/i;
+    if (!EMAIL_DOT_COM_REGEX.test(adminEmail.trim())) {
+      setError('Invalid Email');
+      return;
+    }
+    if (adminPassword.length < 8) {
+      setError('Admin password must be at least 8 digits/characters long.');
+      return;
+    }
+
     setCreating(true);
 
     try {
@@ -314,6 +325,8 @@ export default function SuperAdminDashboard() {
                   <input
                     type="email"
                     required
+                    pattern="[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[cC][oO][mM]"
+                    title="Email must follow the format ____@____.com"
                     placeholder="admin@acmecorp.com"
                     value={adminEmail}
                     onChange={(e) => setAdminEmail(e.target.value)}
@@ -326,8 +339,8 @@ export default function SuperAdminDashboard() {
                   <input
                     type="password"
                     required
-                    minLength={6}
-                    placeholder="Min. 6 characters"
+                    minLength={8}
+                    placeholder="Min. 8 characters"
                     value={adminPassword}
                     onChange={(e) => setAdminPassword(e.target.value)}
                     className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none"

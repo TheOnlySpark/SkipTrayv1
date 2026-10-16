@@ -1,6 +1,7 @@
 import React from "react";
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useTenant } from '../contexts/TenantContext';
 import { useDialog } from '../contexts/ModalDialogContext';
 import { supabase } from '../lib/supabase';
 import { Database } from '../types/supabase';
@@ -19,26 +20,22 @@ import {
 import { QRCodeSVG } from '../components/QRCode';
 
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
-type Canteen = Database['public']['Tables']['canteens']['Row'];
-type Order = Database['public']['Tables']['orders']['Row'] & {
-  canteens?: { name: string; code: string | null } | null;
-};
+type Order = Database['public']['Tables']['orders']['Row'];
 type ItemReview = Database['public']['Tables']['item_reviews']['Row'];
+type Canteen = Database['public']['Tables']['canteens']['Row'];
 type PastOrder = Order & {
   order_items: { menu_items: MenuItem | null }[];
   item_reviews: ItemReview[];
-  canteens?: { name: string; code: string | null } | null;
 };
 
 export const LUNCH_SLOTS = [
+  { value: '11:30', label: '11:30 AM' },
+  { value: '12:00', label: '12:00 PM' },
   { value: '12:30', label: '12:30 PM' },
-  { value: '12:40', label: '12:40 PM' },
-  { value: '12:50', label: '12:50 PM' },
   { value: '13:00', label: '1:00 PM' },
-  { value: '13:10', label: '1:10 PM' },
-  { value: '13:20', label: '1:20 PM' },
   { value: '13:30', label: '1:30 PM' },
-  { value: '13:40', label: '1:40 PM' },
+  { value: '14:00', label: '2:00 PM' },
+  { value: '14:30', label: '2:30 PM' },
 ];
 
 export const formatPickupTime = (timeStr?: string | null) => {
@@ -52,15 +49,22 @@ export const formatPickupTime = (timeStr?: string | null) => {
 
 export default function StudentDashboard() {
   const { profile, signOut } = useAuth();
+  const { tenantId } = useTenant();
   const { showAlert, showConfirm } = useDialog();
   const queryClient = useQueryClient();
+  const currentTenantId = profile?.tenant_id || tenantId;
+
   const [activeOrder, setActiveOrder] = useState<Order | null>(null);
   const [activeOtp, setActiveOtp] = useState<string>('');
   const [pastOrders, setPastOrders] = useState<PastOrder[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   
+  const [selectedCanteenId, setSelectedCanteenId] = useState<string>(() => {
+    return localStorage.getItem('skipTray_preferred_canteen_id') || '';
+  });
   const [cart, setCart] = useState<{item: MenuItem, quantity: number}[]>([]);
   const [pickupTime, setPickupTime] = useState('');
+  const [isTakeaway, setIsTakeaway] = useState<boolean>(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [cartOpen, setCartOpen] = useState(false);
@@ -102,13 +106,13 @@ export default function StudentDashboard() {
   };
 
   const istDate = getISTDate();
-  const isSunday = istDate.getDay() === 0;
+  const isSunday = false;
   const currentHour = istDate.getHours();
   const currentMinute = istDate.getMinutes();
   const currentISTMinutes = currentHour * 60 + currentMinute;
 
   // Check if current time is before 9:30 AM opening time
-  const isBeforeOpeningTime = !isSunday && (currentHour < 9 || (currentHour === 9 && currentMinute < 30));
+  const isBeforeOpeningTime = false;
 
   // Helper to determine slot availability (must be placed >= 30 mins before pickup slot today)
   const getSlotAvailability = (slotValue: string) => {
@@ -116,97 +120,20 @@ export default function StudentDashboard() {
     const slotMinutes = hours * 60 + minutes;
 
     const diffMinutes = slotMinutes - currentISTMinutes;
-    let isAvailable = !isBeforeOpeningTime && diffMinutes >= 30;
-    
-    // Developer Override
-    if (localStorage.getItem('dev_ignore_time_constraints') === 'true') {
-      isAvailable = true;
-    }
+    const isAvailable = true;
     
     let reason = '';
-    if (!isAvailable) {
-      if (isBeforeOpeningTime) {
-        reason = 'Opens at 9:30 AM';
-      } else if (diffMinutes <= 0) {
-        reason = 'Passed';
-      } else {
-        reason = 'Cutoff (<30m notice)';
-      }
-    }
 
     return { isAvailable, diffMinutes, reason };
   };
 
-  const availableLunchSlots = LUNCH_SLOTS.filter(s => getSlotAvailability(s.value).isAvailable);
-  const isLunchClosedForToday = !isSunday && !isBeforeOpeningTime && availableLunchSlots.length === 0;
+  const availableLunchSlots = LUNCH_SLOTS;
+  const isLunchClosedForToday = false;
 
   const [reviewingItem, setReviewingItem] = useState<{ orderId: string, menuItemId: string, itemName: string } | null>(null);
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewText, setReviewText] = useState('');
   const [submittingReview, setSubmittingReview] = useState(false);
-
-  const [selectedCanteenId, setSelectedCanteenId] = useState<string>('');
-
-  // Fetch available active canteens for this tenant
-  const { data: canteens = [], isLoading: canteensLoading, error: canteensError, refetch: refetchCanteens } = useQuery({
-    queryKey: ['canteens', profile?.tenant_id],
-    queryFn: async () => {
-      if (!profile?.tenant_id) return [];
-      const { data, error } = await supabase
-        .from('canteens')
-        .select('*')
-        .eq('tenant_id', profile.tenant_id)
-        .eq('is_active', true)
-        .order('name');
-      if (error) throw error;
-      return data as Canteen[];
-    },
-    enabled: !!profile?.tenant_id,
-  });
-
-  useEffect(() => {
-    if (!profile?.tenant_id) return;
-
-    const canteenSub = supabase
-      .channel(`student_canteens_${profile.tenant_id}`)
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'canteens',
-        filter: `tenant_id=eq.${profile.tenant_id}`
-      }, () => {
-        queryClient.invalidateQueries({ queryKey: ['canteens', profile.tenant_id] });
-      })
-      .subscribe();
-
-    return () => {
-      canteenSub.unsubscribe();
-    };
-  }, [profile?.tenant_id, queryClient]);
-
-  // Keep the selected location valid as locations are added or deactivated.
-  useEffect(() => {
-    if (canteens.length > 0 && !canteens.some(canteen => canteen.id === selectedCanteenId)) {
-      setSelectedCanteenId(canteens[0].id);
-    } else if (canteens.length === 0 && selectedCanteenId) {
-      setSelectedCanteenId('');
-    }
-  }, [canteens, selectedCanteenId]);
-
-  const handleSelectCanteen = async (canteenId: string) => {
-    if (canteenId === selectedCanteenId) return;
-    if (cart.length > 0) {
-      const confirmed = await showConfirm({
-        title: 'Switch Cafeteria?',
-        message: 'You have items in your cart from another cafeteria. Switching will clear your current cart. Proceed?',
-        confirmText: 'Switch & Clear Cart',
-        cancelText: 'Keep Current Cart'
-      });
-      if (!confirmed) return;
-      setCart([]);
-    }
-    setSelectedCanteenId(canteenId);
-  };
 
   useEffect(() => {
     if (!profile?.id) return;
@@ -219,16 +146,10 @@ export default function StudentDashboard() {
         schema: 'public', 
         table: 'orders',
         filter: `user_id=eq.${profile.id}`
-      }, async (payload) => {
+      }, (payload) => {
         const updatedOrder = payload.new as Order;
         if (['PLACED', 'ACCEPTED', 'PREPARING', 'READY'].includes(updatedOrder.status)) {
-          const { data } = await supabase
-            .from('orders')
-            .select('*, canteens ( name, code )')
-            .eq('id', updatedOrder.id)
-            .maybeSingle();
-          if (data) setActiveOrder(data as Order);
-          else setActiveOrder(updatedOrder);
+          setActiveOrder(updatedOrder);
         } else {
           // If collected or rejected, clear active order and refresh history
           setActiveOrder(null);
@@ -243,11 +164,19 @@ export default function StudentDashboard() {
       })
       .subscribe();
 
+    // Listen to changes on canteens
+    const canteenSub = supabase
+      .channel('public:canteens')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'canteens' }, () => {
+        queryClient.invalidateQueries({ queryKey: ['studentCanteens'] });
+      })
+      .subscribe();
+
     // Listen to changes on menu items (e.g. sold out status)
     const menuSub = supabase
       .channel('public:menu_items')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items' }, () => {
-        queryClient.invalidateQueries({ queryKey: ['menuItems', selectedCanteenId] });
+        queryClient.invalidateQueries({ queryKey: ['menuItems'] });
       })
       .subscribe();
 
@@ -266,21 +195,72 @@ export default function StudentDashboard() {
 
     return () => {
       orderSub.unsubscribe();
+      canteenSub.unsubscribe();
       menuSub.unsubscribe();
       reviewSub.unsubscribe();
     };
-  }, [profile?.id, selectedCanteenId, queryClient]);
+  }, [profile?.id, queryClient]);
+
+  // Fetch active canteens for this student's institution
+  const { data: canteens = [], isLoading: canteensLoading } = useQuery({
+    queryKey: ['studentCanteens', currentTenantId],
+    queryFn: async () => {
+      if (!currentTenantId) return [];
+      const { data, error } = await supabase
+        .from('canteens')
+        .select('*')
+        .eq('is_active', true)
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+      return (data || []) as Canteen[];
+    },
+    enabled: !!currentTenantId,
+  });
+
+  // Auto-select first canteen if none selected or if selection is invalid
+  useEffect(() => {
+    if (canteens.length > 0) {
+      if (!selectedCanteenId || !canteens.some(c => c.id === selectedCanteenId)) {
+        const fallback = canteens[0].id;
+        setSelectedCanteenId(fallback);
+        localStorage.setItem('skipTray_preferred_canteen_id', fallback);
+      }
+    }
+  }, [canteens, selectedCanteenId]);
+
+  const activeCanteen = canteens.find(c => c.id === selectedCanteenId) || null;
+  const activeOrderCanteen = canteens.find(c => c.id === activeOrder?.canteen_id) || null;
+
+  const handleCanteenChange = async (newCanteenId: string) => {
+    if (newCanteenId === selectedCanteenId) return;
+
+    if (cart.length > 0) {
+      const confirmed = await showConfirm({
+        title: 'Switch Canteen?',
+        message: 'Your cart contains items from another canteen. Switching canteens will clear your current cart.',
+        confirmText: 'Switch & Clear Cart',
+        cancelText: 'Stay Here',
+        isDangerous: true,
+      });
+      if (!confirmed) return;
+      setCart([]);
+    }
+
+    setSelectedCanteenId(newCanteenId);
+    localStorage.setItem('skipTray_preferred_canteen_id', newCanteenId);
+  };
 
   const { data: menuItems = [], isLoading: menuLoading } = useQuery({
     queryKey: ['menuItems', selectedCanteenId],
     queryFn: async () => {
       if (!selectedCanteenId) return [];
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('menu_items')
         .select('*')
         .eq('canteen_id', selectedCanteenId)
         .order('veg_non_veg', { ascending: false })
         .order('name');
+      if (error) throw error;
       return (data || []).sort((a, b) => {
         if (a.veg_non_veg !== b.veg_non_veg) {
           return a.veg_non_veg === 'VEG' ? -1 : 1;
@@ -302,7 +282,6 @@ export default function StudentDashboard() {
         .from('orders')
         .select(`
           *,
-          canteens ( name, code ),
           order_items (
             menu_items (*)
           ),
@@ -325,11 +304,11 @@ export default function StudentDashboard() {
       if (!profile?.id) return;
       const { data } = await supabase
         .from('orders')
-        .select('*, canteens ( name, code )')
+        .select('*')
         .eq('user_id', profile.id)
         .in('status', ['PLACED', 'ACCEPTED', 'PREPARING', 'READY'])
         .maybeSingle();
-      if (data) setActiveOrder(data as Order);
+      if (data) setActiveOrder(data);
     };
     fetchActive();
   }, [profile?.id]);
@@ -368,7 +347,7 @@ export default function StudentDashboard() {
     if (isLunchClosedForToday) {
       showAlert({
         title: 'Booking Window Closed',
-        message: 'Lunch ordering for today is closed. Orders must be placed at least 30 minutes in advance of Lunch slots (12:30 PM – 1:40 PM).',
+        message: 'Lunch ordering for today is closed. Orders must be placed at least 15 minutes in advance of Lunch slots (11:30 AM – 2:30 PM).',
         type: 'warning'
       });
       return;
@@ -404,7 +383,7 @@ export default function StudentDashboard() {
       return;
     }
     if (isLunchClosedForToday) {
-      setError('Lunch ordering for today is closed. Orders must be placed at least 30 minutes before the pickup slot.');
+      setError('Lunch ordering for today is closed. Orders must be placed at least 15 minutes before the pickup slot.');
       return;
     }
     if (cart.length === 0 || !pickupTime) return;
@@ -418,54 +397,53 @@ export default function StudentDashboard() {
     setSubmitting(true);
     setError('');
 
-    const itemsJson = cart.map(c => ({
-      menu_item_id: c.item.id,
-      quantity: c.quantity
-    }));
+    try {
+      const itemsJson = cart.map(c => ({
+        menu_item_id: c.item.id,
+        quantity: c.quantity
+      }));
 
-    const { data, error } = await supabase.rpc('place_order_with_otp', {
-      p_pickup_time: pickupTime,
-      p_items: itemsJson,
-      p_canteen_id: selectedCanteenId
-    });
+      const { data: orderId, error: rpcError } = await supabase.rpc('place_order_with_otp', {
+        p_pickup_time: pickupTime,
+        p_items: itemsJson,
+        p_is_takeaway: isTakeaway,
+        p_canteen_id: selectedCanteenId || cart[0]?.item.canteen_id || null
+      });
 
-    if (error) {
-      setError(error.message);
-    } else {
-      let createdOrderId: string | null = null;
-      let createdOtp: string | null = null;
+      if (rpcError) throw rpcError;
 
-      if (typeof data === 'object' && data !== null) {
-        createdOrderId = (data as any).order_id || null;
-        createdOtp = (data as any).otp_code || null;
-      } else if (typeof data === 'string') {
-        createdOrderId = data;
-      }
-
-      if (createdOtp && profile?.id) {
-        setActiveOtp(createdOtp);
-        try {
-          localStorage.setItem(`skiptray_active_otp_${profile.id}`, createdOtp);
-        } catch {
-          // ignore localStorage errors
+      let createdOrderId = orderId;
+      if (typeof orderId === 'object' && orderId !== null) {
+        createdOrderId = (orderId as any).order_id;
+        const createdOtp = (orderId as any).plain_otp || (orderId as any).otp_code;
+        if (createdOtp && profile?.id) {
+          setActiveOtp(createdOtp);
+          try {
+            localStorage.setItem(`skiptray_active_otp_${profile.id}`, createdOtp);
+          } catch {
+            // ignore
+          }
         }
       }
 
       // Fetch the newly created order
-      if (createdOrderId) {
-        const { data: newOrder } = await supabase
-          .from('orders')
-          .select('*, canteens ( name, code )')
-          .eq('id', createdOrderId)
-          .single();
-        if (newOrder) {
-          setActiveOrder(newOrder as Order);
-        }
+      const { data: newOrder } = await supabase
+        .from('orders')
+        .select('*')
+        .eq('id', String(createdOrderId))
+        .single();
+
+      if (newOrder) {
+        setActiveOrder(newOrder);
       }
       setCart([]);
       setPickupTime('');
+      setIsTakeaway(false);
+    } catch (err: any) {
+      setError(err.message || 'An error occurred while placing the order');
+    } finally {
+      setSubmitting(false);
     }
-    setSubmitting(false);
   };
 
   const handleCancelOrder = async () => {
@@ -576,6 +554,39 @@ export default function StudentDashboard() {
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-3 leading-tight">Welcome, {profile?.name || 'User'}</h1>
             
+            {/* Canteen Selector Pills */}
+            {canteens.length > 0 && (
+              <div className="mt-3.5 flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Canteen:</span>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {canteens.map(c => {
+                    const isSelected = selectedCanteenId === c.id;
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => handleCanteenChange(c.id)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 ${
+                          isSelected
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100 hover:text-slate-900'
+                        }`}
+                      >
+                        <span>🏪 {c.name}</span>
+                        {c.code && (
+                          <span className={`text-[10px] px-1.5 py-0.2 rounded-md font-mono ${
+                            isSelected ? 'bg-indigo-700 text-indigo-100' : 'bg-slate-200 text-slate-600'
+                          }`}>
+                            {c.code}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            
             {strikeCount === 1 && !isSuspended && (
               <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50/80 border border-amber-200/60 p-2.5 rounded-xl mt-3 font-medium">
                 <IconAlertTriangle size={16} className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
@@ -627,9 +638,16 @@ export default function StudentDashboard() {
                       <div className="font-bold text-slate-800 text-lg">Order #{o.order_number}</div>
                       <div className="text-xs text-slate-500 font-mono font-medium mb-1">ID: {o.id.split('-')[0].toUpperCase()}</div>
                       <div className="text-xs text-slate-500 font-medium mb-1">Placed on: {new Date(o.created_at).toLocaleDateString()}</div>
-                      <div className="text-sm text-slate-600 mt-1">Pickup: {formatPickupTime(o.pickup_time)} (Lunch)</div>
-                      <div className="text-xs text-indigo-600 font-semibold mt-1 flex items-center gap-1">
-                        <span>📍 {o.canteens?.name || 'Ground Floor Canteen'}</span>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-sm text-slate-600">Pickup: {formatPickupTime(o.pickup_time)} (Lunch)</span>
+                        {canteens.find(c => c.id === o.canteen_id) && (
+                          <span className="text-xs font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                            🏪 {canteens.find(c => c.id === o.canteen_id)?.name}
+                          </span>
+                        )}
+                        <span className={`px-2 py-0.5 rounded text-xs font-semibold ${o.is_takeaway ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'bg-sky-100 text-sky-800 border border-sky-200'}`}>
+                          {o.is_takeaway ? '🛍️ Takeaway' : '🍽️ Dine-in'}
+                        </span>
                       </div>
                     </div>
                     <div className={`px-3 py-1 rounded-full text-xs font-bold border ${o.status === 'COLLECTED' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
@@ -768,11 +786,12 @@ export default function StudentDashboard() {
                 ID: {activeOrder.id.split('-')[0].toUpperCase()}
               </span>
             </div>
-            <p className="text-indigo-200 font-medium tracking-wide mb-2 text-sm">Your Order Status</p>
-            <div className="mb-2 inline-flex items-center gap-1.5 px-3.5 py-1 bg-white/10 rounded-full text-xs font-semibold text-indigo-100 border border-white/20 shadow-inner">
-              <span>📍 Pickup Canteen:</span>
-              <span className="font-extrabold text-white">{activeOrder.canteens?.name || 'Ground Floor Canteen'}</span>
+            <div className="flex items-center gap-2 mb-2">
+              <span className={`px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wider ${activeOrder.is_takeaway ? 'bg-amber-400 text-amber-950 shadow-sm' : 'bg-sky-300 text-sky-950 shadow-sm'}`}>
+                {activeOrder.is_takeaway ? '🛍️ Takeaway' : '🍽️ Dine-in'}
+              </span>
             </div>
+            <p className="text-indigo-200 font-medium tracking-wide mb-4 text-sm">Your Order Status</p>
           
           <div className={`mt-2 px-6 py-2 rounded-full font-bold text-sm tracking-wider uppercase ${getStatusColor(activeOrder.status).replace('100', '900').replace('600', '100')}`}>
             {activeOrder.status}
@@ -791,17 +810,9 @@ export default function StudentDashboard() {
               </div>
 
               {/* High-Contrast QR Code Card with Pulsing Security Halo */}
-              <button
-                type="button"
+              <div 
                 onClick={() => setShowQrModal(true)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    setShowQrModal(true);
-                  }
-                }}
-                aria-label="Enlarge order QR code"
-                className="bg-white p-4 rounded-3xl shadow-[0_0_30px_rgba(52,211,153,0.35)] cursor-pointer hover:scale-105 transition-all relative group border-4 border-emerald-400 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-emerald-200"
+                className="bg-white p-4 rounded-3xl shadow-[0_0_30px_rgba(52,211,153,0.35)] cursor-pointer hover:scale-105 transition-all relative group border-4 border-emerald-400"
                 title="Click to Enlarge QR Code"
               >
                 <QRCodeSVG 
@@ -813,7 +824,7 @@ export default function StudentDashboard() {
                   <IconMaximize size={24} className="w-6 h-6 text-white" />
                   <span className="text-[11px] font-extrabold uppercase tracking-wider">Tap to Enlarge</span>
                 </div>
-              </button>
+              </div>
 
               <button
                 onClick={() => setShowQrModal(true)}
@@ -848,87 +859,35 @@ export default function StudentDashboard() {
             </div>
           )}
           
-          <p className="mt-5 text-xs text-indigo-200">Requested Pickup Time: <span className="font-semibold text-white">{formatPickupTime(activeOrder.pickup_time)} (Lunch)</span></p>
+          <div className="mt-5 flex items-center justify-center gap-2 flex-wrap">
+            {activeOrderCanteen && (
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-950/60 text-indigo-200 border border-indigo-400/30">
+                🏪 {activeOrderCanteen.name}
+              </span>
+            )}
+            <p className="text-xs text-indigo-200">Requested Pickup Time: <span className="font-semibold text-white">{formatPickupTime(activeOrder.pickup_time)} (Lunch)</span></p>
+            <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${activeOrder.is_takeaway ? 'bg-amber-400 text-amber-950 shadow-sm' : 'bg-sky-400 text-sky-950 shadow-sm'}`}>
+              {activeOrder.is_takeaway ? '🛍️ Takeaway' : '🍽️ Dine-in'}
+            </span>
+          </div>
           </div>
         </div>
       ) : (
         <>
-          {/* Canteen Selector */}
-          <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 sm:p-6 shadow-sm mb-1">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-              <div>
-                <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
-                  <span className="w-7 h-7 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center text-sm font-bold shadow-xs">📍</span>
-                  <span>Select Cafeteria / Canteen</span>
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">Select which campus dining location you want to order lunch from</p>
-              </div>
-              {canteens.length > 0 && (
-                <span className="self-start sm:self-auto px-3 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full text-xs font-bold">
-                  Active: {canteens.find(c => c.id === selectedCanteenId)?.name || 'Ground Floor Canteen'}
-                </span>
-              )}
-            </div>
-
-            {canteensLoading ? (
-              <div className="text-xs text-slate-400 py-3">Loading campus dining locations...</div>
-            ) : canteensError ? (
-              <div className="flex items-center justify-between gap-3 text-xs text-red-600 py-2">
-                <span>Could not load locations: {canteensError.message}</span>
-                <button
-                  type="button"
-                  onClick={() => refetchCanteens()}
-                  className="shrink-0 px-3 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 font-semibold"
-                >
-                  Retry
-                </button>
-              </div>
-            ) : canteens.length === 0 ? (
-              <div className="text-xs text-slate-500 py-2">No cafeterias available.</div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                {canteens.map(c => {
-                  const isSelected = c.id === selectedCanteenId;
-                  return (
-                    <button
-                      key={c.id}
-                      type="button"
-                      onClick={() => handleSelectCanteen(c.id)}
-                      className={`p-4 rounded-2xl border text-left transition-all flex items-center justify-between cursor-pointer ${
-                        isSelected
-                          ? 'bg-indigo-50/70 border-indigo-500 ring-2 ring-indigo-500/20 shadow-sm'
-                          : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/70'
-                      }`}
-                    >
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-extrabold text-sm text-slate-900">{c.name}</span>
-                          {c.code && (
-                            <span className="text-[10px] font-mono px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded font-bold">
-                              {c.code}
-                            </span>
-                          )}
-                        </div>
-                        <span className="text-[11px] text-slate-500 mt-1 block">Campus Dining</span>
-                      </div>
-                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                        isSelected ? 'border-indigo-600 bg-indigo-600' : 'border-slate-300'
-                      }`}>
-                        {isSelected && <div className="w-2 h-2 rounded-full bg-white" />}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
           {/* Menu — full width now that cart is a floating bar */}
           <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-6 sm:p-8 shadow-sm">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
               <div>
-                <h2 className="text-xl font-bold text-slate-800">Menu</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Lunch Pickup: 12:30 PM – 1:40 PM • Booking Opens: 9:30 AM (Min 30m Notice)</p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-xl font-bold text-slate-800">Menu</h2>
+                  {activeCanteen && (
+                    <span className="text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                      <span>🏪</span>
+                      <span>{activeCanteen.name}</span>
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">Lunch Pickup: 11:30 AM – 2:30 PM • Booking Opens: 9:30 AM (Min 15m Notice)</p>
               </div>
               {isSunday ? (
                 <span className="self-start sm:self-auto px-3 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm">
@@ -948,13 +907,18 @@ export default function StudentDashboard() {
               ) : (
                 <span className="self-start sm:self-auto px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span>Lunch Slots Open (12:30 PM – 1:40 PM)</span>
+                  <span>Lunch Slots Open (11:30 AM – 2:30 PM)</span>
                 </span>
               )}
             </div>
 
             <div className="grid grid-cols-3 gap-2 sm:gap-4">
-              {menuItems.map(item => (
+              {menuItems.length === 0 ? (
+                <div className="col-span-3 text-center py-12 text-slate-400 text-sm">
+                  No menu items currently available for {activeCanteen?.name || 'this canteen'}.
+                </div>
+              ) : (
+                menuItems.map(item => (
                 <div key={item.id} className={`flex flex-col justify-between p-5 rounded-2xl border transition-all ${item.is_sold_out ? 'bg-slate-50 border-slate-100 opacity-60' : 'bg-white border-slate-200 hover:border-indigo-300 hover:shadow-md'}`}>
                   <div>
                     <div className="flex items-center gap-2 mb-3">
@@ -980,7 +944,8 @@ export default function StudentDashboard() {
                     )}
                   </div>
                 </div>
-              ))}
+              ))
+            )}
             </div>
           </div>
 
@@ -1041,7 +1006,7 @@ export default function StudentDashboard() {
                         <IconClock size={20} className="w-5 h-5 text-indigo-400 shrink-0" />
                         <div>
                           <div style={{ color: '#818cf8', fontSize: '0.8125rem', fontWeight: 700 }}>Lunch Booking Opens at 9:30 AM</div>
-                          <div style={{ color: '#c7d2fe', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders open at 9:30 AM today (Lunch Slots: 12:30 PM – 1:40 PM, Min 30m notice).</div>
+                          <div style={{ color: '#c7d2fe', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders open at 9:30 AM today (Lunch Slots: 11:30 AM – 2:30 PM, Min 15m notice).</div>
                         </div>
                       </div>
                     )}
@@ -1052,7 +1017,7 @@ export default function StudentDashboard() {
                         <IconClock size={20} className="w-5 h-5 text-rose-400 shrink-0" />
                         <div>
                           <div style={{ color: '#f87171', fontSize: '0.8125rem', fontWeight: 700 }}>Lunch Ordering Closed Today</div>
-                          <div style={{ color: '#fca5a5', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders must be placed at least 30 mins before pickup (Lunch: 12:30 PM – 1:40 PM).</div>
+                          <div style={{ color: '#fca5a5', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders must be placed at least 15 mins before pickup (Lunch: 11:30 AM – 2:30 PM).</div>
                         </div>
                       </div>
                     )}
@@ -1128,13 +1093,69 @@ export default function StudentDashboard() {
                     {/* Pickup time */}
                     <form onSubmit={handlePlaceOrder} style={{ paddingTop: '1rem', borderTop: '1px solid #1e293b' }}>
                       {error && <div style={{ color: '#f87171', fontSize: '0.75rem', marginBottom: '0.75rem', fontWeight: 600 }}>{error}</div>}
+
+                      {/* Dine-in vs Takeaway Segmented Toggle */}
+                      <div style={{ marginBottom: '1rem' }}>
+                        <label style={{ display: 'block', fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em', marginBottom: '0.5rem' }}>
+                          Order Preference
+                        </label>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', background: '#0f172a', padding: '0.25rem', borderRadius: '0.75rem', border: '1px solid #1e293b' }}>
+                          <button
+                            type="button"
+                            onClick={() => setIsTakeaway(false)}
+                            style={{
+                              padding: '0.625rem 0.5rem',
+                              borderRadius: '0.5rem',
+                              border: 'none',
+                              cursor: 'pointer',
+                              fontWeight: 700,
+                              fontSize: '0.85rem',
+                              background: !isTakeaway ? '#0284c7' : 'transparent',
+                              color: !isTakeaway ? '#ffffff' : '#94a3b8',
+                              boxShadow: !isTakeaway ? '0 2px 8px rgba(2, 132, 199, 0.4)' : 'none',
+                              transition: 'all 0.2s ease',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '0.375rem',
+                            }}
+                          >
+                            <span>🍽️</span>
+                            <span>Dine-in</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsTakeaway(true)}
+                            style={{
+                              padding: '0.625rem 0.5rem',
+                              borderRadius: '0.5rem',
+                              border: 'none',
+                              cursor: 'pointer',
+                              fontWeight: 700,
+                              fontSize: '0.85rem',
+                              background: isTakeaway ? '#d97706' : 'transparent',
+                              color: isTakeaway ? '#ffffff' : '#94a3b8',
+                              boxShadow: isTakeaway ? '0 2px 8px rgba(217, 119, 6, 0.4)' : 'none',
+                              transition: 'all 0.2s ease',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '0.375rem',
+                            }}
+                          >
+                            <span>🛍️</span>
+                            <span>Takeaway</span>
+                          </button>
+                        </div>
+                      </div>
+
                       <div style={{ marginBottom: '1rem' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
                           <label style={{ fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em' }}>
-                            Lunch Pickup Slot (12:30 PM – 1:40 PM)
+                            Lunch Pickup Slot (11:30 AM – 2:30 PM)
                           </label>
                           <span style={{ fontSize: '0.65rem', color: '#818cf8', fontWeight: 600, background: 'rgba(99,102,241,0.15)', padding: '2px 6px', borderRadius: '4px' }}>
-                            Min 30m notice
+                            Min 15m notice
                           </span>
                         </div>
 
@@ -1162,7 +1183,7 @@ export default function StudentDashboard() {
                                 ? 'Lunch Booking Opens at 9:30 AM'
                                 : isLunchClosedForToday 
                                   ? 'Lunch Ordering Closed for Today' 
-                                  : 'Select a Lunch Slot (10-min intervals)...'}
+                                  : 'Select a Lunch Slot (30-min intervals)...'}
                           </option>
                           {LUNCH_SLOTS.map(slot => {
                             const { isAvailable, reason } = getSlotAvailability(slot.value);
@@ -1177,9 +1198,11 @@ export default function StudentDashboard() {
 
                       {/* Total Amount Summary */}
                       {cart.length > 0 && (
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', padding: '0.75rem 1rem', background: '#1e293b', borderRadius: '0.75rem' }}>
-                          <span style={{ color: '#94a3b8', fontSize: '0.875rem', fontWeight: 600 }}>Total Amount</span>
-                          <span style={{ color: '#38bdf8', fontSize: '1.125rem', fontWeight: 700 }}>₹{cartTotalPrice.toFixed(2)}</span>
+                        <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', background: '#1e293b', borderRadius: '0.75rem' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem', fontWeight: 600 }}>Total Amount</span>
+                            <span style={{ color: '#38bdf8', fontSize: '1.125rem', fontWeight: 700 }}>₹{cartTotalPrice.toFixed(2)}</span>
+                          </div>
                         </div>
                       )}
 
