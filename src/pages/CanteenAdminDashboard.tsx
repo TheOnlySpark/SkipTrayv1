@@ -60,12 +60,6 @@ import {
   LunchSlotConfig,
   DEFAULT_LUNCH_SLOT_CONFIG
 } from '../lib/lunchSlots';
-import {
-  CanteenTaxConfig,
-  DEFAULT_CANTEEN_TAX_CONFIG,
-  fetchCanteenTaxConfig,
-  saveCanteenTaxConfig,
-} from '../lib/taxService';
 
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 type FoodType = Database['public']['Enums']['food_type'];
@@ -643,15 +637,7 @@ export default function CanteenAdminDashboard() {
   const [newItemPrice, setNewItemPrice] = useState('');
   const [newItemType, setNewItemType] = useState<FoodType>('VEG');
   const [newItemPrepTime, setNewItemPrepTime] = useState('10');
-  const [newItemGstRate, setNewItemGstRate] = useState('5');
-  const [newItemHsnCode, setNewItemHsnCode] = useState('996331');
   const [priceError, setPriceError] = useState<string | null>(null);
-
-  // Canteen GST & Tax Configuration State
-  const [taxConfig, setTaxConfig] = useState<CanteenTaxConfig>(DEFAULT_CANTEEN_TAX_CONFIG);
-  const [taxConfigLoading, setTaxConfigLoading] = useState(true);
-  const [savingTaxConfig, setSavingTaxConfig] = useState(false);
-  const [taxSaveSuccess, setTaxSaveSuccess] = useState(false);
 
   // Lunch Pickup Time Slots Management State
   const [slotConfig, setSlotConfig] = useState<LunchSlotConfig>(DEFAULT_LUNCH_SLOT_CONFIG);
@@ -666,14 +652,7 @@ export default function CanteenAdminDashboard() {
       setSlotConfig(cfg);
       setSlotConfigLoading(false);
     }
-    async function loadTaxConfig() {
-      setTaxConfigLoading(true);
-      const tcfg = await fetchCanteenTaxConfig(currentCanteenId);
-      setTaxConfig(tcfg);
-      setTaxConfigLoading(false);
-    }
     loadSlotConfig();
-    loadTaxConfig();
   }, [currentCanteenId]);
 
   const generatedSlots = React.useMemo(() => {
@@ -747,32 +726,6 @@ export default function CanteenAdminDashboard() {
 
   const handleResetSlotDefaults = () => {
     setSlotConfig(DEFAULT_LUNCH_SLOT_CONFIG);
-  };
-
-  const handleSaveTaxConfig = async () => {
-    if (!currentCanteenId || !currentTenantId) return;
-    setSavingTaxConfig(true);
-    setTaxSaveSuccess(false);
-
-    const res = await saveCanteenTaxConfig(currentCanteenId, currentTenantId, taxConfig);
-    setSavingTaxConfig(false);
-
-    if (res.success) {
-      setTaxSaveSuccess(true);
-      setTimeout(() => setTaxSaveSuccess(false), 3000);
-      window.dispatchEvent(new CustomEvent('canteen_tax_config_updated', { detail: taxConfig }));
-      showAlert({
-        title: 'Tax Configuration Saved',
-        message: 'Canteen GST settings, pricing mode, and tax rules updated successfully.',
-        type: 'success'
-      });
-    } else {
-      showAlert({
-        title: 'Error Saving Tax Config',
-        message: res.error || 'Failed to save tax settings.',
-        type: 'error'
-      });
-    }
   };
 
   useEffect(() => {
@@ -899,8 +852,6 @@ export default function CanteenAdminDashboard() {
       veg_non_veg: newItemType,
       price: parsedPrice,
       prep_time_minutes: Number(newItemPrepTime) || 10,
-      gst_rate_percent: Number(newItemGstRate) || 5,
-      hsn_code: newItemHsnCode || '996331',
       tenant_id: currentTenantId,
       canteen_id: currentCanteenId
     }).select().single();
@@ -915,7 +866,6 @@ export default function CanteenAdminDashboard() {
       setNewItemName('');
       setNewItemPrice('');
       setNewItemPrepTime('10');
-      setNewItemGstRate('5');
       setPriceError(null);
     }
   };
@@ -1539,23 +1489,12 @@ export default function CanteenAdminDashboard() {
                 onChange={(e) => setNewItemPrepTime(e.target.value)}
                 min="1"
                 max="60"
-                className="w-16 px-2 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-xs text-slate-800"
-              />
-              <input 
-                type="number" 
-                placeholder="GST %" 
-                title="GST Rate Percent (default 5% for canteen food)"
-                value={newItemGstRate}
-                onChange={(e) => setNewItemGstRate(e.target.value)}
-                min="0"
-                max="28"
-                step="0.5"
-                className="w-16 px-2 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-xs text-slate-800"
+                className="w-20 px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm text-slate-800"
               />
               <select 
                 value={newItemType} 
                 onChange={(e) => setNewItemType(e.target.value as FoodType)}
-                className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm text-slate-800"
+                className="w-28 px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm text-slate-800"
               >
                 <option value="VEG">Veg</option>
                 <option value="NON_VEG">Non-Veg</option>
@@ -1586,12 +1525,7 @@ export default function CanteenAdminDashboard() {
                       <span className={`font-semibold ${item.is_sold_out ? 'text-slate-400 line-through' : 'text-slate-800'}`}>{item.name}</span>
                       {item.is_sold_out && <span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full shrink-0">Sold Out</span>}
                     </div>
-                    <div className="text-xs font-bold text-slate-600 mt-0.5">
-                      ₹{Number(item.price || 0).toFixed(2)}{' '}
-                      <span className="font-normal text-slate-400">
-                        ({(item as any).gst_rate_percent ?? 5}% GST)
-                      </span>
-                    </div>
+                    <span className="text-xs font-bold text-slate-600">₹{Number(item.price || 0).toFixed(2)}</span>
                   </div>
                 </div>
                 <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
@@ -2082,178 +2016,6 @@ export default function CanteenAdminDashboard() {
             </div>
           )}
         </div>
-      </div>
-
-      {/* GST & Indian Tax Configuration Management */}
-      <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 shadow-sm flex flex-col">
-        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-6 pb-4 border-b border-slate-100">
-          <div>
-            <div className="flex items-center gap-2">
-              <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
-                <span className="font-black text-sm">₹</span>
-              </div>
-              <h2 className="text-xl font-bold text-slate-800">GST & Tax Compliance Configuration</h2>
-            </div>
-            <p className="text-xs text-slate-500 mt-1">
-              Configure your Canteen GSTIN, Indian State Code, Menu Pricing Mode (Tax-Inclusive vs. Exclusive), and default GST rates for itemized invoices.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-              {taxConfig.priceMode === 'TAX_INCLUSIVE' ? 'Prices: Tax-Inclusive' : 'Prices: Tax-Exclusive'}
-            </span>
-          </div>
-        </div>
-
-        {taxConfigLoading ? (
-          <div className="py-8 text-center text-slate-400 text-sm">Loading tax configuration...</div>
-        ) : (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-              {/* GSTIN */}
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-                  Canteen GSTIN (15 Digits)
-                </label>
-                <input
-                  type="text"
-                  maxLength={15}
-                  value={taxConfig.gstin}
-                  onChange={(e) => setTaxConfig({ ...taxConfig, gstin: e.target.value.toUpperCase() })}
-                  placeholder="e.g. 29AABCU9603R1Z7"
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono uppercase focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                />
-                <p className="text-[11px] text-slate-400 mt-1">Leave empty or UNREGISTERED if composition/unregistered.</p>
-              </div>
-
-              {/* State Code */}
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-                  Operating State Code (GST)
-                </label>
-                <select
-                  value={taxConfig.stateCode}
-                  onChange={(e) => setTaxConfig({ ...taxConfig, stateCode: e.target.value })}
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                >
-                  <option value="29">29 — Karnataka</option>
-                  <option value="33">33 — Tamil Nadu</option>
-                  <option value="32">32 — Kerala</option>
-                  <option value="36">36 — Telangana</option>
-                  <option value="37">37 — Andhra Pradesh</option>
-                  <option value="27">27 — Maharashtra</option>
-                  <option value="07">07 — Delhi</option>
-                  <option value="19">19 — West Bengal</option>
-                  <option value="24">24 — Gujarat</option>
-                  <option value="06">06 — Haryana</option>
-                  <option value="08">08 — Rajasthan</option>
-                  <option value="09">09 — Uttar Pradesh</option>
-                </select>
-                <p className="text-[11px] text-slate-400 mt-1">Same state supply splits into CGST + SGST. Inter-state uses IGST.</p>
-              </div>
-
-              {/* Pricing Mode */}
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-                  Menu Pricing Mode
-                </label>
-                <select
-                  value={taxConfig.priceMode}
-                  onChange={(e) => setTaxConfig({ ...taxConfig, priceMode: e.target.value as 'TAX_INCLUSIVE' | 'TAX_EXCLUSIVE' })}
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                >
-                  <option value="TAX_INCLUSIVE">Tax-Inclusive (Menu price contains GST)</option>
-                  <option value="TAX_EXCLUSIVE">Tax-Exclusive (GST added on top)</option>
-                </select>
-                <p className="text-[11px] text-slate-400 mt-1">Indian canteens usually display MRP / inclusive prices.</p>
-              </div>
-
-              {/* Default Food GST Rate */}
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-                  Default Food GST Rate (%)
-                </label>
-                <select
-                  value={taxConfig.defaultFoodGstRate}
-                  onChange={(e) => setTaxConfig({ ...taxConfig, defaultFoodGstRate: Number(e.target.value) })}
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                >
-                  <option value={5}>5% (Restaurant service / Canteen without ITC - CGST 2.5% + SGST 2.5%)</option>
-                  <option value={12}>12% (Packaged food / with ITC)</option>
-                  <option value={18}>18% (Outdoor catering / Standard service)</option>
-                  <option value={0}>0% (Exempt / Nil Rated)</option>
-                </select>
-                <p className="text-[11px] text-slate-400 mt-1">Items can override this rate individually in the menu list.</p>
-              </div>
-
-              {/* Service Fee GST Rate */}
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-                  Service / Platform Fee GST (%)
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="28"
-                  value={taxConfig.serviceFeeGstRate}
-                  onChange={(e) => setTaxConfig({ ...taxConfig, serviceFeeGstRate: Number(e.target.value) })}
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                />
-                <p className="text-[11px] text-slate-400 mt-1">Platform service tax treatment rate (Default: 18%).</p>
-              </div>
-
-              {/* Legal Canteen Name */}
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-                  Canteen Legal / Invoice Name
-                </label>
-                <input
-                  type="text"
-                  value={taxConfig.legalBusinessName || ''}
-                  onChange={(e) => setTaxConfig({ ...taxConfig, legalBusinessName: e.target.value })}
-                  placeholder="e.g. SkipTray Campus Food Services"
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                />
-                <p className="text-[11px] text-slate-400 mt-1">Printed on formal tax invoice headers.</p>
-              </div>
-            </div>
-
-            {/* Statutory Formula Banner */}
-            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-xs text-amber-800 space-y-1.5">
-              <div className="font-bold flex items-center gap-1.5 text-amber-900">
-                <span>Tax Compliance Formula & Audit Rules:</span>
-              </div>
-              <ul className="list-disc list-inside space-y-1 text-amber-700">
-                <li>
-                  <strong>Tax-Inclusive Mode:</strong> Taxable Base = Price × 100 / (100 + Rate). For an ₹80.00 item at 5% GST, Base = ₹76.19, Total GST = ₹3.81.
-                </li>
-                <li>
-                  <strong>Intra-State Supplies (Karnataka to Karnataka):</strong> GST is split exactly into <strong>CGST ({taxConfig.defaultFoodGstRate / 2}%)</strong> and <strong>SGST ({taxConfig.defaultFoodGstRate / 2}%)</strong>.
-                </li>
-                <li>
-                  <strong>Inter-State Supplies:</strong> <strong>IGST ({taxConfig.defaultFoodGstRate}%)</strong> is charged; CGST/SGST are never charged simultaneously with IGST.
-                </li>
-              </ul>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex items-center justify-end gap-3 pt-2">
-              {taxSaveSuccess && (
-                <span className="text-xs font-bold text-emerald-600 flex items-center gap-1">
-                  <IconCheckCircle className="w-4 h-4" /> Tax Settings Saved
-                </span>
-              )}
-              <button
-                type="button"
-                onClick={handleSaveTaxConfig}
-                disabled={savingTaxConfig}
-                className="px-6 py-2.5 bg-emerald-600 text-white text-sm font-bold rounded-xl hover:bg-emerald-700 transition shadow-sm disabled:opacity-50"
-              >
-                {savingTaxConfig ? 'Saving Settings...' : 'Save Tax Configuration'}
-              </button>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Lunch Pickup Time Slots Management */}
