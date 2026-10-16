@@ -470,6 +470,20 @@ export default function CanteenAdminDashboard() {
     }
   });
 
+  const { data: currentCanteen } = useQuery({
+    queryKey: ['canteenDetails', currentCanteenId],
+    enabled: !!currentCanteenId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('canteens')
+        .select('id, name, code')
+        .eq('id', currentCanteenId)
+        .maybeSingle();
+      if (error) return null;
+      return data;
+    }
+  });
+
   const { data: staffList = [], isLoading: staffLoading } = useQuery({
     queryKey: ['canteenStaff', currentCanteenId],
     enabled: !!currentCanteenId,
@@ -629,6 +643,7 @@ export default function CanteenAdminDashboard() {
 
   const handleCreateStaff = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (creatingStaff) return;
     if (!currentCanteenId) {
       showAlert({ title: 'Error', message: 'No canteen selected or assigned to your profile.', type: 'error' });
       return;
@@ -1853,9 +1868,16 @@ export default function CanteenAdminDashboard() {
             <p className="text-[11px] text-slate-500">Instant access for kitchen &amp; delivery counter operators</p>
           </div>
         </div>
-        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-100/60 px-2.5 py-0.5 rounded-full border border-emerald-200/50 hidden sm:inline-block">
-          Role: Counter Staff
-        </span>
+        <div className="flex items-center gap-2">
+          {currentCanteen?.name && (
+            <span className="text-[11px] font-semibold text-slate-700 bg-slate-100 px-2.5 py-0.5 rounded-full border border-slate-200 hidden sm:inline-block">
+              Cafeteria: {currentCanteen.name}
+            </span>
+          )}
+          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-100/60 px-2.5 py-0.5 rounded-full border border-emerald-200/50 hidden sm:inline-block">
+            Role: Counter Staff
+          </span>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
