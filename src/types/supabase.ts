@@ -173,6 +173,7 @@ export interface Database {
           name: string
           price: number
           prep_time_minutes: number | null
+          stock_quantity: number | null
           gst_rate_percent: number | null
           hsn_code: string | null
           updated_at: string
@@ -188,6 +189,7 @@ export interface Database {
           name: string
           price?: number
           prep_time_minutes?: number | null
+          stock_quantity?: number | null
           gst_rate_percent?: number | null
           hsn_code?: string | null
           updated_at?: string
@@ -203,6 +205,7 @@ export interface Database {
           name?: string
           price?: number
           prep_time_minutes?: number | null
+          stock_quantity?: number | null
           gst_rate_percent?: number | null
           hsn_code?: string | null
           updated_at?: string

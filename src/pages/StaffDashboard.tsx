@@ -220,14 +220,16 @@ export default function StaffDashboard() {
       .order('veg_non_veg', { ascending: false })
       .order('name');
     if (data) {
-      const sorted = [...data].sort((a, b) => {
-        if (a.veg_non_veg !== b.veg_non_veg) {
-          return a.veg_non_veg === 'VEG' ? -1 : 1;
-        }
-        if (a.name.toLowerCase() === 'veg meals') return -1;
-        if (b.name.toLowerCase() === 'veg meals') return 1;
-        return a.name.localeCompare(b.name);
-      });
+      const sorted = [...data]
+        .filter(item => !item.name.startsWith('[DELETED]') && !item.name.startsWith('[ARCHIVED]'))
+        .sort((a, b) => {
+          if (a.veg_non_veg !== b.veg_non_veg) {
+            return a.veg_non_veg === 'VEG' ? -1 : 1;
+          }
+          if (a.name.toLowerCase() === 'veg meals') return -1;
+          if (b.name.toLowerCase() === 'veg meals') return 1;
+          return a.name.localeCompare(b.name);
+        });
       setMenuItems(sorted);
     }
   };
@@ -822,9 +824,10 @@ export default function StaffDashboard() {
           <div className={`px-2.5 py-0.5 rounded-full text-[11px] font-extrabold uppercase tracking-wide border shrink-0 ${order.status === 'PLACED' ? 'bg-slate-100 text-slate-700 border-slate-300' :
               order.status === 'ACCEPTED' ? 'bg-blue-50 text-blue-700 border-blue-200' :
                 order.status === 'PREPARING' ? 'bg-orange-50 text-orange-700 border-orange-200' :
-                  'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  order.status === 'REJECTED' ? 'bg-red-50 text-red-700 border-red-200' :
+                    'bg-emerald-50 text-emerald-700 border-emerald-200'
             }`}>
-            {order.status}
+            {order.status === 'REJECTED' ? 'CANCELLED' : order.status}
           </div>
         </div>
 
@@ -1090,9 +1093,10 @@ export default function StaffDashboard() {
           order.status === 'PLACED' ? 'bg-slate-100 text-slate-700 border-slate-300' :
           order.status === 'ACCEPTED' ? 'bg-blue-50 text-blue-700 border-blue-200' :
           order.status === 'PREPARING' ? 'bg-orange-50 text-orange-700 border-orange-200' :
+          order.status === 'REJECTED' ? 'bg-red-50 text-red-700 border-red-200' :
           'bg-emerald-50 text-emerald-700 border-emerald-200'
         }`}>
-          {order.status}
+          {order.status === 'REJECTED' ? 'CANCELLED' : order.status}
         </span>
       )
     },

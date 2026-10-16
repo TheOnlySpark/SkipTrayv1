@@ -284,7 +284,7 @@ export async function fetchLunchSlotConfig(canteenId?: string | null): Promise<L
   // 1. Check local cache
   let cachedConfig: LunchSlotConfig | null = null;
   try {
-    const local = localStorage.getItem(cacheKey);
+    const local = localStorage.getItem(cacheKey) || localStorage.getItem('skiptray_lunch_slot_config_default');
     if (local) {
       cachedConfig = JSON.parse(local);
     }
@@ -308,7 +308,7 @@ export async function fetchLunchSlotConfig(canteenId?: string | null): Promise<L
         serviceStartTime: data.service_start_time || '12:00',
         serviceEndTime: data.service_end_time || '14:00',
         slotDurationMinutes: Number(data.slot_duration_minutes) || 15,
-        minNoticeMinutes: Number(data.min_notice_minutes) || 30,
+        minNoticeMinutes: data.min_notice_minutes !== null && data.min_notice_minutes !== undefined ? Number(data.min_notice_minutes) : 15,
         isLunchEnabled: data.is_lunch_enabled ?? true,
         disabledSlots: Array.isArray(data.disabled_slots) ? (data.disabled_slots as string[]) : [],
         slotCapacities: typeof data.slot_capacities === 'object' && data.slot_capacities !== null ? (data.slot_capacities as Record<string, number>) : {},
@@ -320,6 +320,7 @@ export async function fetchLunchSlotConfig(canteenId?: string | null): Promise<L
 
       try {
         localStorage.setItem(cacheKey, JSON.stringify(parsedConfig));
+        localStorage.setItem('skiptray_lunch_slot_config_default', JSON.stringify(parsedConfig));
       } catch (err) {
         // Ignore local storage error
       }
@@ -353,6 +354,7 @@ export async function saveLunchSlotConfig(
   // 1. Immediately update local storage so user sees changes instantly
   try {
     localStorage.setItem(cacheKey, JSON.stringify(updatedConfig));
+    localStorage.setItem('skiptray_lunch_slot_config_default', JSON.stringify(updatedConfig));
     // Broadcast storage event for other tabs/components
     window.dispatchEvent(new CustomEvent('lunch_slot_config_updated', { detail: updatedConfig }));
   } catch (e) {
