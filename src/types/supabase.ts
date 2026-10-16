@@ -323,6 +323,134 @@ export interface Database {
           }
         ]
       }
+      admin_provisioning_audit_log: {
+        Row: {
+          id: string
+          created_at: string
+          action: string
+          actor_id: string | null
+          target_user_id: string | null
+          target_email_masked: string | null
+          ip_address: string | null
+          details: Json | null
+        }
+        Insert: {
+          id?: string
+          created_at?: string
+          action: string
+          actor_id?: string | null
+          target_user_id?: string | null
+          target_email_masked?: string | null
+          ip_address?: string | null
+          details?: Json | null
+        }
+        Update: {
+          id?: string
+          created_at?: string
+          action?: string
+          actor_id?: string | null
+          target_user_id?: string | null
+          target_email_masked?: string | null
+          ip_address?: string | null
+          details?: Json | null
+        }
+        Relationships: []
+      }
+      order_otp_challenges: {
+        Row: {
+          id: string
+          order_id: string
+          user_id: string
+          tenant_id: string
+          canteen_id: string
+          created_at: string
+          expires_at: string
+          attempts: number
+          max_attempts: number
+          resend_available_at: string
+          status: string
+          verified_at: string | null
+        }
+        Insert: {
+          id?: string
+          order_id: string
+          user_id: string
+          tenant_id: string
+          canteen_id: string
+          created_at?: string
+          expires_at: string
+          attempts?: number
+          max_attempts?: number
+          resend_available_at: string
+          status?: string
+          verified_at?: string | null
+        }
+        Update: {
+          id?: string
+          order_id?: string
+          user_id?: string
+          tenant_id?: string
+          canteen_id?: string
+          created_at?: string
+          expires_at?: string
+          attempts?: number
+          max_attempts?: number
+          resend_available_at?: string
+          status?: string
+          verified_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "order_otp_challenges_order_id_fkey"
+            columns: ["order_id"]
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      order_security_audit_log: {
+        Row: {
+          id: string
+          order_id: string | null
+          actor_id: string | null
+          actor_role: string | null
+          event_type: string
+          previous_status: string | null
+          new_status: string | null
+          details: Json | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          order_id?: string | null
+          actor_id?: string | null
+          actor_role?: string | null
+          event_type: string
+          previous_status?: string | null
+          new_status?: string | null
+          details?: Json | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          order_id?: string | null
+          actor_id?: string | null
+          actor_role?: string | null
+          event_type?: string
+          previous_status?: string | null
+          new_status?: string | null
+          details?: Json | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "order_security_audit_log_order_id_fkey"
+            columns: ["order_id"]
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
       orders: {
         Row: {
           accepted_at: string | null
@@ -331,7 +459,6 @@ export interface Database {
           id: string
           order_number: number
           otp_attempts: number
-          otp_code: string
           pickup_time: string
           requested_pickup_time: string | null
           estimated_prep_duration_minutes: number | null
@@ -354,7 +481,6 @@ export interface Database {
           id?: string
           order_number?: number
           otp_attempts?: number
-          otp_code: string
           pickup_time: string
           requested_pickup_time?: string | null
           estimated_prep_duration_minutes?: number | null
@@ -377,7 +503,6 @@ export interface Database {
           id?: string
           order_number?: number
           otp_attempts?: number
-          otp_code?: string
           pickup_time?: string
           requested_pickup_time?: string | null
           estimated_prep_duration_minutes?: number | null
@@ -419,6 +544,8 @@ export interface Database {
           suspended_until: string | null
           tenant_id: string
           canteen_id: string | null
+          must_change_password: boolean
+          password_last_changed_at: string | null
         }
         Insert: {
           created_at?: string
@@ -430,6 +557,8 @@ export interface Database {
           suspended_until?: string | null
           tenant_id: string
           canteen_id?: string | null
+          must_change_password?: boolean
+          password_last_changed_at?: string | null
         }
         Update: {
           created_at?: string
@@ -441,6 +570,8 @@ export interface Database {
           suspended_until?: string | null
           tenant_id?: string
           canteen_id?: string | null
+          must_change_password?: boolean
+          password_last_changed_at?: string | null
         }
         Relationships: [
           {
@@ -790,21 +921,33 @@ export interface Database {
           p_order_id: string
           p_status: Database["public"]["Enums"]["order_status"]
         }
-        Returns: undefined
+        Returns: Json
       }
       verify_pickup_otp: {
         Args: {
           p_order_id?: string | null
           p_otp?: string | null
-          p_is_override?: boolean
+        }
+        Returns: Json
+      }
+      request_collection_otp: {
+        Args: {
+          p_order_id: string
+        }
+        Returns: Json
+      }
+      reset_order_otp_attempts: {
+        Args: {
+          p_order_id: string
         }
         Returns: Json
       }
       cancel_order: {
         Args: {
           p_order_id: string
+          p_reason?: string
         }
-        Returns: undefined
+        Returns: Json
       }
       mark_order_no_show: {
         Args: {
@@ -853,6 +996,18 @@ export interface Database {
           p_tenant_id: string
         }
         Returns: boolean
+      }
+      complete_first_login_password_setup: {
+        Args: Record<string, never>
+        Returns: Json
+      }
+      provision_super_admin: {
+        Args: {
+          p_user_id: string
+          p_email: string
+          p_name?: string
+        }
+        Returns: Json
       }
     }
     Enums: {

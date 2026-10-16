@@ -57,7 +57,7 @@ export default function BaseLayout({
 
   // Determine if on public pages or logged out - if so, hide sidebar for a clean full-width layout
   const isLoginPage = location.pathname === '/login';
-  const publicRoutes = ['/', '/login', '/privacy', '/terms'];
+  const publicRoutes = ['/', '/login', '/reset-password', '/privacy', '/terms'];
   const isPublicPage = publicRoutes.includes(location.pathname);
   const shouldHideSidebar = hideSidebar || !user || isPublicPage;
   const isDedicatedAdminView =

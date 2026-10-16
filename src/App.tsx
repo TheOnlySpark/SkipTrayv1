@@ -15,6 +15,7 @@ import StaffDashboard from './pages/StaffDashboard';
 import UniAdminDashboard from './pages/UniAdminDashboard';
 import CanteenAdminDashboard from './pages/CanteenAdminDashboard';
 import SuperAdminDashboard from './pages/SuperAdminDashboard';
+import ResetPassword from './pages/ResetPassword';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfService from './pages/TermsOfService';
 import { TenantProvider } from './contexts/TenantContext';
@@ -83,6 +84,7 @@ export default function App() {
                     <Route path="/privacy" element={<PrivacyPolicy />} />
                     <Route path="/terms" element={<TermsOfService />} />
                     <Route path="/login" element={<Login />} />
+                    <Route path="/reset-password" element={<ResetPassword />} />
                     <Route
                       path="/dashboard"
                       element={
@@ -102,7 +104,7 @@ export default function App() {
                     <Route
                       path="/staff"
                       element={
-                        <ProtectedRoute allowedRoles={['STAFF', 'SUPER_ADMIN']}>
+                        <ProtectedRoute allowedRoles={['STAFF', 'CANTEEN_ADMIN', 'UNI_ADMIN', 'SUPER_ADMIN']}>
                           <StaffDashboard />
                         </ProtectedRoute>
                       }
@@ -110,7 +112,7 @@ export default function App() {
                     <Route
                       path="/staff/menu"
                       element={
-                        <ProtectedRoute allowedRoles={['STAFF', 'SUPER_ADMIN']}>
+                        <ProtectedRoute allowedRoles={['STAFF', 'CANTEEN_ADMIN', 'UNI_ADMIN', 'SUPER_ADMIN']}>
                           <StaffDashboard />
                         </ProtectedRoute>
                       }

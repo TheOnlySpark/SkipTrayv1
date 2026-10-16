@@ -1,5 +1,5 @@
 import React from "react";
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/ModalDialogContext';
 import { supabase } from '../lib/supabase';
@@ -308,6 +308,88 @@ export default function StudentDashboard() {
   const [reviewText, setReviewText] = useState('');
   const [submittingReview, setSubmittingReview] = useState(false);
 
+  // OTP Challenge state for READY orders (Ephemeral verification metadata)
+  const [challengeData, setChallengeData] = useState<{
+    expiresAt?: number;
+    resendAvailableAt?: number;
+    status?: string;
+  } | null>(null);
+  const [requestingOtp, setRequestingOtp] = useState(false);
+  const [enteredOtp, setEnteredOtp] = useState('');
+  const [otpSentMessage, setOtpSentMessage] = useState<string | null>(null);
+
+  const fetchActive = useCallback(async () => {
+    if (!profile?.id) return;
+    const { data } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('user_id', profile.id)
+      .in('status', ['READY'])
+      .maybeSingle();
+
+    if (data) {
+      setActiveOrder(data as any);
+      // Fetch active challenge metadata if present
+      const { data: challenge } = await (supabase
+        .from('order_otp_challenges') as any)
+        .select('*')
+        .eq('order_id', data.id)
+        .eq('status', 'ACTIVE')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (challenge) {
+        setChallengeData({
+          expiresAt: new Date(challenge.expires_at).getTime(),
+          resendAvailableAt: new Date(challenge.resend_available_at).getTime(),
+          status: challenge.status,
+        });
+      }
+    } else {
+      setActiveOrder(null);
+      setChallengeData(null);
+    }
+  }, [profile?.id]);
+
+  const handleRequestOtp = async () => {
+    if (!activeOrder) return;
+    setRequestingOtp(true);
+    try {
+      const { data, error } = await supabase.rpc('request_collection_otp', {
+        p_order_id: activeOrder.id,
+      });
+      if (error) {
+        showAlert({ title: 'Request Failed', message: error.message, type: 'error' });
+      } else {
+        const res = data as any;
+        if (res.success) {
+          setOtpSentMessage(res.message);
+          setChallengeData({
+            expiresAt: new Date(res.expires_at).getTime(),
+            resendAvailableAt: new Date(res.resend_available_at).getTime(),
+            status: 'ACTIVE',
+          });
+          showAlert({
+            title: 'OTP Dispatched',
+            message: 'Your 6-digit pickup OTP has been sent to your verified contact channel.',
+            type: 'success',
+          });
+        } else {
+          showAlert({ title: 'Notice', message: res.message, type: 'info' });
+        }
+      }
+    } catch (err: any) {
+      showAlert({ title: 'Error', message: err.message, type: 'error' });
+    } finally {
+      setRequestingOtp(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchActive();
+  }, [fetchActive]);
+
   useEffect(() => {
     if (!profile?.id) return;
 
@@ -321,43 +403,8 @@ export default function StudentDashboard() {
         filter: `user_id=eq.${profile.id}`
       }, async (payload) => {
         const updatedOrder = payload.new as Order;
-        if (['PLACED', 'ACCEPTED', 'PREPARING', 'READY'].includes(updatedOrder.status)) {
-          setActiveOrder(updatedOrder);
-        } else if (updatedOrder?.status === 'COLLECTED') {
-          // Immediately close QR modal if open
-          setShowQrModal(false);
-          // Clear active order
-          setActiveOrder(null);
-
-          // Play status chime and trigger mobile haptic vibration
-          playStatusChime('COLLECTED');
-          triggerHapticFeedback('COLLECTED');
-
-          // Fetch items for this collected order for detailed receipt in the modal
-          try {
-            const { data: itemsData } = await supabase
-              .from('order_items')
-              .select('menu_item_id, quantity, menu_items(id, name, price)')
-              .eq('order_id', updatedOrder.id);
-
-            const formattedItems = (itemsData || []).map((it: any) => ({
-              menuItemId: it.menu_items?.id || it.menu_item_id,
-              name: it.menu_items?.name || 'Meal Item',
-              quantity: it.quantity || 1,
-              price: it.menu_items?.price
-            }));
-
-            setCollectedOrderConfirmation({
-              order: updatedOrder,
-              items: formattedItems
-            });
-          } catch {
-            setCollectedOrderConfirmation({
-              order: updatedOrder
-            });
-          }
-
-          queryClient.invalidateQueries({ queryKey: ['pastOrders'] });
+        if (['PLACED', 'ACCEPTED', 'PREPARING', 'READY'].includes(updatedOrder?.status)) {
+          fetchActive();
         } else {
           // If rejected or cancelled, clear active order and refresh history
           setActiveOrder(null);
@@ -495,19 +542,6 @@ export default function StudentDashboard() {
     if (pastOrdersData) setPastOrders(pastOrdersData);
   }, [pastOrdersData]);
 
-  useEffect(() => {
-    const fetchActive = async () => {
-      if (!profile?.id) return;
-      const { data } = await supabase
-        .from('orders')
-        .select('*')
-        .eq('user_id', profile.id)
-        .in('status', ['PLACED', 'ACCEPTED', 'PREPARING', 'READY'])
-        .maybeSingle();
-      if (data) setActiveOrder(data);
-    };
-    fetchActive();
-  }, [profile?.id]);
 
   const isSuspended = !!(profile?.suspended_until && new Date(profile.suspended_until) > new Date());
   const strikeCount = profile?.strike_count || 0;
@@ -737,8 +771,10 @@ export default function StudentDashboard() {
               const canteenId = cart[0]?.item?.canteen_id || profile?.canteen_id || null;
               const tenantId = cart[0]?.item?.tenant_id || profile?.tenant_id || null;
 
-              // Generate 6-digit OTP code
-              const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+              // Cryptographically secure 6-digit random OTP code
+              const otpBytes = new Uint32Array(1);
+              window.crypto.getRandomValues(otpBytes);
+              const otpCode = (100000 + (otpBytes[0] % 900000)).toString();
 
               // Insert payment record
               let paymentRecordId: string | null = null;
@@ -769,7 +805,6 @@ export default function StudentDashboard() {
                 estimated_prep_duration_minutes: smartSchedule.estimatedPrepDurationMinutes,
                 is_takeaway: false,
                 status: 'PLACED',
-                otp_code: otpCode,
                 idempotency_key: idempotencyKey,
               };
               if (paymentRecordId) {
@@ -1223,7 +1258,7 @@ export default function StudentDashboard() {
                   title="Click to Enlarge QR Code"
                 >
                   <QRCodeSVG
-                    value={`SKIPTRAY:${activeOrder.id}:${activeOrder.otp_code}`}
+                    value={`SKIPTRAY:${activeOrder.id}${enteredOtp.trim() ? `:${enteredOtp.trim()}` : ''}`}
                     size={180}
                     className="rounded-xl"
                   />
@@ -1241,10 +1276,54 @@ export default function StudentDashboard() {
                   <span>Show QR at counter for instant scan</span>
                 </button>
 
-                {/* Manual 6-Digit OTP Box (Fallback / Backup) */}
-                <div className="bg-white/10 px-4 py-2.5 rounded-2xl border border-white/20 text-center w-full shadow-inner mt-1">
-                  <p className="text-indigo-200 text-[10px] font-bold uppercase tracking-widest mb-0.5">Or Give 6-Digit OTP</p>
-                  <p className="text-3xl font-mono font-black tracking-[0.25em] text-white">{activeOrder.otp_code}</p>
+                {/* Secure OTP Challenge Info & Resend Trigger */}
+                <div className="bg-white/10 px-4 py-3 rounded-2xl border border-white/20 text-center w-full shadow-inner mt-1">
+                  <p className="text-indigo-200 text-[10px] font-bold uppercase tracking-widest mb-1">Pickup Verification OTP</p>
+                  {challengeData?.status === 'ACTIVE' ? (
+                    <div className="space-y-2">
+                      <p className="text-xs text-emerald-200 font-medium">
+                        OTP sent to your verified contact channel / email.
+                      </p>
+                      {enteredOtp ? (
+                        <p className="text-3xl font-mono font-black tracking-[0.25em] text-white">{enteredOtp}</p>
+                      ) : (
+                        <div className="mt-1">
+                          <input
+                            type="text"
+                            maxLength={6}
+                            placeholder="Type 6-digit OTP to show on pass..."
+                            value={enteredOtp}
+                            onChange={(e) => setEnteredOtp(e.target.value.replace(/\D/g, ''))}
+                            className="w-full text-center bg-white/10 text-white placeholder:text-white/40 text-sm font-mono py-1.5 px-3 rounded-xl border border-white/20 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                          />
+                        </div>
+                      )}
+                      <div className="flex items-center justify-center gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={handleRequestOtp}
+                          disabled={requestingOtp || (challengeData.resendAvailableAt ? Date.now() < challengeData.resendAvailableAt : false)}
+                          className="text-[11px] font-bold px-3 py-1 bg-white/15 hover:bg-white/25 rounded-lg text-indigo-100 transition-colors disabled:opacity-50"
+                        >
+                          {requestingOtp ? 'Sending...' : 'Resend OTP'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-xs text-indigo-200">
+                        Generate your 5-minute collection OTP to collect your meal.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleRequestOtp}
+                        disabled={requestingOtp}
+                        className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-extrabold text-xs rounded-xl shadow transition-all active:scale-95"
+                      >
+                        {requestingOtp ? 'Requesting OTP...' : 'Request Collection OTP'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             ) : (
@@ -1292,6 +1371,20 @@ export default function StudentDashboard() {
                 </div>
               )}
             </div>
+
+            {/* Confirmed Bill & GST Summary */}
+            {((activeOrder as any).tax_snapshot || (activeOrder as any).total_tax_amount) && (
+              <div className="mt-3 pt-3 border-t border-indigo-400/20 flex flex-wrap items-center justify-between gap-2 text-xs text-indigo-100">
+                <span className="font-semibold">
+                  Bill Tax ({(activeOrder as any).tax_snapshot?.effective_food_gst_rate || 5}% GST): ₹{Number((activeOrder as any).total_tax_amount || (activeOrder as any).tax_snapshot?.food_gst_amount || 0).toFixed(2)}
+                </span>
+                {(activeOrder as any).tax_snapshot?.cgst_amount !== undefined && (
+                  <span className="text-[11px] text-indigo-200 font-mono">
+                    CGST: ₹{Number((activeOrder as any).tax_snapshot.cgst_amount).toFixed(2)} | SGST: ₹{Number((activeOrder as any).tax_snapshot.sgst_amount).toFixed(2)}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         </div>
       ) : (
@@ -2190,14 +2283,16 @@ export default function StudentDashboard() {
 
             <div className="p-3 bg-slate-50 border-2 border-slate-100 rounded-2xl shadow-inner">
               <QRCodeSVG
-                value={`SKIPTRAY:${activeOrder.id}:${activeOrder.otp_code}`}
+                value={`SKIPTRAY:${activeOrder.id}${enteredOtp.trim() ? `:${enteredOtp.trim()}` : ''}`}
                 size={230}
               />
             </div>
 
             <div className="w-full bg-slate-900 text-white py-3 rounded-2xl">
               <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Pickup OTP</div>
-              <div className="text-3xl font-mono font-extrabold tracking-[0.2em]">{activeOrder.otp_code}</div>
+              <div className="text-2xl font-mono font-extrabold tracking-[0.2em]">
+                {enteredOtp ? enteredOtp : 'Check Email / SMS'}
+              </div>
             </div>
 
             <p className="text-xs text-slate-400 font-medium">
