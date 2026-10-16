@@ -1,6 +1,7 @@
 import React from "react";
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useTenant } from '../contexts/TenantContext';
 import { useDialog } from '../contexts/ModalDialogContext';
 import { supabase } from '../lib/supabase';
 import { Database } from '../types/supabase';
@@ -17,25 +18,24 @@ import {
   IconMaximize
 } from '../components/Icons';
 import { QRCodeSVG } from '../components/QRCode';
-import { calculateOrderLedger } from '../lib/ledger';
 
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 type Order = Database['public']['Tables']['orders']['Row'];
 type ItemReview = Database['public']['Tables']['item_reviews']['Row'];
+type Canteen = Database['public']['Tables']['canteens']['Row'];
 type PastOrder = Order & {
   order_items: { menu_items: MenuItem | null }[];
   item_reviews: ItemReview[];
 };
 
 export const LUNCH_SLOTS = [
+  { value: '11:30', label: '11:30 AM' },
+  { value: '12:00', label: '12:00 PM' },
   { value: '12:30', label: '12:30 PM' },
-  { value: '12:40', label: '12:40 PM' },
-  { value: '12:50', label: '12:50 PM' },
   { value: '13:00', label: '1:00 PM' },
-  { value: '13:10', label: '1:10 PM' },
-  { value: '13:20', label: '1:20 PM' },
   { value: '13:30', label: '1:30 PM' },
-  { value: '13:40', label: '1:40 PM' },
+  { value: '14:00', label: '2:00 PM' },
+  { value: '14:30', label: '2:30 PM' },
 ];
 
 export const formatPickupTime = (timeStr?: string | null) => {
@@ -49,14 +49,21 @@ export const formatPickupTime = (timeStr?: string | null) => {
 
 export default function StudentDashboard() {
   const { profile, signOut } = useAuth();
+  const { tenantId } = useTenant();
   const { showAlert, showConfirm } = useDialog();
   const queryClient = useQueryClient();
+  const currentTenantId = profile?.tenant_id || tenantId;
+
   const [activeOrder, setActiveOrder] = useState<Order | null>(null);
   const [pastOrders, setPastOrders] = useState<PastOrder[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   
+  const [selectedCanteenId, setSelectedCanteenId] = useState<string>(() => {
+    return localStorage.getItem('skipTray_preferred_canteen_id') || '';
+  });
   const [cart, setCart] = useState<{item: MenuItem, quantity: number}[]>([]);
   const [pickupTime, setPickupTime] = useState('');
+  const [isTakeaway, setIsTakeaway] = useState<boolean>(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [cartOpen, setCartOpen] = useState(false);
@@ -134,6 +141,14 @@ export default function StudentDashboard() {
       })
       .subscribe();
 
+    // Listen to changes on canteens
+    const canteenSub = supabase
+      .channel('public:canteens')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'canteens' }, () => {
+        queryClient.invalidateQueries({ queryKey: ['studentCanteens'] });
+      })
+      .subscribe();
+
     // Listen to changes on menu items (e.g. sold out status)
     const menuSub = supabase
       .channel('public:menu_items')
@@ -157,19 +172,72 @@ export default function StudentDashboard() {
 
     return () => {
       orderSub.unsubscribe();
+      canteenSub.unsubscribe();
       menuSub.unsubscribe();
       reviewSub.unsubscribe();
     };
   }, [profile?.id, queryClient]);
 
-  const { data: menuItems = [], isLoading: menuLoading } = useQuery({
-    queryKey: ['menuItems'],
+  // Fetch active canteens for this student's institution
+  const { data: canteens = [], isLoading: canteensLoading } = useQuery({
+    queryKey: ['studentCanteens', currentTenantId],
     queryFn: async () => {
-      const { data } = await supabase
+      if (!currentTenantId) return [];
+      const { data, error } = await supabase
+        .from('canteens')
+        .select('*')
+        .eq('is_active', true)
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+      return (data || []) as Canteen[];
+    },
+    enabled: !!currentTenantId,
+  });
+
+  // Auto-select first canteen if none selected or if selection is invalid
+  useEffect(() => {
+    if (canteens.length > 0) {
+      if (!selectedCanteenId || !canteens.some(c => c.id === selectedCanteenId)) {
+        const fallback = canteens[0].id;
+        setSelectedCanteenId(fallback);
+        localStorage.setItem('skipTray_preferred_canteen_id', fallback);
+      }
+    }
+  }, [canteens, selectedCanteenId]);
+
+  const activeCanteen = canteens.find(c => c.id === selectedCanteenId) || null;
+  const activeOrderCanteen = canteens.find(c => c.id === activeOrder?.canteen_id) || null;
+
+  const handleCanteenChange = async (newCanteenId: string) => {
+    if (newCanteenId === selectedCanteenId) return;
+
+    if (cart.length > 0) {
+      const confirmed = await showConfirm({
+        title: 'Switch Canteen?',
+        message: 'Your cart contains items from another canteen. Switching canteens will clear your current cart.',
+        confirmText: 'Switch & Clear Cart',
+        cancelText: 'Stay Here',
+        isDangerous: true,
+      });
+      if (!confirmed) return;
+      setCart([]);
+    }
+
+    setSelectedCanteenId(newCanteenId);
+    localStorage.setItem('skipTray_preferred_canteen_id', newCanteenId);
+  };
+
+  const { data: menuItems = [], isLoading: menuLoading } = useQuery({
+    queryKey: ['menuItems', selectedCanteenId],
+    queryFn: async () => {
+      if (!selectedCanteenId) return [];
+      const { data, error } = await supabase
         .from('menu_items')
         .select('*')
+        .eq('canteen_id', selectedCanteenId)
         .order('veg_non_veg', { ascending: false })
         .order('name');
+      if (error) throw error;
       return (data || []).sort((a, b) => {
         if (a.veg_non_veg !== b.veg_non_veg) {
           return a.veg_non_veg === 'VEG' ? -1 : 1;
@@ -179,6 +247,7 @@ export default function StudentDashboard() {
         return a.name.localeCompare(b.name);
       });
     },
+    enabled: !!selectedCanteenId,
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 
@@ -255,7 +324,7 @@ export default function StudentDashboard() {
     if (isLunchClosedForToday) {
       showAlert({
         title: 'Booking Window Closed',
-        message: 'Lunch ordering for today is closed. Orders must be placed at least 30 minutes in advance of Lunch slots (12:30 PM – 1:40 PM).',
+        message: 'Lunch ordering for today is closed. Orders must be placed at least 15 minutes in advance of Lunch slots (11:30 AM – 2:30 PM).',
         type: 'warning'
       });
       return;
@@ -291,7 +360,7 @@ export default function StudentDashboard() {
       return;
     }
     if (isLunchClosedForToday) {
-      setError('Lunch ordering for today is closed. Orders must be placed at least 30 minutes before the pickup slot.');
+      setError('Lunch ordering for today is closed. Orders must be placed at least 15 minutes before the pickup slot.');
       return;
     }
     if (cart.length === 0 || !pickupTime) return;
@@ -305,141 +374,37 @@ export default function StudentDashboard() {
     setSubmitting(true);
     setError('');
 
-    const itemsJson = cart.map(c => ({
-      id: c.item.id,
-      quantity: c.quantity
-    }));
-
-    // 1. Generate Idempotency Key
-    const idempotencyKey = crypto.randomUUID();
-
-    // 2. Save cart state in case of redirect
-    localStorage.setItem('pending_order', JSON.stringify({ cart, pickupTime, idempotencyKey }));
-
     try {
-      const ledger = calculateOrderLedger(cartTotalPrice);
+      const itemsJson = cart.map(c => ({
+        menu_item_id: c.item.id,
+        quantity: c.quantity
+      }));
 
-      // 3. Create ZohoPay Session
-      const { data: createData, error: createError } = await supabase.functions.invoke('create-zohopay-order', {
-        body: { 
-          items: itemsJson,
-          total_amount: ledger.gross_payable,
-          idempotency_key: idempotencyKey,
-          is_takeaway: false
-        }
+      const { data: orderId, error: rpcError } = await supabase.rpc('place_order_with_otp', {
+        p_pickup_time: pickupTime,
+        p_items: itemsJson,
+        p_is_takeaway: isTakeaway,
+        p_canteen_id: selectedCanteenId || cart[0]?.item.canteen_id || null
       });
 
-      if (createError) throw createError;
+      if (rpcError) throw rpcError;
 
-      // 4. Initialize ZohoPay Widget Popup
-      // 4. Initialize ZohoPay Widget Popup
-      if (!(window as any).ZohoPay) {
-        console.warn("ZohoPay SDK is not loaded. Mocking visual payment popup.");
-        
-        // Create a visual mock ZohoPay popup
-        (window as any).ZohoPay = {
-          checkout: (options: any) => {
-            const overlay = document.createElement('div');
-            overlay.style.position = 'fixed';
-            overlay.style.top = '0';
-            overlay.style.left = '0';
-            overlay.style.width = '100vw';
-            overlay.style.height = '100vh';
-            overlay.style.backgroundColor = 'rgba(0,0,0,0.5)';
-            overlay.style.display = 'flex';
-            overlay.style.alignItems = 'center';
-            overlay.style.justifyContent = 'center';
-            overlay.style.zIndex = '9999';
+      // Fetch the newly created order
+      const { data: newOrder } = await supabase
+        .from('orders')
+        .select('*')
+        .eq('id', orderId)
+        .single();
 
-            const modal = document.createElement('div');
-            modal.style.backgroundColor = 'white';
-            modal.style.padding = '32px';
-            modal.style.borderRadius = '16px';
-            modal.style.textAlign = 'center';
-            modal.style.boxShadow = '0 10px 25px -5px rgba(0, 0, 0, 0.1)';
-            
-            modal.innerHTML = `
-              <h2 style="font-size: 24px; font-weight: bold; margin-bottom: 8px;">ZohoPay Mock Popup</h2>
-              <p style="color: #64748b; margin-bottom: 24px;">This is a test payment screen.</p>
-              <div style="display: flex; gap: 12px; justify-content: center;">
-                <button id="mock-success-btn" style="background-color: #22c55e; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold;">Pay ₹${calculateOrderLedger(cartTotalPrice).gross_payable.toFixed(2)}</button>
-                <button id="mock-cancel-btn" style="background-color: #ef4444; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold;">Cancel</button>
-              </div>
-            `;
-            
-            overlay.appendChild(modal);
-            document.body.appendChild(overlay);
-
-            document.getElementById('mock-success-btn')?.addEventListener('click', () => {
-              document.body.removeChild(overlay);
-              if (options.onSuccess) {
-                options.onSuccess({ payment_id: `MOCK_PAYMENT_${Date.now()}` });
-              }
-            });
-
-            document.getElementById('mock-cancel-btn')?.addEventListener('click', () => {
-              document.body.removeChild(overlay);
-              if (options.onCancel) {
-                options.onCancel();
-              }
-            });
-          }
-        };
+      if (newOrder) {
+        setActiveOrder(newOrder);
       }
-
-      const zohoOptions = {
-        sessionId: createData.session_id,
-        onSuccess: async function (response: any) {
-          try {
-            // 5. Verify and Create Order
-            const { data: verifyData, error: verifyError } = await supabase.functions.invoke('verify-zohopay-order', {
-              body: {
-                payment_id: response.payment_id || response.transaction_id || `ZOHO_${Date.now()}`,
-                idempotency_key: idempotencyKey,
-                cart_items: itemsJson,
-                total_amount: calculateOrderLedger(cartTotalPrice).gross_payable,
-                ledger: calculateOrderLedger(cartTotalPrice),
-                pickup_time: pickupTime,
-                is_takeaway: false,
-                canteen_id: cart[0]?.item.canteen_id,
-                tenant_id: cart[0]?.item.tenant_id
-              }
-            });
-
-            if (verifyError) throw verifyError;
-
-            if (verifyData.success) {
-              // Fetch the newly created order
-              const { data: newOrder } = await supabase.from('orders').select('*').eq('id', verifyData.order_id).single();
-              if (newOrder) {
-                setActiveOrder(newOrder);
-              }
-              setCart([]);
-              setPickupTime('');
-              localStorage.removeItem('pending_order');
-            } else {
-              throw new Error(verifyData.error || 'Payment verification failed');
-            }
-          } catch (err: any) {
-            setError(err.message || 'An error occurred during payment verification');
-          } finally {
-            setSubmitting(false);
-          }
-        },
-        onCancel: function () {
-          setSubmitting(false);
-          setError('Payment was cancelled.');
-        },
-        onError: function (err: any) {
-          setSubmitting(false);
-          setError(err.message || 'Payment failed.');
-        }
-      };
-
-      (window as any).ZohoPay.checkout(zohoOptions);
-
+      setCart([]);
+      setPickupTime('');
+      setIsTakeaway(false);
     } catch (err: any) {
-      setError(err.message || 'An error occurred during checkout');
+      setError(err.message || 'An error occurred while placing the order');
+    } finally {
       setSubmitting(false);
     }
   };
@@ -544,6 +509,39 @@ export default function StudentDashboard() {
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-3 leading-tight">Welcome, {profile?.name || 'User'}</h1>
             
+            {/* Canteen Selector Pills */}
+            {canteens.length > 0 && (
+              <div className="mt-3.5 flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Canteen:</span>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {canteens.map(c => {
+                    const isSelected = selectedCanteenId === c.id;
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => handleCanteenChange(c.id)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 ${
+                          isSelected
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100 hover:text-slate-900'
+                        }`}
+                      >
+                        <span>🏪 {c.name}</span>
+                        {c.code && (
+                          <span className={`text-[10px] px-1.5 py-0.2 rounded-md font-mono ${
+                            isSelected ? 'bg-indigo-700 text-indigo-100' : 'bg-slate-200 text-slate-600'
+                          }`}>
+                            {c.code}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            
             {strikeCount === 1 && !isSuspended && (
               <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50/80 border border-amber-200/60 p-2.5 rounded-xl mt-3 font-medium">
                 <IconAlertTriangle size={16} className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
@@ -595,7 +593,17 @@ export default function StudentDashboard() {
                       <div className="font-bold text-slate-800 text-lg">Order #{o.order_number}</div>
                       <div className="text-xs text-slate-500 font-mono font-medium mb-1">ID: {o.id.split('-')[0].toUpperCase()}</div>
                       <div className="text-xs text-slate-500 font-medium mb-1">Placed on: {new Date(o.created_at).toLocaleDateString()}</div>
-                      <div className="text-sm text-slate-600 mt-1">Pickup: {formatPickupTime(o.pickup_time)} (Lunch)</div>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-sm text-slate-600">Pickup: {formatPickupTime(o.pickup_time)} (Lunch)</span>
+                        {canteens.find(c => c.id === o.canteen_id) && (
+                          <span className="text-xs font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                            🏪 {canteens.find(c => c.id === o.canteen_id)?.name}
+                          </span>
+                        )}
+                        <span className={`px-2 py-0.5 rounded text-xs font-semibold ${o.is_takeaway ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'bg-sky-100 text-sky-800 border border-sky-200'}`}>
+                          {o.is_takeaway ? '🛍️ Takeaway' : '🍽️ Dine-in'}
+                        </span>
+                      </div>
                     </div>
                     <div className={`px-3 py-1 rounded-full text-xs font-bold border ${o.status === 'COLLECTED' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
                       {o.status}
@@ -733,6 +741,11 @@ export default function StudentDashboard() {
                 ID: {activeOrder.id.split('-')[0].toUpperCase()}
               </span>
             </div>
+            <div className="flex items-center gap-2 mb-2">
+              <span className={`px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wider ${activeOrder.is_takeaway ? 'bg-amber-400 text-amber-950 shadow-sm' : 'bg-sky-300 text-sky-950 shadow-sm'}`}>
+                {activeOrder.is_takeaway ? '🛍️ Takeaway' : '🍽️ Dine-in'}
+              </span>
+            </div>
             <p className="text-indigo-200 font-medium tracking-wide mb-4 text-sm">Your Order Status</p>
           
           <div className={`mt-2 px-6 py-2 rounded-full font-bold text-sm tracking-wider uppercase ${getStatusColor(activeOrder.status).replace('100', '900').replace('600', '100')}`}>
@@ -799,7 +812,17 @@ export default function StudentDashboard() {
             </div>
           )}
           
-          <p className="mt-5 text-xs text-indigo-200">Requested Pickup Time: <span className="font-semibold text-white">{formatPickupTime(activeOrder.pickup_time)} (Lunch)</span></p>
+          <div className="mt-5 flex items-center justify-center gap-2 flex-wrap">
+            {activeOrderCanteen && (
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-950/60 text-indigo-200 border border-indigo-400/30">
+                🏪 {activeOrderCanteen.name}
+              </span>
+            )}
+            <p className="text-xs text-indigo-200">Requested Pickup Time: <span className="font-semibold text-white">{formatPickupTime(activeOrder.pickup_time)} (Lunch)</span></p>
+            <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${activeOrder.is_takeaway ? 'bg-amber-400 text-amber-950 shadow-sm' : 'bg-sky-400 text-sky-950 shadow-sm'}`}>
+              {activeOrder.is_takeaway ? '🛍️ Takeaway' : '🍽️ Dine-in'}
+            </span>
+          </div>
           </div>
         </div>
       ) : (
@@ -808,8 +831,16 @@ export default function StudentDashboard() {
           <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-6 sm:p-8 shadow-sm">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
               <div>
-                <h2 className="text-xl font-bold text-slate-800">Menu</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Lunch Pickup: 12:30 PM – 1:40 PM • Booking Opens: 9:30 AM (Min 30m Notice)</p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-xl font-bold text-slate-800">Menu</h2>
+                  {activeCanteen && (
+                    <span className="text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                      <span>🏪</span>
+                      <span>{activeCanteen.name}</span>
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">Lunch Pickup: 11:30 AM – 2:30 PM • Booking Opens: 9:30 AM (Min 15m Notice)</p>
               </div>
               {isSunday ? (
                 <span className="self-start sm:self-auto px-3 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm">
@@ -829,13 +860,18 @@ export default function StudentDashboard() {
               ) : (
                 <span className="self-start sm:self-auto px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span>Lunch Slots Open (12:30 PM – 1:40 PM)</span>
+                  <span>Lunch Slots Open (11:30 AM – 2:30 PM)</span>
                 </span>
               )}
             </div>
 
             <div className="grid grid-cols-3 gap-2 sm:gap-4">
-              {menuItems.map(item => (
+              {menuItems.length === 0 ? (
+                <div className="col-span-3 text-center py-12 text-slate-400 text-sm">
+                  No menu items currently available for {activeCanteen?.name || 'this canteen'}.
+                </div>
+              ) : (
+                menuItems.map(item => (
                 <div key={item.id} className={`flex flex-col justify-between p-5 rounded-2xl border transition-all ${item.is_sold_out ? 'bg-slate-50 border-slate-100 opacity-60' : 'bg-white border-slate-200 hover:border-indigo-300 hover:shadow-md'}`}>
                   <div>
                     <div className="flex items-center gap-2 mb-3">
@@ -861,7 +897,8 @@ export default function StudentDashboard() {
                     )}
                   </div>
                 </div>
-              ))}
+              ))
+            )}
             </div>
           </div>
 
@@ -922,7 +959,7 @@ export default function StudentDashboard() {
                         <IconClock size={20} className="w-5 h-5 text-indigo-400 shrink-0" />
                         <div>
                           <div style={{ color: '#818cf8', fontSize: '0.8125rem', fontWeight: 700 }}>Lunch Booking Opens at 9:30 AM</div>
-                          <div style={{ color: '#c7d2fe', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders open at 9:30 AM today (Lunch Slots: 12:30 PM – 1:40 PM, Min 30m notice).</div>
+                          <div style={{ color: '#c7d2fe', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders open at 9:30 AM today (Lunch Slots: 11:30 AM – 2:30 PM, Min 15m notice).</div>
                         </div>
                       </div>
                     )}
@@ -933,7 +970,7 @@ export default function StudentDashboard() {
                         <IconClock size={20} className="w-5 h-5 text-rose-400 shrink-0" />
                         <div>
                           <div style={{ color: '#f87171', fontSize: '0.8125rem', fontWeight: 700 }}>Lunch Ordering Closed Today</div>
-                          <div style={{ color: '#fca5a5', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders must be placed at least 30 mins before pickup (Lunch: 12:30 PM – 1:40 PM).</div>
+                          <div style={{ color: '#fca5a5', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders must be placed at least 15 mins before pickup (Lunch: 11:30 AM – 2:30 PM).</div>
                         </div>
                       </div>
                     )}
@@ -1009,13 +1046,69 @@ export default function StudentDashboard() {
                     {/* Pickup time */}
                     <form onSubmit={handlePlaceOrder} style={{ paddingTop: '1rem', borderTop: '1px solid #1e293b' }}>
                       {error && <div style={{ color: '#f87171', fontSize: '0.75rem', marginBottom: '0.75rem', fontWeight: 600 }}>{error}</div>}
+
+                      {/* Dine-in vs Takeaway Segmented Toggle */}
+                      <div style={{ marginBottom: '1rem' }}>
+                        <label style={{ display: 'block', fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em', marginBottom: '0.5rem' }}>
+                          Order Preference
+                        </label>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', background: '#0f172a', padding: '0.25rem', borderRadius: '0.75rem', border: '1px solid #1e293b' }}>
+                          <button
+                            type="button"
+                            onClick={() => setIsTakeaway(false)}
+                            style={{
+                              padding: '0.625rem 0.5rem',
+                              borderRadius: '0.5rem',
+                              border: 'none',
+                              cursor: 'pointer',
+                              fontWeight: 700,
+                              fontSize: '0.85rem',
+                              background: !isTakeaway ? '#0284c7' : 'transparent',
+                              color: !isTakeaway ? '#ffffff' : '#94a3b8',
+                              boxShadow: !isTakeaway ? '0 2px 8px rgba(2, 132, 199, 0.4)' : 'none',
+                              transition: 'all 0.2s ease',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '0.375rem',
+                            }}
+                          >
+                            <span>🍽️</span>
+                            <span>Dine-in</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsTakeaway(true)}
+                            style={{
+                              padding: '0.625rem 0.5rem',
+                              borderRadius: '0.5rem',
+                              border: 'none',
+                              cursor: 'pointer',
+                              fontWeight: 700,
+                              fontSize: '0.85rem',
+                              background: isTakeaway ? '#d97706' : 'transparent',
+                              color: isTakeaway ? '#ffffff' : '#94a3b8',
+                              boxShadow: isTakeaway ? '0 2px 8px rgba(217, 119, 6, 0.4)' : 'none',
+                              transition: 'all 0.2s ease',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '0.375rem',
+                            }}
+                          >
+                            <span>🛍️</span>
+                            <span>Takeaway</span>
+                          </button>
+                        </div>
+                      </div>
+
                       <div style={{ marginBottom: '1rem' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
                           <label style={{ fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em' }}>
-                            Lunch Pickup Slot (12:30 PM – 1:40 PM)
+                            Lunch Pickup Slot (11:30 AM – 2:30 PM)
                           </label>
                           <span style={{ fontSize: '0.65rem', color: '#818cf8', fontWeight: 600, background: 'rgba(99,102,241,0.15)', padding: '2px 6px', borderRadius: '4px' }}>
-                            Min 30m notice
+                            Min 15m notice
                           </span>
                         </div>
 
@@ -1043,7 +1136,7 @@ export default function StudentDashboard() {
                                 ? 'Lunch Booking Opens at 9:30 AM'
                                 : isLunchClosedForToday 
                                   ? 'Lunch Ordering Closed for Today' 
-                                  : 'Select a Lunch Slot (10-min intervals)...'}
+                                  : 'Select a Lunch Slot (30-min intervals)...'}
                           </option>
                           {LUNCH_SLOTS.map(slot => {
                             const { isAvailable, reason } = getSlotAvailability(slot.value);
@@ -1059,17 +1152,9 @@ export default function StudentDashboard() {
                       {/* Total Amount Summary */}
                       {cart.length > 0 && (
                         <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', background: '#1e293b', borderRadius: '0.75rem' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>Food Subtotal</span>
-                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem' }}>₹{calculateOrderLedger(cartTotalPrice).food_subtotal.toFixed(2)}</span>
-                          </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem', paddingBottom: '0.75rem', borderBottom: '1px solid #334155' }}>
-                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>GST and other</span>
-                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem' }}>₹{(calculateOrderLedger(cartTotalPrice).commission_fee + calculateOrderLedger(cartTotalPrice).gateway_fee).toFixed(2)}</span>
-                          </div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem', fontWeight: 600 }}>Total Amount to Pay</span>
-                            <span style={{ color: '#38bdf8', fontSize: '1.125rem', fontWeight: 700 }}>₹{calculateOrderLedger(cartTotalPrice).gross_payable.toFixed(2)}</span>
+                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem', fontWeight: 600 }}>Total Amount</span>
+                            <span style={{ color: '#38bdf8', fontSize: '1.125rem', fontWeight: 700 }}>₹{cartTotalPrice.toFixed(2)}</span>
                           </div>
                         </div>
                       )}
@@ -1108,7 +1193,7 @@ export default function StudentDashboard() {
                               ? 'Lunch Booking Opens at 9:30 AM'
                               : isLunchClosedForToday
                                 ? 'Lunch Ordering Closed Today'
-                                : (submitting ? 'Placing...' : `Place Order (${cartTotalItems} items • ₹${calculateOrderLedger(cartTotalPrice).gross_payable.toFixed(2)})`)}
+                                : (submitting ? 'Placing...' : `Place Order (${cartTotalItems} items • ₹${cartTotalPrice.toFixed(2)})`)}
                       </button>
                     </form>
                   </div>
@@ -1143,7 +1228,7 @@ export default function StudentDashboard() {
                     <span style={{ color: '#f1f5f9', fontWeight: 700, fontSize: '0.95rem' }}>Your Order</span>
                     {cartTotalItems > 0 && (
                       <span style={{ color: '#818cf8', fontSize: '0.75rem', fontWeight: 600 }}>
-                        ₹{calculateOrderLedger(cartTotalPrice).gross_payable.toFixed(2)} • {cartTotalItems} item{cartTotalItems > 1 ? 's' : ''}
+                        ₹{cartTotalPrice.toFixed(2)} • {cartTotalItems} item{cartTotalItems > 1 ? 's' : ''}
                       </span>
                     )}
                   </div>
