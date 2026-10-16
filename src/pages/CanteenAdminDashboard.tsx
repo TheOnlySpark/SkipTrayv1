@@ -213,7 +213,17 @@ export default function CanteenAdminDashboard() {
       let query = supabase
         .from('orders')
         .select(`
-          *,
+          id,
+          order_number,
+          status,
+          created_at,
+          pickup_time,
+          total_tax_amount,
+          is_takeaway,
+          canteen_id,
+          tenant_id,
+          user_id,
+          collected_at,
           profiles (name, id_number),
           order_items (
             id, quantity,
@@ -260,7 +270,17 @@ export default function CanteenAdminDashboard() {
       let fallbackQuery = supabase
         .from('orders')
         .select(`
-          *,
+          id,
+          order_number,
+          status,
+          created_at,
+          pickup_time,
+          total_tax_amount,
+          is_takeaway,
+          canteen_id,
+          tenant_id,
+          user_id,
+          collected_at,
           profiles (name, id_number),
           order_items (
             id, quantity,
