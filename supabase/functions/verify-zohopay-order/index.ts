@@ -7,9 +7,11 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Simple OTP generator
+// Cryptographically secure OTP generator
 function generateOTP() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  const array = new Uint32Array(1);
+  crypto.getRandomValues(array);
+  return (100000 + (array[0] % 900000)).toString();
 }
 
 serve(async (req) => {
@@ -232,7 +234,7 @@ serve(async (req) => {
         target_ready_by_time: targetReadyByIso,
         is_takeaway,
         status: 'PLACED',
-        otp_code: generateOTP(),
+        otp_code: null,
         idempotency_key,
         payment_id: paymentRecord.id,
         total_tax_amount: Number(ledger?.total_tax_amount ?? ledger?.food_gst_amount ?? 0),
@@ -259,7 +261,7 @@ serve(async (req) => {
           pickup_time: cleanPickupTime,
           is_takeaway,
           status: 'PLACED',
-          otp_code: generateOTP(),
+          otp_code: null,
           idempotency_key,
           payment_id: paymentRecord.id,
         })
