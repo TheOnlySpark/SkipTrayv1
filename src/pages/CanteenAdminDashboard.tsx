@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { useLocation, Link } from "react-router-dom";
 import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/ModalDialogContext';
 import { supabase } from '../lib/supabase';
@@ -6,6 +7,7 @@ import { useTenant } from '../contexts/TenantContext';
 import { Database } from '../types/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatPickupTime } from './StudentDashboard';
+import { isValidEmail, formatErrorMessage } from '../utils/validation';
 import {
   IconAlertTriangle,
   IconBan,
@@ -16,6 +18,8 @@ import {
 } from '../components/Icons';
 import {
   Search,
+  Filter,
+  Check,
   LayoutList,
   LayoutGrid,
   ChevronLeft,
@@ -34,7 +38,6 @@ import {
   EyeOff,
   ShieldCheck,
   Copy,
-  Check,
   Trash2,
   IndianRupee,
   CreditCard,
@@ -43,7 +46,18 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   CalendarDays,
-  Filter
+  ListFilter,
+  Leaf,
+  Flame,
+  CheckCircle2,
+  BarChart3,
+  MessageSquare,
+  Star,
+  ClipboardList,
+  ArrowRight,
+  Utensils,
+  TrendingUp,
+  Plus
 } from 'lucide-react';
 import { SalesCollectionDashboard } from '../components/SalesCollectionDashboard';
 import {
@@ -60,12 +74,6 @@ import {
   LunchSlotConfig,
   DEFAULT_LUNCH_SLOT_CONFIG
 } from '../lib/lunchSlots';
-import {
-  CanteenTaxConfig,
-  DEFAULT_CANTEEN_TAX_CONFIG,
-  fetchCanteenTaxConfig,
-  saveCanteenTaxConfig,
-} from '../lib/taxService';
 
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 type FoodType = Database['public']['Enums']['food_type'];
@@ -81,12 +89,25 @@ export default function CanteenAdminDashboard() {
   const { showAlert, showConfirm } = useDialog();
   const queryClient = useQueryClient();
 
+  const location = useLocation();
+  const isOrdersView = location.pathname === '/canteen-admin/orders' || location.search.includes('tab=orders');
+  const isMenuView = location.pathname === '/canteen-admin/menu' || location.search.includes('tab=menu');
+  const isAnalyticsView = location.pathname === '/canteen-admin/analytics' || location.search.includes('tab=analytics');
+  const isStaffView = location.pathname === '/canteen-admin/staff' || location.search.includes('tab=staff');
+  const isReviewsView = location.pathname === '/canteen-admin/reviews' || location.search.includes('tab=reviews');
+  const isDedicatedView = isOrdersView || isMenuView || isAnalyticsView || isStaffView || isReviewsView;
+
   const currentCanteenId = profile?.canteen_id;
   const currentTenantId = profile?.tenant_id ?? tenantId ?? null;
 
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({ placed: 0, collected: 0, rejected: 0 });
+
+  // Menu Search & Filter State
+  const [menuSearch, setMenuSearch] = useState('');
+  const [menuTypeFilter, setMenuTypeFilter] = useState<'ALL' | 'VEG' | 'NON_VEG' | 'PACKED' | 'AVAILABLE' | 'SOLD_OUT'>('ALL');
+  const [filterDropdownOpen, setFilterDropdownOpen] = useState(false);
 
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
@@ -326,6 +347,29 @@ export default function CanteenAdminDashboard() {
     return filteredAdminOrders.slice(start, start + pageSize);
   }, [filteredAdminOrders, currentPage, pageSize]);
 
+  // Filtered menu items based on menuSearch and menuTypeFilter
+  const filteredMenuItems = useMemo(() => {
+    return menuItems.filter(item => {
+      // Type/Status filter
+      if (menuTypeFilter === 'VEG' && item.veg_non_veg !== 'VEG') return false;
+      if (menuTypeFilter === 'NON_VEG' && item.veg_non_veg !== 'NON_VEG') return false;
+      if (menuTypeFilter === 'PACKED' && !item.name.toLowerCase().includes('packed')) return false;
+      if (menuTypeFilter === 'AVAILABLE' && item.is_sold_out) return false;
+      if (menuTypeFilter === 'SOLD_OUT' && !item.is_sold_out) return false;
+
+      // Search query
+      if (menuSearch.trim()) {
+        const q = menuSearch.toLowerCase().trim();
+        const matchName = item.name.toLowerCase().includes(q);
+        const matchPrice = String(item.price || '').includes(q);
+        const matchType = (item.veg_non_veg || '').toLowerCase().includes(q);
+        if (!matchName && !matchPrice && !matchType) return false;
+      }
+
+      return true;
+    });
+  }, [menuItems, menuSearch, menuTypeFilter]);
+
   const { data: analytics = { mostSold: [] }, isLoading: analyticsLoading } = useQuery({
     queryKey: ['canteenAnalytics', currentCanteenId],
     enabled: !!currentCanteenId,
@@ -387,16 +431,20 @@ export default function CanteenAdminDashboard() {
   });
 
   const handleReplyToReview = async (reviewId: string) => {
-    if (!replyText.trim()) return;
+    const trimmedReply = replyText.trim();
+    if (!trimmedReply) {
+      showAlert({ title: 'Reply Required', message: 'Please write a reply message before submitting.', type: 'warning' });
+      return;
+    }
     setSubmittingReply(true);
 
     const { error } = await supabase
       .from('item_reviews')
-      .update({ admin_reply: replyText })
+      .update({ admin_reply: trimmedReply })
       .eq('id', reviewId);
 
     if (error) {
-      showAlert({ title: 'Reply Failed', message: 'Failed to submit reply. Please try again.', type: 'error' });
+      showAlert({ title: 'Reply Failed', message: formatErrorMessage(error, 'Failed to submit reply. Please try again.'), type: 'error' });
     } else {
       setReplyingTo(null);
       setReplyText('');
@@ -407,13 +455,17 @@ export default function CanteenAdminDashboard() {
   };
 
   const { data: penalizedStudents = [], isLoading: penaltiesLoading } = useQuery({
-    queryKey: ['canteenPenalizedStudents'],
+    queryKey: ['canteenPenalizedStudents', currentTenantId],
+    enabled: !!currentTenantId,
     queryFn: async () => {
-      const { data } = await supabase
+      let query = supabase
         .from('profiles')
         .select('*')
+        .eq('tenant_id', currentTenantId)
+        .in('role', ['STUDENT', 'TEACHER'])
         .or('strike_count.gt.0,suspended_until.not.is.null')
         .order('name');
+      const { data } = await query;
       return (data as any[]) || [];
     }
   });
@@ -426,7 +478,7 @@ export default function CanteenAdminDashboard() {
       try {
         const stored = localStorage.getItem(`canteen_deleted_staff_${currentCanteenId}`);
         if (stored) locallyDeleted = JSON.parse(stored);
-      } catch {}
+      } catch { }
 
       const { data, error } = await supabase
         .from('profiles')
@@ -464,7 +516,7 @@ export default function CanteenAdminDashboard() {
     try {
       const stored = localStorage.getItem(`canteen_deleted_staff_${currentCanteenId}`);
       if (stored) locallyDeleted = JSON.parse(stored);
-    } catch {}
+    } catch { }
 
     const activeList = staffList.filter(
       s => !locallyDeleted.includes(s.id) && !s.name?.startsWith('[DELETED]') && s.id_number !== 'DELETED'
@@ -548,7 +600,7 @@ export default function CanteenAdminDashboard() {
           list.push(staffId);
           localStorage.setItem(key, JSON.stringify(list));
         }
-      } catch {}
+      } catch { }
 
       // Optimistically update React Query cache and invalidate
       queryClient.setQueryData(['canteenStaff', currentCanteenId], (old: any[] = []) =>
@@ -577,7 +629,29 @@ export default function CanteenAdminDashboard() {
 
   const handleCreateStaff = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentCanteenId) return;
+    if (!currentCanteenId) {
+      showAlert({ title: 'Error', message: 'No canteen selected or assigned to your profile.', type: 'error' });
+      return;
+    }
+
+    const trimmedName = newStaffName.trim();
+    const trimmedEmail = newStaffEmail.trim();
+
+    if (!trimmedName) {
+      showAlert({ title: 'Missing Name', message: 'Please enter the staff member\'s full name.', type: 'warning' });
+      return;
+    }
+
+    if (!trimmedEmail || !isValidEmail(trimmedEmail)) {
+      showAlert({ title: 'Invalid Email', message: 'Please enter a valid staff email address (e.g. staff@institution.edu).', type: 'warning' });
+      return;
+    }
+
+    if (!newStaffPassword || newStaffPassword.length < 6) {
+      showAlert({ title: 'Invalid Password', message: 'Password must be at least 6 characters long.', type: 'warning' });
+      return;
+    }
+
     setCreatingStaff(true);
     try {
       const functionsUrl = import.meta.env.VITE_SUPABASE_URL
@@ -585,7 +659,7 @@ export default function CanteenAdminDashboard() {
         : 'http://localhost:54321/functions/v1';
 
       const { data: { session } } = await supabase.auth.getSession();
-      
+
       const response = await fetch(`${functionsUrl}/create-tenant-user`, {
         method: 'POST',
         headers: {
@@ -593,8 +667,8 @@ export default function CanteenAdminDashboard() {
           'Authorization': `Bearer ${session?.access_token}`
         },
         body: JSON.stringify({
-          name: newStaffName,
-          email: newStaffEmail,
+          name: trimmedName,
+          email: trimmedEmail,
           password: newStaffPassword,
           role: 'STAFF',
           canteen_id: currentCanteenId
@@ -604,17 +678,18 @@ export default function CanteenAdminDashboard() {
       const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(result.error || 'Failed to create staff');
+        throw new Error(result.error || 'Failed to create staff account');
       }
 
-      showAlert({ title: 'Staff Created', message: `Successfully created staff account for ${newStaffEmail}`, type: 'success' });
-      
+      showAlert({ title: 'Staff Created', message: `Successfully created staff account for ${trimmedEmail}.`, type: 'success' });
+      queryClient.invalidateQueries({ queryKey: ['canteenStaff', currentCanteenId] });
+
       setNewStaffName('');
       setNewStaffEmail('');
       setNewStaffPassword('');
       queryClient.invalidateQueries({ queryKey: ['canteenStaff'] });
     } catch (err: any) {
-      showAlert({ title: 'Error', message: err.message, type: 'error' });
+      showAlert({ title: 'Error', message: formatErrorMessage(err, 'Failed to create staff account.'), type: 'error' });
     } finally {
       setCreatingStaff(false);
     }
@@ -643,15 +718,7 @@ export default function CanteenAdminDashboard() {
   const [newItemPrice, setNewItemPrice] = useState('');
   const [newItemType, setNewItemType] = useState<FoodType>('VEG');
   const [newItemPrepTime, setNewItemPrepTime] = useState('10');
-  const [newItemGstRate, setNewItemGstRate] = useState('5');
-  const [newItemHsnCode, setNewItemHsnCode] = useState('996331');
   const [priceError, setPriceError] = useState<string | null>(null);
-
-  // Canteen GST & Tax Configuration State
-  const [taxConfig, setTaxConfig] = useState<CanteenTaxConfig>(DEFAULT_CANTEEN_TAX_CONFIG);
-  const [taxConfigLoading, setTaxConfigLoading] = useState(true);
-  const [savingTaxConfig, setSavingTaxConfig] = useState(false);
-  const [taxSaveSuccess, setTaxSaveSuccess] = useState(false);
 
   // Lunch Pickup Time Slots Management State
   const [slotConfig, setSlotConfig] = useState<LunchSlotConfig>(DEFAULT_LUNCH_SLOT_CONFIG);
@@ -666,14 +733,7 @@ export default function CanteenAdminDashboard() {
       setSlotConfig(cfg);
       setSlotConfigLoading(false);
     }
-    async function loadTaxConfig() {
-      setTaxConfigLoading(true);
-      const tcfg = await fetchCanteenTaxConfig(currentCanteenId);
-      setTaxConfig(tcfg);
-      setTaxConfigLoading(false);
-    }
     loadSlotConfig();
-    loadTaxConfig();
   }, [currentCanteenId]);
 
   const generatedSlots = React.useMemo(() => {
@@ -749,32 +809,6 @@ export default function CanteenAdminDashboard() {
     setSlotConfig(DEFAULT_LUNCH_SLOT_CONFIG);
   };
 
-  const handleSaveTaxConfig = async () => {
-    if (!currentCanteenId || !currentTenantId) return;
-    setSavingTaxConfig(true);
-    setTaxSaveSuccess(false);
-
-    const res = await saveCanteenTaxConfig(currentCanteenId, currentTenantId, taxConfig);
-    setSavingTaxConfig(false);
-
-    if (res.success) {
-      setTaxSaveSuccess(true);
-      setTimeout(() => setTaxSaveSuccess(false), 3000);
-      window.dispatchEvent(new CustomEvent('canteen_tax_config_updated', { detail: taxConfig }));
-      showAlert({
-        title: 'Tax Configuration Saved',
-        message: 'Canteen GST settings, pricing mode, and tax rules updated successfully.',
-        type: 'success'
-      });
-    } else {
-      showAlert({
-        title: 'Error Saving Tax Config',
-        message: res.error || 'Failed to save tax settings.',
-        type: 'error'
-      });
-    }
-  };
-
   useEffect(() => {
     if (!currentCanteenId) return;
 
@@ -819,48 +853,50 @@ export default function CanteenAdminDashboard() {
     };
   }, [currentCanteenId, queryClient]);
 
+  const fetchMenu = async () => {
+    if (!currentCanteenId) return;
+    setLoading(true);
+    const { data } = await supabase
+      .from('menu_items')
+      .select('*')
+      .eq('canteen_id', currentCanteenId)
+      .order('created_at', { ascending: false });
+    if (data) {
+      setMenuItems(data);
+    }
+    setLoading(false);
+  };
+
   const fetchStats = async () => {
     if (!currentCanteenId) return;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const startOfDay = today.toISOString();
 
-    const { data, error } = await supabase
+    const { data: placed } = await supabase
       .from('orders')
-      .select('status')
+      .select('id', { count: 'exact' })
       .eq('canteen_id', currentCanteenId)
-      .gte('created_at', startOfDay);
+      .gte('created_at', today.toISOString());
 
-    if (data) {
-      const s = { placed: 0, collected: 0, rejected: 0 };
-      data.forEach(o => {
-        s.placed++;
-        if (o.status === 'COLLECTED') s.collected++;
-        if (o.status === 'REJECTED') s.rejected++;
-      });
-      setStats(s);
-    }
-  };
-
-  const fetchMenu = async () => {
-    if (!currentCanteenId) return;
-    setLoading(true);
-    const { data, error } = await supabase
-      .from('menu_items')
-      .select('*')
+    const { data: collected } = await supabase
+      .from('orders')
+      .select('id', { count: 'exact' })
       .eq('canteen_id', currentCanteenId)
-      .order('veg_non_veg', { ascending: false })
-      .order('name');
-    if (data) {
-      const sorted = [...data].sort((a, b) => {
-        if (a.veg_non_veg !== b.veg_non_veg) return a.veg_non_veg === 'VEG' ? -1 : 1;
-        if (a.name.toLowerCase() === 'veg meals') return -1;
-        if (b.name.toLowerCase() === 'veg meals') return 1;
-        return a.name.localeCompare(b.name);
-      });
-      setMenuItems(sorted);
-    }
-    setLoading(false);
+      .eq('status', 'COLLECTED')
+      .gte('created_at', today.toISOString());
+
+    const { data: rejected } = await supabase
+      .from('orders')
+      .select('id', { count: 'exact' })
+      .eq('canteen_id', currentCanteenId)
+      .eq('status', 'REJECTED')
+      .gte('created_at', today.toISOString());
+
+    setStats({
+      placed: placed?.length || 0,
+      collected: collected?.length || 0,
+      rejected: rejected?.length || 0
+    });
   };
 
   const handleAddItem = async (e: React.FormEvent) => {
@@ -894,19 +930,39 @@ export default function CanteenAdminDashboard() {
 
     setPriceError(null);
 
-    const { data, error } = await supabase.from('menu_items').insert({
+    const parsedPrepTime = Number(newItemPrepTime) || 10;
+
+    const insertPayload: Database['public']['Tables']['menu_items']['Insert'] = {
       name: newItemName.trim(),
       veg_non_veg: newItemType,
       price: parsedPrice,
-      prep_time_minutes: Number(newItemPrepTime) || 10,
-      gst_rate_percent: Number(newItemGstRate) || 5,
-      hsn_code: newItemHsnCode || '996331',
+      prep_time_minutes: parsedPrepTime,
       tenant_id: currentTenantId,
       canteen_id: currentCanteenId
-    }).select().single();
+    };
+
+    let { data, error } = await supabase.from('menu_items').insert(insertPayload).select().single();
+
+    // Graceful fallback: If 'prep_time_minutes' is not yet present in the database or schema cache, retry without it
+    if (error && (
+      error.message?.includes('prep_time_minutes') ||
+      (error as any)?.details?.includes('prep_time_minutes') ||
+      error.code === 'PGRST204'
+    )) {
+      const fallbackPayload = {
+        name: newItemName.trim(),
+        veg_non_veg: newItemType,
+        price: parsedPrice,
+        tenant_id: currentTenantId,
+        canteen_id: currentCanteenId
+      };
+      const retryResult = await (supabase.from('menu_items') as any).insert(fallbackPayload).select().single();
+      data = retryResult.data;
+      error = retryResult.error;
+    }
 
     if (error) {
-      showAlert({ title: 'Error', message: `Failed to add item: ${error.message}`, type: 'error' });
+      showAlert({ title: 'Error', message: `Failed to add item: ${formatErrorMessage(error)}`, type: 'error' });
       return;
     }
 
@@ -915,7 +971,6 @@ export default function CanteenAdminDashboard() {
       setNewItemName('');
       setNewItemPrice('');
       setNewItemPrepTime('10');
-      setNewItemGstRate('5');
       setPriceError(null);
     }
   };
@@ -957,27 +1012,20 @@ export default function CanteenAdminDashboard() {
   }
 
   return (
-    <div className="w-full max-w-6xl mx-auto grid grid-cols-12 gap-4">
-      {/* Header */}
-      <div className="col-span-12 bg-emerald-600 border border-emerald-500 rounded-[2rem] p-5 md:p-8 flex flex-col justify-between shadow-sm relative overflow-hidden text-white mb-4">
-        <div className="z-10 flex justify-between items-start">
-          <div>
-            <span className="px-3 py-1 bg-emerald-500 text-emerald-100 text-xs font-bold uppercase tracking-wider rounded-full border border-emerald-400">Canteen Admin</span>
-            <h1 className="text-3xl font-extrabold text-white mt-4 leading-tight">Welcome, {profile?.name || 'Admin'}</h1>
-          </div>
-        </div>
-      </div>
+    <div className={`w-full ${isOrdersView || !isDedicatedView ? 'max-w-5xl' : 'max-w-4xl'} mx-auto grid grid-cols-1 gap-5`}>
+      {isOrdersView ? (
+        /* Dedicated View 1: Order List */
+        <>
+          {/* Sales Collection Summary Dashboard */}
+          <SalesCollectionDashboard
+            data={salesCollectionSummary}
+            isLoading={salesLoading}
+            activePeriod={orderFilter}
+            onSelectPeriod={(p) => setOrderFilter(p)}
+          />
 
-      {/* Sales Collection Summary Dashboard */}
-      <SalesCollectionDashboard
-        data={salesCollectionSummary}
-        isLoading={salesLoading}
-        activePeriod={orderFilter}
-        onSelectPeriod={(p) => setOrderFilter(p)}
-      />
-
-      {/* Order List */}
-      <div ref={orderListRef} className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 shadow-sm">
+          {/* Order List */}
+          <div ref={orderListRef} className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 shadow-sm">
         {/* Header with Title, Count & Date Range */}
         <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-6">
           <div>
@@ -991,7 +1039,7 @@ export default function CanteenAdminDashboard() {
               Individual order total calculation, payment status, and food price breakdown
             </p>
           </div>
-          
+
           <div className="flex items-center gap-1.5 flex-wrap">
             {([
               { key: 'TODAY', label: "Today" },
@@ -1003,11 +1051,10 @@ export default function CanteenAdminDashboard() {
               <button
                 key={f.key}
                 onClick={() => setOrderFilter(f.key)}
-                className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
-                  orderFilter === f.key
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${orderFilter === f.key
                     ? 'bg-emerald-600 text-white shadow-sm'
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
+                  }`}
               >
                 {f.label}
               </button>
@@ -1042,22 +1089,20 @@ export default function CanteenAdminDashboard() {
           <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 self-end md:self-auto shrink-0">
             <button
               onClick={() => setOrderViewMode('TABLE')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                orderViewMode === 'TABLE'
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${orderViewMode === 'TABLE'
                   ? 'bg-white text-emerald-700 shadow-sm'
                   : 'text-slate-500 hover:text-slate-800'
-              }`}
+                }`}
             >
               <LayoutList size={14} />
               <span>Table</span>
             </button>
             <button
               onClick={() => setOrderViewMode('CARDS')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                orderViewMode === 'CARDS'
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${orderViewMode === 'CARDS'
                   ? 'bg-white text-emerald-700 shadow-sm'
                   : 'text-slate-500 hover:text-slate-800'
-              }`}
+                }`}
             >
               <LayoutGrid size={14} />
               <span>Cards</span>
@@ -1081,20 +1126,18 @@ export default function CanteenAdminDashboard() {
               <button
                 key={tab.key}
                 onClick={() => setOrderStatusFilter(tab.key as any)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 transition-all border flex items-center gap-1.5 ${
-                  isSelected
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 transition-all border flex items-center gap-1.5 ${isSelected
                     ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
                     : tab.count > 0
                       ? 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                       : 'bg-slate-50 text-slate-400 border-slate-200 opacity-60'
-                }`}
+                  }`}
               >
                 <span>{tab.label}</span>
-                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
-                  isSelected
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${isSelected
                     ? 'bg-slate-700 text-white'
                     : 'bg-slate-200 text-slate-700'
-                }`}>
+                  }`}>
                   {tab.count}
                 </span>
               </button>
@@ -1109,19 +1152,18 @@ export default function CanteenAdminDashboard() {
             <button
               key={pKey}
               onClick={() => setPaymentStatusFilter(pKey)}
-              className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all border shrink-0 ${
-                paymentStatusFilter === pKey
+              className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all border shrink-0 ${paymentStatusFilter === pKey
                   ? pKey === 'PAID'
                     ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
                     : pKey === 'FAILED'
-                    ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
-                    : pKey === 'REFUNDED'
-                    ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
-                    : pKey === 'PENDING'
-                    ? 'bg-amber-500 text-white border-amber-500 shadow-xs'
-                    : 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                      ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
+                      : pKey === 'REFUNDED'
+                        ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
+                        : pKey === 'PENDING'
+                          ? 'bg-amber-500 text-white border-amber-500 shadow-xs'
+                          : 'bg-slate-900 text-white border-slate-900 shadow-xs'
                   : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-              }`}
+                }`}
             >
               {pKey === 'ALL' ? 'All Payments' : pKey}
             </button>
@@ -1181,11 +1223,10 @@ export default function CanteenAdminDashboard() {
 
                   return (
                     <React.Fragment key={order.id}>
-                      <tr 
+                      <tr
                         onClick={() => toggleExpandOrder(order.id)}
-                        className={`hover:bg-slate-50/80 transition-colors cursor-pointer ${
-                          isExpanded ? 'bg-slate-50/50' : ''
-                        }`}
+                        className={`hover:bg-slate-50/80 transition-colors cursor-pointer ${isExpanded ? 'bg-slate-50/50' : ''
+                          }`}
                       >
                         <td className="py-2.5 px-2.5 sm:px-3">
                           <span className="font-extrabold text-slate-900 block truncate">#{order.order_number}</span>
@@ -1223,14 +1264,13 @@ export default function CanteenAdminDashboard() {
                           </span>
                         </td>
                         <td className="py-2.5 px-2 sm:px-3 text-center">
-                          <span className={`px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border truncate inline-block max-w-full ${
-                            order.status === 'COLLECTED' ? 'bg-green-50 text-green-700 border-green-200' :
-                            order.status === 'READY' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                            order.status === 'PREPARING' ? 'bg-orange-50 text-orange-700 border-orange-200' :
-                            order.status === 'ACCEPTED' ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                            order.status === 'REJECTED' ? 'bg-red-50 text-red-700 border-red-200' :
-                            'bg-slate-100 text-slate-700 border-slate-200'
-                          }`}>
+                          <span className={`px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border truncate inline-block max-w-full ${order.status === 'COLLECTED' ? 'bg-green-50 text-green-700 border-green-200' :
+                              order.status === 'READY' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                                order.status === 'PREPARING' ? 'bg-orange-50 text-orange-700 border-orange-200' :
+                                  order.status === 'ACCEPTED' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                                    order.status === 'REJECTED' ? 'bg-red-50 text-red-700 border-red-200' :
+                                      'bg-slate-100 text-slate-700 border-slate-200'
+                            }`}>
                             {order.status === 'REJECTED' ? 'CANCELLED' : order.status}
                           </span>
                         </td>
@@ -1352,14 +1392,13 @@ export default function CanteenAdminDashboard() {
                         <div className="text-[11px] text-slate-400 font-mono">ID: {order.id.split('-')[0].toUpperCase()}</div>
                       </div>
                       <div className="flex items-center gap-1.5 flex-wrap justify-end">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border ${
-                          order.status === 'COLLECTED' ? 'bg-green-50 text-green-700 border-green-200' :
-                          order.status === 'READY' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                          order.status === 'PREPARING' ? 'bg-orange-50 text-orange-700 border-orange-200' :
-                          order.status === 'ACCEPTED' ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                          order.status === 'REJECTED' ? 'bg-red-50 text-red-700 border-red-200' :
-                          'bg-slate-100 text-slate-700 border-slate-200'
-                        }`}>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border ${order.status === 'COLLECTED' ? 'bg-green-50 text-green-700 border-green-200' :
+                            order.status === 'READY' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                              order.status === 'PREPARING' ? 'bg-orange-50 text-orange-700 border-orange-200' :
+                                order.status === 'ACCEPTED' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                                  order.status === 'REJECTED' ? 'bg-red-50 text-red-700 border-red-200' :
+                                    'bg-slate-100 text-slate-700 border-slate-200'
+                          }`}>
                           {order.status === 'REJECTED' ? 'CANCELLED' : order.status}
                         </span>
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border ${payInfo.badgeClass}`}>
@@ -1473,11 +1512,10 @@ export default function CanteenAdminDashboard() {
                         <button
                           type="button"
                           onClick={(e) => { e.preventDefault(); handlePageChange(p); }}
-                          className={`w-7 h-7 rounded-lg text-xs font-bold transition-all ${
-                            currentPage === p
+                          className={`w-7 h-7 rounded-lg text-xs font-bold transition-all ${currentPage === p
                               ? 'bg-emerald-600 text-white shadow-sm'
                               : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
-                          }`}
+                            }`}
                         >
                           {p}
                         </button>
@@ -1499,9 +1537,10 @@ export default function CanteenAdminDashboard() {
           </div>
         )}
       </div>
-
-      {/* Menu Management */}
-      <div className="col-span-12 md:col-span-6 bg-white border border-slate-200 rounded-[2rem] p-5 sm:p-8 shadow-sm flex flex-col h-[620px]">
+    </>
+  ) : isMenuView ? (
+    /* Dedicated View 2: Manage Menu */
+    <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 sm:p-8 shadow-sm flex flex-col">
         <div className="flex justify-between items-center mb-5 shrink-0">
           <h2 className="text-xl font-bold text-slate-800">Manage Menu</h2>
           <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">
@@ -1509,9 +1548,9 @@ export default function CanteenAdminDashboard() {
           </span>
         </div>
         <form onSubmit={handleAddItem} className="flex flex-col gap-3 mb-5 bg-slate-50 p-4 rounded-xl border border-slate-100 shrink-0">
-          <input 
-            type="text" 
-            placeholder="Item Name" 
+          <input
+            type="text"
+            placeholder="Item Name"
             value={newItemName}
             onChange={(e) => setNewItemName(e.target.value)}
             maxLength={100}
@@ -1519,9 +1558,9 @@ export default function CanteenAdminDashboard() {
           />
           <div className="flex flex-col gap-1">
             <div className="flex gap-2 items-center">
-              <input 
-                type="number" 
-                placeholder="Price (₹)" 
+              <input
+                type="number"
+                placeholder="Price (₹)"
                 value={newItemPrice}
                 onChange={(e) => {
                   setNewItemPrice(e.target.value);
@@ -1531,37 +1570,26 @@ export default function CanteenAdminDashboard() {
                 step="any"
                 className={`w-28 px-3.5 py-2 bg-white border ${priceError ? 'border-rose-400 ring-1 ring-rose-400' : 'border-slate-200'} rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm text-slate-800`}
               />
-              <input 
-                type="number" 
-                placeholder="Prep (m)" 
+              <input
+                type="number"
+                placeholder="Prep (m)"
                 title="Estimated preparation duration in minutes"
                 value={newItemPrepTime}
                 onChange={(e) => setNewItemPrepTime(e.target.value)}
                 min="1"
                 max="60"
-                className="w-16 px-2 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-xs text-slate-800"
+                className="w-20 px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm text-slate-800"
               />
-              <input 
-                type="number" 
-                placeholder="GST %" 
-                title="GST Rate Percent (default 5% for canteen food)"
-                value={newItemGstRate}
-                onChange={(e) => setNewItemGstRate(e.target.value)}
-                min="0"
-                max="28"
-                step="0.5"
-                className="w-16 px-2 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-xs text-slate-800"
-              />
-              <select 
-                value={newItemType} 
+              <select
+                value={newItemType}
                 onChange={(e) => setNewItemType(e.target.value as FoodType)}
-                className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm text-slate-800"
+                className="w-28 px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm text-slate-800"
               >
                 <option value="VEG">Veg</option>
                 <option value="NON_VEG">Non-Veg</option>
               </select>
-              <button 
-                type="submit" 
+              <button
+                type="submit"
                 className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 active:scale-95 transition-all shrink-0 cursor-pointer"
               >
                 Add Item
@@ -1573,109 +1601,956 @@ export default function CanteenAdminDashboard() {
           </div>
         </form>
 
-        {loading && menuItems.length === 0 ? (
-          <div className="text-slate-500 text-sm flex-1 flex items-center justify-center">Loading menu...</div>
+        {/* Search & Filter Toolbar */}
+        <div className="space-y-2.5 mb-4 shrink-0">
+          <div className="relative">
+            <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search by item name, price, or category..."
+              value={menuSearch}
+              onChange={(e) => setMenuSearch(e.target.value)}
+              className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-800 placeholder:text-slate-400"
+            />
+            {menuSearch && (
+              <button
+                onClick={() => setMenuSearch('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                title="Clear search"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+
+          {/* Filter Pills */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
+            {([
+              { key: 'ALL', label: 'All', icon: ListFilter, iconColor: 'text-slate-500' },
+              { key: 'VEG', label: 'Veg', icon: Leaf, iconColor: 'text-emerald-500' },
+              { key: 'NON_VEG', label: 'Non-Veg', icon: Flame, iconColor: 'text-rose-500' },
+              { key: 'PACKED', label: 'Packed', icon: Package, iconColor: 'text-purple-500' },
+              { key: 'AVAILABLE', label: 'Available', icon: CheckCircle2, iconColor: 'text-emerald-500' },
+              { key: 'SOLD_OUT', label: 'Sold Out', icon: IconBan, iconColor: 'text-rose-500' }
+            ] as const).map(({ key, label, icon: IconComp, iconColor }) => {
+              const isSelected = menuTypeFilter === key;
+              return (
+                <button
+                  key={key}
+                  onClick={() => setMenuTypeFilter(key)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold shrink-0 transition-all border inline-flex items-center gap-1.5 ${
+                    isSelected
+                      ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+                      : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <IconComp size={13} className={isSelected ? 'text-white' : iconColor} />
+                  <span>{label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Menu Items List Container */}
+        <div className="flex-1 overflow-y-auto pr-1">
+        {loading ? (
+          <div className="text-slate-500 text-sm py-12 text-center">Loading menu...</div>
+        ) : filteredMenuItems.length === 0 ? (
+          <div className="col-span-full text-slate-400 text-sm text-center py-12 bg-slate-50/70 rounded-2xl border border-slate-100">
+            {menuSearch || menuTypeFilter !== 'ALL'
+              ? 'No menu items match your search or filter.'
+              : 'No menu items for this location yet.'}
+          </div>
         ) : (
-          <div className="space-y-3 overflow-y-auto flex-1 pr-1.5 custom-scrollbar">
-            {menuItems.map(item => (
-              <div key={item.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-white border border-slate-200 rounded-xl hover:border-slate-300 transition-colors shadow-sm gap-3">
-                <div className="flex items-center gap-3">
-                  <div className={`w-3 h-3 rounded-full shrink-0 ${item.veg_non_veg === 'VEG' ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className={`font-semibold ${item.is_sold_out ? 'text-slate-400 line-through' : 'text-slate-800'}`}>{item.name}</span>
-                      {item.is_sold_out && <span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full shrink-0">Sold Out</span>}
-                    </div>
-                    <div className="text-xs font-bold text-slate-600 mt-0.5">
-                      ₹{Number(item.price || 0).toFixed(2)}{' '}
-                      <span className="font-normal text-slate-400">
-                        ({(item as any).gst_rate_percent ?? 5}% GST)
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            {filteredMenuItems.map(item => (
+              <div
+                key={item.id}
+                className={`p-3.5 rounded-2xl border transition-all flex flex-col justify-between gap-2 shadow-xs ${item.is_sold_out
+                    ? 'bg-slate-50/60 border-slate-200 opacity-70'
+                    : 'bg-white border-slate-200/90 hover:border-emerald-300'
+                  }`}
+              >
+                <div className="flex justify-between items-start gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <h4 className="font-extrabold text-slate-900 text-sm truncate">{item.name}</h4>
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded font-black border ${item.veg_non_veg === 'VEG'
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : 'bg-rose-50 text-rose-700 border-rose-200'
+                        }`}>
+                        {item.veg_non_veg === 'VEG' ? 'VEG' : 'NON-VEG'}
                       </span>
+                      {item.name.toLowerCase().includes('packed') && (
+                        <span className="text-[10px] px-1.5 py-0.2 rounded font-black bg-purple-50 text-purple-700 border border-purple-200">
+                          PACKED
+                        </span>
+                      )}
+                    </div>
+                    <div className="font-black text-emerald-700 text-sm mt-0.5">
+                      ₹{Number(item.price).toFixed(2)}
                     </div>
                   </div>
-                </div>
-                <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-                  <button
-                    onClick={() => handleToggleSoldOut(item.id, item.is_sold_out)}
-                    className="text-[10px] sm:text-xs font-semibold text-slate-500 bg-slate-100 px-2 sm:px-3 py-1.5 rounded-lg hover:bg-slate-200 transition-colors cursor-pointer"
-                  >
-                    {item.is_sold_out ? 'Mark Available' : 'Mark Sold Out'}
-                  </button>
+
                   <button
                     onClick={() => handleDeleteMenuItem(item.id, item.name)}
-                    className="text-[10px] sm:text-xs font-semibold text-rose-500 bg-rose-50 px-2 sm:px-3 py-1.5 rounded-lg hover:bg-rose-100 border border-rose-100 transition-colors cursor-pointer"
-                    title="Permanently delete this item"
+                    className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 transition-colors"
+                    title="Delete item"
                   >
-                    Delete
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+
+                <div className="flex justify-between items-center pt-2 border-t border-slate-100">
+                  <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold ${item.is_sold_out ? 'text-rose-600' : 'text-emerald-600'}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${item.is_sold_out ? 'bg-rose-500' : 'bg-emerald-500'}`} />
+                    <span>{item.is_sold_out ? 'Sold Out' : 'Available'}</span>
+                  </span>
+                  <button
+                    onClick={() => handleToggleSoldOut(item.id, item.is_sold_out)}
+                    className={`px-3 py-1 rounded-xl text-xs font-bold transition-all border ${item.is_sold_out
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                        : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
+                      }`}
+                  >
+                    {item.is_sold_out ? 'Mark Available' : 'Mark Sold Out'}
                   </button>
                 </div>
               </div>
             ))}
-            {menuItems.length === 0 && (
-              <div className="text-slate-500 text-sm text-center py-8">
-                No menu items for this location yet.
+          </div>
+        )}
+      </div>
+    </div>
+  ) : isAnalyticsView ? (
+    /* Dedicated View 3: Weekly Analytics */
+    <div className="relative overflow-hidden bg-white/95 backdrop-blur-xl border border-slate-200/90 rounded-3xl p-5 sm:p-7 shadow-xl shadow-emerald-500/5 hover:shadow-emerald-500/10 transition-all duration-300">
+      {/* Top ambient accent glow */}
+      <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-purple-500 via-emerald-500 to-teal-500 rounded-t-3xl" />
+      <div className="absolute -top-20 -right-20 w-56 h-56 bg-purple-500/5 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute -bottom-20 -left-20 w-56 h-56 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
+
+      {/* Header Section */}
+      <div className="flex flex-col items-center text-center mb-4 relative">
+        <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-purple-600 via-emerald-600 to-teal-600 text-white flex items-center justify-center shadow-lg shadow-emerald-500/25 mb-2 ring-4 ring-emerald-50/70">
+          <BarChart3 size={28} strokeWidth={2.2} />
+        </div>
+        <h1 className="text-2xl sm:text-[26px] font-black text-slate-900 tracking-tight">Weekly Analytics</h1>
+        <p className="text-xs sm:text-sm text-slate-500 max-w-md mt-0.5 leading-snug">
+          Kitchen velocity, customer order patterns, and sales volume over the past 7 days.
+        </p>
+
+        {/* Metric Badges Row */}
+        <div className="flex flex-wrap items-center justify-center gap-2 mt-3">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-purple-50 text-purple-700 border border-purple-200/70 shadow-xs">
+            <Sparkles size={13} />
+            {analytics.mostSold.reduce((acc, i) => acc + i.count, 0)} Items Sold
+          </span>
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/70 shadow-xs">
+            {analytics.mostSold.length} Top Dishes Ranked
+          </span>
+        </div>
+      </div>
+
+      {/* Cards Grid (Exact Match to Screenshot 3) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Card 1: Most Sold This Week */}
+        <div className="bg-slate-50/70 rounded-2xl p-5 border border-slate-200 flex flex-col justify-between">
+          <div>
+            <h3 className="font-extrabold text-slate-800 mb-3 uppercase tracking-wider text-xs">
+              Most Sold This Week
+            </h3>
+            {analyticsLoading ? (
+              <div className="text-slate-400 text-xs py-6">Loading sales data...</div>
+            ) : analytics.mostSold.length === 0 ? (
+              <div className="text-slate-500 text-xs py-6">No sales data for this week.</div>
+            ) : (
+              <div className="space-y-3">
+                {analytics.mostSold.map((item, idx) => {
+                  const maxCount = analytics.mostSold[0]?.count || 1;
+                  const percentage = Math.round((item.count / maxCount) * 100);
+                  return (
+                    <div key={item.name} className="space-y-1">
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="font-bold text-slate-700 truncate max-w-[160px]">
+                          {idx + 1}. {item.name}
+                        </span>
+                        <span className="font-black text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.2 rounded-full text-[10px]">
+                          {item.count} sold
+                        </span>
+                      </div>
+                      <div className="w-full bg-slate-200/80 rounded-full h-1.5 overflow-hidden">
+                        <div
+                          className="bg-emerald-600 h-1.5 rounded-full transition-all duration-500"
+                          style={{ width: `${percentage}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
+            )}
+          </div>
+        </div>
+
+        {/* Card 2: Great Job! Banner (Exact Match to Screenshot 3) */}
+        <div className="bg-emerald-600 rounded-2xl p-6 text-white flex flex-col items-center justify-center text-center shadow-xs">
+          <div className="w-12 h-12 rounded-full bg-emerald-500/80 text-white flex items-center justify-center mb-3">
+            <BarChart3 size={24} />
+          </div>
+          <h3 className="text-xl font-black mb-1">Great Job!</h3>
+          <p className="text-emerald-100 text-xs max-w-xs">
+            Keep up the good work managing orders.
+          </p>
+        </div>
+      </div>
+    </div>
+  ) : isStaffView ? (
+    /* Dedicated View 4: Kitchen Staff, Lunch Slots, & Penalties */
+    <div className="col-span-12 space-y-6">
+      {/* Manage Staff Section */}
+      <div className="bg-white border border-slate-200/90 rounded-[2rem] p-5 sm:p-8 shadow-sm flex flex-col relative overflow-hidden">
+    {/* Subtle decorative background ambient blur */}
+    <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-br from-emerald-100/40 via-teal-50/20 to-transparent rounded-full blur-3xl -z-0 pointer-events-none" />
+
+    {/* Section Header */}
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 relative z-10">
+      <div>
+        <div className="flex items-center gap-2.5">
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center shadow-md shadow-emerald-500/20">
+            <Users size={20} />
+          </div>
+          <div>
+            <h2 className="text-xl font-extrabold text-slate-800 tracking-tight">Staff Management</h2>
+            <p className="text-xs text-slate-500 mt-0.5">Provision &amp; monitor counter staff credentials for this cafeteria</p>
+          </div>
+        </div>
+      </div>
+      <div className="flex items-center gap-2 self-start sm:self-auto">
+        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-xs">
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+          </span>
+          <span>{staffList.length} Active {staffList.length === 1 ? 'Operator' : 'Operators'}</span>
+        </span>
+      </div>
+    </div>
+
+    {/* Innovative Create Staff Form Card */}
+    <form
+      onSubmit={handleCreateStaff}
+      className="mb-8 relative z-10 rounded-2xl bg-gradient-to-br from-slate-50/90 via-emerald-50/20 to-slate-50/70 border border-emerald-100/80 p-5 sm:p-6 shadow-xs hover:border-emerald-200 transition-all duration-300 backdrop-blur-xs"
+    >
+      <div className="flex items-center justify-between gap-3 mb-5">
+        <div className="flex items-center gap-2">
+          <span className="p-1.5 rounded-lg bg-emerald-100 text-emerald-700">
+            <UserPlus size={16} />
+          </span>
+          <div>
+            <h3 className="font-bold text-slate-800 text-sm">Provision New Staff Member</h3>
+            <p className="text-[11px] text-slate-500">Instant access for kitchen &amp; delivery counter operators</p>
+          </div>
+        </div>
+        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-100/60 px-2.5 py-0.5 rounded-full border border-emerald-200/50 hidden sm:inline-block">
+          Role: Counter Staff
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
+        {/* Full Name Input with Left Icon */}
+        <div className="space-y-1.5">
+          <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+            <User size={13} className="text-emerald-600" />
+            <span>Full Name</span>
+            <span className="text-emerald-600">*</span>
+          </label>
+          <div className="relative group">
+            <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 group-focus-within:text-emerald-600 transition-colors">
+              <User size={16} />
+            </div>
+            <input
+              type="text"
+              required
+              placeholder="e.g. Ramesh Kumar"
+              value={newStaffName}
+              onChange={(e) => setNewStaffName(e.target.value)}
+              className="w-full pl-10 pr-3.5 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none text-sm text-slate-800 placeholder:text-slate-400 shadow-2xs hover:border-slate-300 transition-all"
+            />
+          </div>
+        </div>
+
+        {/* Email Address Input with Left Icon */}
+        <div className="space-y-1.5">
+          <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+            <Mail size={13} className="text-emerald-600" />
+            <span>Email Address</span>
+            <span className="text-emerald-600">*</span>
+          </label>
+          <div className="relative group">
+            <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 group-focus-within:text-emerald-600 transition-colors">
+              <Mail size={16} />
+            </div>
+            <input
+              type="email"
+              required
+              placeholder="staff@cafeteria.edu"
+              value={newStaffEmail}
+              onChange={(e) => setNewStaffEmail(e.target.value)}
+              className="w-full pl-10 pr-3.5 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none text-sm text-slate-800 placeholder:text-slate-400 shadow-2xs hover:border-slate-300 transition-all"
+            />
+          </div>
+        </div>
+
+        {/* Password Input with Left Icon and Show/Hide toggle */}
+        <div className="space-y-1.5">
+          <div className="flex justify-between items-center">
+            <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+              <KeyRound size={13} className="text-emerald-600" />
+              <span>Password</span>
+              <span className="text-emerald-600">*</span>
+            </label>
+            <span className="text-[10px] font-medium text-slate-400">Min. 6 chars</span>
+          </div>
+          <div className="relative group">
+            <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 group-focus-within:text-emerald-600 transition-colors">
+              <KeyRound size={16} />
+            </div>
+            <input
+              type={showStaffPassword ? "text" : "password"}
+              required
+              minLength={6}
+              placeholder="••••••••"
+              value={newStaffPassword}
+              onChange={(e) => setNewStaffPassword(e.target.value)}
+              className="w-full pl-10 pr-10 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none text-sm text-slate-800 placeholder:text-slate-400 shadow-2xs hover:border-slate-300 transition-all font-mono tracking-wider"
+            />
+            <button
+              type="button"
+              onClick={() => setShowStaffPassword(!showStaffPassword)}
+              className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 focus:outline-none cursor-pointer"
+              title={showStaffPassword ? "Hide password" : "Show password"}
+            >
+              {showStaffPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pt-3 border-t border-slate-200/60">
+        <div className="flex items-center gap-2 text-xs text-slate-500">
+          <ShieldCheck size={14} className="text-emerald-600" />
+          <span>Staff accounts receive verified dashboard access restricted to this canteen.</span>
+        </div>
+        <button
+          type="submit"
+          disabled={creatingStaff}
+          className="w-full sm:w-auto px-6 py-2.5 bg-gradient-to-r from-emerald-600 via-emerald-700 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white text-sm font-bold rounded-xl shadow-md shadow-emerald-700/20 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer"
+        >
+          {creatingStaff ? (
+            <>
+              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              <span>Provisioning...</span>
+            </>
+          ) : (
+            <>
+              <UserPlus size={16} />
+              <span>Create Staff Account</span>
+            </>
+          )}
+        </button>
+      </div>
+    </form>
+
+    {/* Existing Staff Members List */}
+    <div className="relative z-10">
+      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-4">
+        <div className="flex items-center gap-2">
+          <h3 className="font-bold text-slate-800 text-base">Active Staff Directory</h3>
+          <span className="text-xs font-extrabold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
+            {filteredStaffList.length}
+          </span>
+        </div>
+
+        {/* Quick search input */}
+        {staffList.length > 0 && (
+          <div className="relative w-full sm:w-64">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Filter staff by name or ID..."
+              value={staffSearch}
+              onChange={e => setStaffSearch(e.target.value)}
+              className="w-full pl-8 pr-7 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+            />
+            {staffSearch && (
+              <button
+                onClick={() => setStaffSearch('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X size={12} />
+              </button>
             )}
           </div>
         )}
       </div>
 
-      {/* Feedback & Reviews */}
-      <div className="col-span-12 md:col-span-6 bg-white border border-slate-200 rounded-[2rem] p-5 sm:p-8 shadow-sm flex flex-col h-[620px]">
-        <div className="flex justify-between items-center mb-5 shrink-0">
-          <h2 className="text-xl font-bold text-slate-800">Student Feedback & Reviews</h2>
-          <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">
-            {reviews.length} {reviews.length === 1 ? 'review' : 'reviews'}
+      {staffLoading ? (
+        <div className="text-slate-500 text-xs py-10 text-center flex flex-col items-center gap-2">
+          <div className="w-6 h-6 border-2 border-emerald-500/30 border-t-emerald-600 rounded-full animate-spin" />
+          <span>Loading staff directory...</span>
+        </div>
+      ) : filteredStaffList.length === 0 ? (
+        <div className="bg-gradient-to-b from-slate-50 to-slate-50/50 border border-slate-200/80 rounded-2xl p-8 text-center flex flex-col items-center gap-3">
+          <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center">
+            <Users size={24} />
+          </div>
+          <div>
+            <div className="font-bold text-slate-700 text-sm">
+              {staffSearch ? 'No staff members match your filter' : 'No staff members registered yet'}
+            </div>
+            <p className="text-xs text-slate-400 mt-1 max-w-sm">
+              {staffSearch
+                ? `No results found for "${staffSearch}". Try clearing your search filter.`
+                : 'Use the form above to provision kitchen and counter staff accounts.'}
+            </p>
+          </div>
+          {staffSearch && (
+            <button
+              onClick={() => setStaffSearch('')}
+              className="text-xs font-bold text-emerald-600 hover:underline cursor-pointer"
+            >
+              Clear Search
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+          {filteredStaffList.map((staff: any, idx: number) => {
+            const shortId = staff.id_number || staff.id.split('-')[0].toUpperCase();
+            const initials = (staff.name || 'S')
+              .split(' ')
+              .map((w: string) => w[0])
+              .filter(Boolean)
+              .slice(0, 2)
+              .join('')
+              .toUpperCase();
+            const avatarGradients = [
+              'from-emerald-500 to-teal-600',
+              'from-teal-500 to-cyan-600',
+              'from-blue-500 to-indigo-600',
+              'from-indigo-500 to-purple-600',
+              'from-emerald-600 to-emerald-800',
+            ];
+            const grad = avatarGradients[idx % avatarGradients.length];
+
+            return (
+              <div
+                key={staff.id}
+                className="p-4 rounded-2xl border border-slate-200/90 bg-white hover:border-emerald-300 hover:shadow-md transition-all duration-200 flex flex-col justify-between gap-3 group relative overflow-hidden"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-xl bg-gradient-to-tr ${grad} text-white font-extrabold text-sm flex items-center justify-center shadow-xs shrink-0 group-hover:scale-105 transition-transform`}>
+                      {initials}
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-slate-900 text-sm leading-tight group-hover:text-emerald-700 transition-colors">
+                        {staff.name || 'Unnamed Staff'}
+                      </h4>
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 bg-emerald-50 border border-emerald-100 px-2 py-0.2 rounded-full mt-1">
+                        <ShieldCheck size={11} />
+                        Counter Staff
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      Active
+                    </span>
+                    <button
+                      onClick={() => handleDeleteStaff(staff.id, staff.name)}
+                      disabled={deletingStaffId === staff.id}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-100 transition-all cursor-pointer disabled:opacity-50"
+                      title="Delete staff member"
+                    >
+                      {deletingStaffId === staff.id ? (
+                        <div className="w-3.5 h-3.5 border-2 border-rose-400/30 border-t-rose-600 rounded-full animate-spin" />
+                      ) : (
+                        <Trash2 size={14} />
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-slate-400">ID:</span>
+                    <code className="font-mono font-bold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">
+                      {shortId}
+                    </code>
+                    <button
+                      onClick={() => handleCopyId(staff.id)}
+                      className="text-slate-400 hover:text-slate-700 transition-colors p-0.5 cursor-pointer"
+                      title="Copy full UUID"
+                    >
+                      {copiedStaffId === staff.id ? (
+                        <Check size={12} className="text-emerald-600" />
+                      ) : (
+                        <Copy size={12} />
+                      )}
+                    </button>
+                  </div>
+
+                  <span className="text-slate-400">
+                    Joined {new Date(staff.created_at).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  </div>
+
+  {/* Lunch Pickup Time Slots Management */ }
+  <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 shadow-sm flex flex-col">
+    <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-6 pb-4 border-b border-slate-100">
+      <div>
+        <div className="flex items-center gap-2">
+          <div className="w-9 h-9 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600">
+            <IconClock size={20} className="w-5 h-5 text-indigo-600 shrink-0" />
+          </div>
+          <h2 className="text-xl font-bold text-slate-800">Lunch Pickup Time Slots Management</h2>
+        </div>
+        <p className="text-xs text-slate-500 mt-1">
+          Configure available lunch service hours, interval durations (5m, 10m, 15m, 20m, 30m), and toggle individual slot availability.
+        </p>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className={`px-3 py-1 rounded-full text-xs font-bold ${slotConfig.isLunchEnabled
+            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+            : 'bg-rose-50 text-rose-700 border border-rose-200'
+          }`}>
+          {slotConfig.isLunchEnabled ? 'Lunch Ordering Active' : 'Lunch Ordering Disabled'}
+        </span>
+      </div>
+    </div>
+
+    {slotConfigLoading ? (
+      <div className="text-slate-500 text-sm py-8 text-center">Loading lunch slot configuration...</div>
+    ) : (
+      <div className="space-y-6">
+        {/* Global Timing & Interval Settings */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 p-4 sm:p-5 bg-slate-50 border border-slate-200/80 rounded-2xl">
+          <div>
+            <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+              Service Start Time
+            </label>
+            <input
+              type="time"
+              value={slotConfig.serviceStartTime}
+              onChange={e => setSlotConfig(prev => ({ ...prev, serviceStartTime: e.target.value }))}
+              className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <span className="text-[11px] text-slate-400 mt-1 block">
+              Current: {formatPickupTime(slotConfig.serviceStartTime)}
+            </span>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+              Service End Time
+            </label>
+            <input
+              type="time"
+              value={slotConfig.serviceEndTime}
+              onChange={e => setSlotConfig(prev => ({ ...prev, serviceEndTime: e.target.value }))}
+              className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <span className="text-[11px] text-slate-400 mt-1 block">
+              Current: {formatPickupTime(slotConfig.serviceEndTime)}
+            </span>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+              Slot Interval Duration
+            </label>
+            <select
+              value={slotConfig.slotDurationMinutes}
+              onChange={e => setSlotConfig(prev => ({ ...prev, slotDurationMinutes: Number(e.target.value) }))}
+              className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value={5}>5 Minutes</option>
+              <option value={10}>10 Minutes</option>
+              <option value={15}>15 Minutes (Default)</option>
+              <option value={20}>20 Minutes</option>
+              <option value={30}>30 Minutes</option>
+              <option value={45}>45 Minutes</option>
+              <option value={60}>60 Minutes</option>
+            </select>
+            <span className="text-[11px] text-slate-400 mt-1 block">
+              Generates slots across service hours
+            </span>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+              Advance Notice Cutoff
+            </label>
+            <select
+              value={slotConfig.minNoticeMinutes}
+              onChange={e => setSlotConfig(prev => ({ ...prev, minNoticeMinutes: Number(e.target.value) }))}
+              className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value={0}>No notice required</option>
+              <option value={15}>15 Minutes before slot</option>
+              <option value={30}>30 Minutes before slot (Default)</option>
+              <option value={45}>45 Minutes before slot</option>
+              <option value={60}>60 Minutes before slot</option>
+            </select>
+            <span className="text-[11px] text-slate-400 mt-1 block">
+              Buffer time for kitchen preparation
+            </span>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+              Max Kitchen Capacity
+            </label>
+            <input
+              type="number"
+              min="1"
+              max="100"
+              value={slotConfig.maxConcurrentOrders ?? 15}
+              onChange={e => setSlotConfig(prev => ({ ...prev, maxConcurrentOrders: Number(e.target.value) }))}
+              className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <span className="text-[11px] text-slate-400 mt-1 block">
+              Max orders cooking per 15m window
+            </span>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+              Default Item Prep Time
+            </label>
+            <input
+              type="number"
+              min="1"
+              max="60"
+              value={slotConfig.defaultPrepTimeMinutes ?? 10}
+              onChange={e => setSlotConfig(prev => ({ ...prev, defaultPrepTimeMinutes: Number(e.target.value) }))}
+              className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <span className="text-[11px] text-slate-400 mt-1 block">
+              Default cooking duration in minutes
+            </span>
+          </div>
+        </div>
+
+        {/* Service Toggle */}
+        <div className="flex items-center justify-between p-4 bg-indigo-50/50 border border-indigo-100 rounded-2xl">
+          <div className="flex items-center gap-3">
+            <input
+              type="checkbox"
+              id="enableLunchToggle"
+              checked={slotConfig.isLunchEnabled}
+              onChange={e => setSlotConfig(prev => ({ ...prev, isLunchEnabled: e.target.checked }))}
+              className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+            />
+            <label htmlFor="enableLunchToggle" className="text-sm font-bold text-slate-800 cursor-pointer">
+              Enable Lunch Ordering Service
+            </label>
+          </div>
+          <span className="text-xs text-slate-500">
+            Turn off to temporarily stop accepting lunch pickup orders.
           </span>
         </div>
 
-        {reviewsLoading ? (
-          <div className="text-slate-500 text-sm flex-1 flex items-center justify-center">Loading reviews...</div>
-        ) : reviews.length === 0 ? (
-          <div className="text-slate-400 text-sm flex-1 flex items-center justify-center">No reviews yet.</div>
-        ) : (
-          <div className="flex flex-col gap-4 overflow-y-auto flex-1 pr-1.5 custom-scrollbar">
-            {reviews.map(review => (
-              <div key={review.id} className="p-5 rounded-2xl border border-slate-200 bg-slate-50 flex flex-col gap-3 hover:shadow-md transition-shadow">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h3 className="font-bold text-slate-800">
-                      {review.orders?.order_number ? `Order #${review.orders.order_number} - ` : ''}
-                      {review.menu_items?.name || 'Unknown Item'}
-                    </h3>
-                    <div className="text-xs text-slate-500 mt-0.5">
-                      {review.orders?.id && <span className="font-mono">ID: {review.orders.id.split('-')[0].toUpperCase()} • </span>}
-                      By {review.profiles?.name || 'Unknown'} ({review.profiles?.id_number || 'No ID'})
+        {/* Generated Slots Grid & Individual Slot Toggles */}
+        <div>
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 mb-3">
+            <div>
+              <h3 className="text-sm font-bold text-slate-800">
+                Active Slots ({generatedSlots.filter(s => s.enabled).length} of {generatedSlots.length} Enabled)
+              </h3>
+              <p className="text-xs text-slate-500">
+                Click any slot badge to toggle availability on or off. Disabled slots will be hidden or grayed out for students.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handleToggleAllSlots(true)}
+                className="text-xs font-semibold px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors"
+              >
+                Enable All
+              </button>
+              <button
+                type="button"
+                onClick={() => handleToggleAllSlots(false)}
+                className="text-xs font-semibold px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors"
+              >
+                Disable All
+              </button>
+            </div>
+          </div>
+
+          {generatedSlots.length === 0 ? (
+            <div className="p-6 text-center text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-2xl">
+              No slots generated. Please check that End Time is later than Start Time and duration is valid.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+              {generatedSlots.map(slot => {
+                const isDisabled = !slot.enabled;
+                return (
+                  <div
+                    key={slot.value}
+                    className={`p-3 rounded-xl border transition-all flex flex-col justify-between gap-2 ${isDisabled
+                        ? 'bg-slate-100 border-slate-200 opacity-60'
+                        : 'bg-white border-indigo-200/80 hover:border-indigo-400 shadow-xs'
+                      }`}
+                  >
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <span className="text-xs font-mono font-bold text-slate-800">
+                          {slot.rangeLabel}
+                        </span>
+                        <div className="text-[11px] text-slate-500">
+                          Pickup: {formatPickupTime(slot.value)}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleSlot(slot.value)}
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider transition-colors ${isDisabled
+                            ? 'bg-slate-200 text-slate-600 hover:bg-slate-300'
+                            : 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                          }`}
+                      >
+                        {isDisabled ? 'Disabled' : 'Enabled'}
+                      </button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1">
-                    {Array.from({ length: 5 }).map((_, i) => (
-                      <IconStar 
-                        key={i} 
-                        size={16} 
-                        className={`w-4 h-4 ${i < review.rating ? 'text-yellow-400 fill-yellow-400' : 'text-slate-200'}`} 
-                        filled={i < review.rating} 
-                      />
-                    ))}
-                  </div>
-                </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
 
-                {review.feedback_text && (
-                  <div className="bg-white p-3 rounded-xl border border-slate-100 text-sm text-slate-700 italic">
-                    "{review.feedback_text}"
-                  </div>
-                )}
+        {/* Save Button Row */}
+        <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-4 border-t border-slate-200">
+          <button
+            type="button"
+            onClick={handleResetSlotDefaults}
+            className="text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors"
+          >
+            Reset to Default (12:00 PM – 2:00 PM, 15m intervals)
+          </button>
 
-                <div className="text-xs text-slate-400">
-                  Reviewed on: {new Date(review.created_at).toLocaleString()}
+          <div className="flex items-center gap-3">
+            {slotSaveSuccess && (
+              <span className="text-xs text-emerald-600 font-bold flex items-center gap-1">
+                <IconCheckCircle size={14} className="w-3.5 h-3.5 text-emerald-600" />
+                Configuration Saved!
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={handleSaveSlotConfig}
+              disabled={savingSlotConfig || generatedSlots.length === 0}
+              className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl shadow-sm transition-all active:scale-95 flex items-center gap-2"
+            >
+              <IconCheckCircle size={16} className="w-4 h-4" />
+              <span>{savingSlotConfig ? 'Saving Configuration...' : 'Save Slot Configuration'}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+  </div>
+
+  {/* Student Penalties & Account Suspensions */ }
+  <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 shadow-sm flex flex-col">
+    <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 mb-6">
+      <div>
+        <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+          <IconAlertTriangle size={20} className="w-5 h-5 text-amber-600 shrink-0" />
+          <span>Student No-Show Penalties &amp; Suspensions</span>
+        </h2>
+        <p className="text-xs text-slate-500 mt-1">
+          Students receive 1 strike per missed pickup. 2 strikes trigger an automatic 3-day account deactivation.
+        </p>
+      </div>
+      <span className="text-xs font-semibold px-3 py-1 bg-slate-100 text-slate-600 rounded-full w-fit">
+        {penalizedStudents.length} {penalizedStudents.length === 1 ? 'Student' : 'Students'} with records
+      </span>
+    </div>
+
+    {penaltiesLoading ? (
+      <div className="text-slate-500 text-xs py-4 text-center">Loading student penalty records...</div>
+    ) : penalizedStudents.length === 0 ? (
+      <div className="bg-slate-50/70 border border-slate-100 rounded-2xl p-5 text-center text-slate-500 text-xs flex items-center justify-center gap-2">
+        <IconSparkles size={16} className="w-4 h-4 text-emerald-500 shrink-0" />
+        <span>All clean! No students currently have active strikes or suspensions.</span>
+      </div>
+    ) : (
+      <div className="overflow-x-auto rounded-xl border border-slate-100">
+        <table className="w-full text-left border-collapse text-xs">
+          <thead>
+            <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+              <th className="py-2 px-3">Student</th>
+              <th className="py-2 px-3">ID Number</th>
+              <th className="py-2 px-3">Active Strikes</th>
+              <th className="py-2 px-3">Account Status</th>
+              <th className="py-2 px-3 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {penalizedStudents.map(student => {
+              const isSuspended = !!(student.suspended_until && new Date(student.suspended_until) > new Date());
+              return (
+                <tr key={student.id} className="hover:bg-slate-50/80 transition-colors">
+                  <td className="py-2.5 px-3 font-semibold text-slate-800">{student.name || 'Unnamed'}</td>
+                  <td className="py-2.5 px-3 text-slate-500 font-mono text-[11px]">{student.id_number || 'N/A'}</td>
+                  <td className="py-2.5 px-3">
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${student.strike_count > 0 ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'}`}>
+                      {student.strike_count} / 2 Strikes
+                    </span>
+                  </td>
+                  <td className="py-2.5 px-3">
+                    {isSuspended ? (
+                      <div className="flex flex-col">
+                        <span className="px-2 py-0.2 rounded-full text-[10px] font-bold bg-red-100 text-red-700 w-fit flex items-center gap-1">
+                          <IconBan size={11} className="w-3 h-3 text-red-600 shrink-0" />
+                          <span>Suspended</span>
+                        </span>
+                        <span className="text-[10px] text-slate-400 mt-0.5">
+                          Until: {new Date(student.suspended_until).toLocaleDateString()}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="px-2 py-0.2 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 w-fit">
+                        Active
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-2.5 px-3 text-right">
+                    <button
+                      onClick={() => handleResetStudentStrikes(student.id, student.name || 'Student')}
+                      className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-semibold rounded-lg transition-colors active:scale-95"
+                      title="Clear strikes and lift any active suspension"
+                    >
+                      Clear & Unsuspend
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </div>
+</div>
+) : isReviewsView ? (
+    /* Dedicated View 5: Student Feedback & Reviews */
+    <div className="relative overflow-hidden bg-white/95 backdrop-blur-xl border border-slate-200/90 rounded-3xl p-5 sm:p-7 shadow-xl shadow-emerald-500/5 hover:shadow-emerald-500/10 transition-all duration-300">
+      {/* Top ambient accent glow */}
+      <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-rose-500 via-emerald-500 to-teal-500 rounded-t-3xl" />
+      <div className="absolute -top-20 -right-20 w-56 h-56 bg-rose-500/5 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute -bottom-20 -left-20 w-56 h-56 bg-teal-500/5 rounded-full blur-3xl pointer-events-none" />
+
+      {/* Header Section */}
+      <div className="flex flex-col items-center text-center mb-4 relative">
+        <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-rose-500 via-emerald-600 to-teal-600 text-white flex items-center justify-center shadow-lg shadow-emerald-500/25 mb-2 ring-4 ring-emerald-50/70">
+          <MessageSquare size={28} strokeWidth={2.2} />
+        </div>
+        <div className="flex items-center gap-2">
+          <h1 className="text-2xl sm:text-[26px] font-black text-slate-900 tracking-tight">Student Feedback &amp; Reviews</h1>
+          <span className="text-xs font-bold text-slate-500 bg-slate-100 border border-slate-200 px-2.5 py-0.5 rounded-full">
+            {reviews.length} {reviews.length === 1 ? 'review' : 'reviews'}
+          </span>
+        </div>
+        <p className="text-xs sm:text-sm text-slate-500 max-w-md mt-0.5 leading-snug">
+          Read reviews from students and reply directly
+        </p>
+
+        {/* Metric Badges Row */}
+        <div className="flex flex-wrap items-center justify-center gap-2 mt-3">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200/70 shadow-xs">
+            <Star size={13} className="text-rose-500" />
+            {reviews.length} Total Reviews
+          </span>
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/70 shadow-xs">
+            {reviews.filter(r => r.admin_reply).length} Replied
+          </span>
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200/70 shadow-xs">
+            {reviews.filter(r => !r.admin_reply).length} Pending Reply
+          </span>
+        </div>
+      </div>
+
+      {/* Reviews List Container (Exact Match to Screenshot 5) */}
+      <div className="max-h-[460px] overflow-y-auto pr-1">
+        {reviewsLoading ? (
+          <div className="text-slate-500 text-sm py-12 text-center">Loading reviews...</div>
+        ) : reviews.length === 0 ? (
+          <div className="text-slate-400 text-sm py-12 text-center bg-slate-50/70 rounded-2xl border border-slate-100">
+            No student reviews yet.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {reviews.map(review => (
+              <div key={review.id} className="p-4 rounded-2xl border border-slate-200 bg-slate-50/70 flex flex-col justify-between gap-2.5 hover:shadow-xs transition-shadow">
+                <div>
+                  <div className="flex justify-between items-start mb-1.5">
+                    <div>
+                      <h3 className="font-bold text-slate-800 text-sm">
+                        {review.orders?.order_number ? `Order #${review.orders.order_number} - ` : ''}
+                        {review.menu_items?.name || 'Unknown Item'}
+                      </h3>
+                      <div className="text-[11px] text-slate-500 mt-0.5">
+                        {review.orders?.id && <span className="font-mono">ID: {review.orders.id.split('-')[0].toUpperCase()} • </span>}
+                        By {review.profiles?.name || 'Unknown'} ({review.profiles?.id_number || 'No ID'})
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      {Array.from({ length: 5 }).map((_, i) => (
+                        <IconStar
+                          key={i}
+                          size={14}
+                          className={`w-3.5 h-3.5 ${i < review.rating ? 'text-yellow-400 fill-yellow-400' : 'text-slate-200'}`}
+                          filled={i < review.rating}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  {review.feedback_text && (
+                    <div className="bg-white p-2.5 rounded-xl border border-slate-100 text-xs text-slate-700 italic my-1.5">
+                      "{review.feedback_text}"
+                    </div>
+                  )}
+
+                  <div className="text-[10px] text-slate-400">
+                    Reviewed on: {new Date(review.created_at).toLocaleString()}
+                  </div>
                 </div>
 
                 {/* Admin Reply Section */}
-                <div className="mt-2 pt-3 border-t border-slate-200">
+                <div className="pt-2 border-t border-slate-200/80">
                   {review.admin_reply ? (
-                    <div className="bg-emerald-50 p-3 rounded-xl border border-emerald-100">
-                      <div className="text-xs font-bold text-emerald-600 uppercase tracking-wider mb-1">Your Reply</div>
-                      <p className="text-sm text-slate-800">{review.admin_reply}</p>
+                    <div className="bg-emerald-50 p-2.5 rounded-xl border border-emerald-100">
+                      <div className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider mb-0.5">Your Reply</div>
+                      <p className="text-xs text-slate-800">{review.admin_reply}</p>
                     </div>
                   ) : replyingTo === review.id ? (
                     <div className="flex flex-col gap-2">
@@ -1684,20 +2559,20 @@ export default function CanteenAdminDashboard() {
                         onChange={(e) => setReplyText(e.target.value)}
                         placeholder="Write a reply..."
                         maxLength={500}
-                        className="w-full text-sm bg-white border border-emerald-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        className="w-full text-xs bg-white border border-emerald-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                         rows={2}
                       />
-                      <div className="flex justify-end gap-2">
+                      <div className="flex justify-end gap-1.5">
                         <button
                           onClick={() => { setReplyingTo(null); setReplyText(''); }}
-                          className="px-3 py-1.5 text-xs font-semibold text-slate-500 hover:text-slate-700 transition-colors"
+                          className="px-2.5 py-1 text-xs font-semibold text-slate-500 hover:text-slate-700 transition cursor-pointer"
                         >
                           Cancel
                         </button>
                         <button
                           onClick={() => handleReplyToReview(review.id)}
                           disabled={submittingReply || !replyText.trim()}
-                          className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+                          className="px-3 py-1 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-700 disabled:opacity-50 transition shadow-xs cursor-pointer"
                         >
                           {submittingReply ? 'Sending...' : 'Send Reply'}
                         </button>
@@ -1706,10 +2581,10 @@ export default function CanteenAdminDashboard() {
                   ) : (
                     <button
                       onClick={() => setReplyingTo(review.id)}
-                      className="text-xs font-semibold text-emerald-600 hover:text-emerald-800 flex items-center gap-1"
+                      className="text-xs font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1.5 cursor-pointer transition"
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 21l1.9-5.7a8.5 8.5 0 1 1 3.8 3.8z"></path></svg>
-                      Reply to feedback
+                      <MessageSquare size={13} />
+                      <span>Reply to feedback</span>
                     </button>
                   )}
                 </div>
@@ -1718,891 +2593,168 @@ export default function CanteenAdminDashboard() {
           </div>
         )}
       </div>
-
-      {/* Analytics Section */}
-      <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 shadow-sm flex flex-col">
-        <h2 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2">
-          Weekly Analytics
-        </h2>
-
-        {analyticsLoading ? (
-          <div className="text-slate-500 text-sm">Loading analytics...</div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-slate-50 rounded-2xl p-6 shadow-sm border border-slate-200">
-              <h3 className="font-bold text-slate-800 mb-4 uppercase tracking-wider text-xs">Most Sold This Week</h3>
-              {analytics.mostSold.length === 0 ? (
-                <div className="text-slate-500 text-sm">No sales data for this week.</div>
-              ) : (
-                <div className="space-y-4 mt-2">
-                  {analytics.mostSold.map((item, idx) => {
-                    const maxCount = Math.max(...analytics.mostSold.map(i => i.count), 1);
-                    const percentage = Math.round((item.count / maxCount) * 100);
-                    return (
-                      <div key={idx} className="flex flex-col gap-1.5">
-                        <div className="flex justify-between text-xs font-semibold">
-                          <span className="text-slate-700 flex items-center gap-2">
-                            <span className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold bg-slate-200 text-slate-600">
-                              {idx + 1}
-                            </span>
-                            {item.name}
-                          </span>
-                          <span className="text-emerald-600">{item.count} sold</span>
-                        </div>
-                        <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden border border-slate-200/50">
-                          <div
-                            className={`h-2.5 rounded-full transition-all duration-1000 ease-out ${idx === 0 ? 'bg-emerald-600' :
-                                idx === 1 ? 'bg-emerald-500' :
-                                  idx === 2 ? 'bg-emerald-400' : 'bg-emerald-300'
-                              }`}
-                            style={{ width: `${percentage}%` }}
-                          ></div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            <div className="bg-emerald-600 rounded-2xl p-6 shadow-sm flex flex-col items-center justify-center text-white text-center">
-              <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center mb-4">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20v-6M6 20V10M18 20V4"></path></svg>
-              </div>
-              <h3 className="font-bold text-xl mb-1">Great Job!</h3>
-              <p className="text-emerald-200 text-sm">Keep up the good work managing orders.</p>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Manage Staff Section */}
-      <div className="col-span-12 bg-white border border-slate-200/90 rounded-[2rem] p-5 sm:p-8 shadow-sm flex flex-col relative overflow-hidden">
-        {/* Subtle decorative background ambient blur */}
-        <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-br from-emerald-100/40 via-teal-50/20 to-transparent rounded-full blur-3xl -z-0 pointer-events-none" />
-
-        {/* Section Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 relative z-10">
-          <div>
-            <div className="flex items-center gap-2.5">
-              <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center shadow-md shadow-emerald-500/20">
-                <Users size={20} />
-              </div>
-              <div>
-                <h2 className="text-xl font-extrabold text-slate-800 tracking-tight">Staff Management</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Provision &amp; monitor counter staff credentials for this cafeteria</p>
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 self-start sm:self-auto">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-xs">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-              </span>
-              <span>{staffList.length} Active {staffList.length === 1 ? 'Operator' : 'Operators'}</span>
-            </span>
-          </div>
-        </div>
-
-        {/* Innovative Create Staff Form Card */}
-        <form 
-          onSubmit={handleCreateStaff} 
-          className="mb-8 relative z-10 rounded-2xl bg-gradient-to-br from-slate-50/90 via-emerald-50/20 to-slate-50/70 border border-emerald-100/80 p-5 sm:p-6 shadow-xs hover:border-emerald-200 transition-all duration-300 backdrop-blur-xs"
-        >
-          <div className="flex items-center justify-between gap-3 mb-5">
-            <div className="flex items-center gap-2">
-              <span className="p-1.5 rounded-lg bg-emerald-100 text-emerald-700">
-                <UserPlus size={16} />
-              </span>
-              <div>
-                <h3 className="font-bold text-slate-800 text-sm">Provision New Staff Member</h3>
-                <p className="text-[11px] text-slate-500">Instant access for kitchen &amp; delivery counter operators</p>
-              </div>
-            </div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-100/60 px-2.5 py-0.5 rounded-full border border-emerald-200/50 hidden sm:inline-block">
-              Role: Counter Staff
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
-            {/* Full Name Input with Left Icon */}
-            <div className="space-y-1.5">
-              <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
-                <User size={13} className="text-emerald-600" />
-                <span>Full Name</span>
-                <span className="text-emerald-600">*</span>
-              </label>
-              <div className="relative group">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 group-focus-within:text-emerald-600 transition-colors">
-                  <User size={16} />
-                </div>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Ramesh Kumar"
-                  value={newStaffName}
-                  onChange={(e) => setNewStaffName(e.target.value)}
-                  className="w-full pl-10 pr-3.5 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none text-sm text-slate-800 placeholder:text-slate-400 shadow-2xs hover:border-slate-300 transition-all"
-                />
-              </div>
-            </div>
-
-            {/* Email Address Input with Left Icon */}
-            <div className="space-y-1.5">
-              <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
-                <Mail size={13} className="text-emerald-600" />
-                <span>Email Address</span>
-                <span className="text-emerald-600">*</span>
-              </label>
-              <div className="relative group">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 group-focus-within:text-emerald-600 transition-colors">
-                  <Mail size={16} />
-                </div>
-                <input
-                  type="email"
-                  required
-                  placeholder="staff@cafeteria.edu"
-                  value={newStaffEmail}
-                  onChange={(e) => setNewStaffEmail(e.target.value)}
-                  className="w-full pl-10 pr-3.5 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none text-sm text-slate-800 placeholder:text-slate-400 shadow-2xs hover:border-slate-300 transition-all"
-                />
-              </div>
-            </div>
-
-            {/* Password Input with Left Icon and Show/Hide toggle */}
-            <div className="space-y-1.5">
-              <div className="flex justify-between items-center">
-                <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
-                  <KeyRound size={13} className="text-emerald-600" />
-                  <span>Password</span>
-                  <span className="text-emerald-600">*</span>
-                </label>
-                <span className="text-[10px] font-medium text-slate-400">Min. 6 chars</span>
-              </div>
-              <div className="relative group">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 group-focus-within:text-emerald-600 transition-colors">
-                  <KeyRound size={16} />
-                </div>
-                <input
-                  type={showStaffPassword ? "text" : "password"}
-                  required
-                  minLength={6}
-                  placeholder="••••••••"
-                  value={newStaffPassword}
-                  onChange={(e) => setNewStaffPassword(e.target.value)}
-                  className="w-full pl-10 pr-10 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none text-sm text-slate-800 placeholder:text-slate-400 shadow-2xs hover:border-slate-300 transition-all font-mono tracking-wider"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowStaffPassword(!showStaffPassword)}
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 focus:outline-none cursor-pointer"
-                  title={showStaffPassword ? "Hide password" : "Show password"}
-                >
-                  {showStaffPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pt-3 border-t border-slate-200/60">
-            <div className="flex items-center gap-2 text-xs text-slate-500">
-              <ShieldCheck size={14} className="text-emerald-600" />
-              <span>Staff accounts receive verified dashboard access restricted to this canteen.</span>
-            </div>
-            <button
-              type="submit"
-              disabled={creatingStaff}
-              className="w-full sm:w-auto px-6 py-2.5 bg-gradient-to-r from-emerald-600 via-emerald-700 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white text-sm font-bold rounded-xl shadow-md shadow-emerald-700/20 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer"
-            >
-              {creatingStaff ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  <span>Provisioning...</span>
-                </>
-              ) : (
-                <>
-                  <UserPlus size={16} />
-                  <span>Create Staff Account</span>
-                </>
-              )}
-            </button>
-          </div>
-        </form>
-
-        {/* Existing Staff Members List */}
-        <div className="relative z-10">
-          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-4">
-            <div className="flex items-center gap-2">
-              <h3 className="font-bold text-slate-800 text-base">Active Staff Directory</h3>
-              <span className="text-xs font-extrabold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
-                {filteredStaffList.length}
-              </span>
-            </div>
-
-            {/* Quick search input */}
-            {staffList.length > 0 && (
-              <div className="relative w-full sm:w-64">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="Filter staff by name or ID..."
-                  value={staffSearch}
-                  onChange={e => setStaffSearch(e.target.value)}
-                  className="w-full pl-8 pr-7 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-                />
-                {staffSearch && (
-                  <button
-                    onClick={() => setStaffSearch('')}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-                  >
-                    <X size={12} />
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-
-          {staffLoading ? (
-            <div className="text-slate-500 text-xs py-10 text-center flex flex-col items-center gap-2">
-              <div className="w-6 h-6 border-2 border-emerald-500/30 border-t-emerald-600 rounded-full animate-spin" />
-              <span>Loading staff directory...</span>
-            </div>
-          ) : filteredStaffList.length === 0 ? (
-            <div className="bg-gradient-to-b from-slate-50 to-slate-50/50 border border-slate-200/80 rounded-2xl p-8 text-center flex flex-col items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center">
-                <Users size={24} />
-              </div>
-              <div>
-                <div className="font-bold text-slate-700 text-sm">
-                  {staffSearch ? 'No staff members match your filter' : 'No staff members registered yet'}
-                </div>
-                <p className="text-xs text-slate-400 mt-1 max-w-sm">
-                  {staffSearch
-                    ? `No results found for "${staffSearch}". Try clearing your search filter.`
-                    : 'Use the form above to provision kitchen and counter staff accounts.'}
-                </p>
-              </div>
-              {staffSearch && (
-                <button
-                  onClick={() => setStaffSearch('')}
-                  className="text-xs font-bold text-emerald-600 hover:underline cursor-pointer"
-                >
-                  Clear Search
-                </button>
-              )}
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
-              {filteredStaffList.map((staff: any, idx: number) => {
-                const shortId = staff.id_number || staff.id.split('-')[0].toUpperCase();
-                const initials = (staff.name || 'S')
-                  .split(' ')
-                  .map((w: string) => w[0])
-                  .filter(Boolean)
-                  .slice(0, 2)
-                  .join('')
-                  .toUpperCase();
-                const avatarGradients = [
-                  'from-emerald-500 to-teal-600',
-                  'from-teal-500 to-cyan-600',
-                  'from-blue-500 to-indigo-600',
-                  'from-indigo-500 to-purple-600',
-                  'from-emerald-600 to-emerald-800',
-                ];
-                const grad = avatarGradients[idx % avatarGradients.length];
-
-                return (
-                  <div
-                    key={staff.id}
-                    className="p-4 rounded-2xl border border-slate-200/90 bg-white hover:border-emerald-300 hover:shadow-md transition-all duration-200 flex flex-col justify-between gap-3 group relative overflow-hidden"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-10 h-10 rounded-xl bg-gradient-to-tr ${grad} text-white font-extrabold text-sm flex items-center justify-center shadow-xs shrink-0 group-hover:scale-105 transition-transform`}>
-                          {initials}
-                        </div>
-                        <div>
-                          <h4 className="font-bold text-slate-900 text-sm leading-tight group-hover:text-emerald-700 transition-colors">
-                            {staff.name || 'Unnamed Staff'}
-                          </h4>
-                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 bg-emerald-50 border border-emerald-100 px-2 py-0.2 rounded-full mt-1">
-                            <ShieldCheck size={11} />
-                            Counter Staff
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                          Active
-                        </span>
-                        <button
-                          onClick={() => handleDeleteStaff(staff.id, staff.name)}
-                          disabled={deletingStaffId === staff.id}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-100 transition-all cursor-pointer disabled:opacity-50"
-                          title="Delete staff member"
-                        >
-                          {deletingStaffId === staff.id ? (
-                            <div className="w-3.5 h-3.5 border-2 border-rose-400/30 border-t-rose-600 rounded-full animate-spin" />
-                          ) : (
-                            <Trash2 size={14} />
-                          )}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-slate-400">ID:</span>
-                        <code className="font-mono font-bold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">
-                          {shortId}
-                        </code>
-                        <button
-                          onClick={() => handleCopyId(staff.id)}
-                          className="text-slate-400 hover:text-slate-700 transition-colors p-0.5 cursor-pointer"
-                          title="Copy full UUID"
-                        >
-                          {copiedStaffId === staff.id ? (
-                            <Check size={12} className="text-emerald-600" />
-                          ) : (
-                            <Copy size={12} />
-                          )}
-                        </button>
-                      </div>
-
-                      <span className="text-slate-400">
-                        Joined {new Date(staff.created_at).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* GST & Indian Tax Configuration Management */}
-      <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 shadow-sm flex flex-col">
-        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-6 pb-4 border-b border-slate-100">
-          <div>
-            <div className="flex items-center gap-2">
-              <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
-                <span className="font-black text-sm">₹</span>
-              </div>
-              <h2 className="text-xl font-bold text-slate-800">GST & Tax Compliance Configuration</h2>
-            </div>
-            <p className="text-xs text-slate-500 mt-1">
-              Configure your Canteen GSTIN, Indian State Code, Menu Pricing Mode (Tax-Inclusive vs. Exclusive), and default GST rates for itemized invoices.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-              {taxConfig.priceMode === 'TAX_INCLUSIVE' ? 'Prices: Tax-Inclusive' : 'Prices: Tax-Exclusive'}
-            </span>
-          </div>
-        </div>
-
-        {taxConfigLoading ? (
-          <div className="py-8 text-center text-slate-400 text-sm">Loading tax configuration...</div>
-        ) : (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-              {/* GSTIN */}
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-                  Canteen GSTIN (15 Digits)
-                </label>
-                <input
-                  type="text"
-                  maxLength={15}
-                  value={taxConfig.gstin}
-                  onChange={(e) => setTaxConfig({ ...taxConfig, gstin: e.target.value.toUpperCase() })}
-                  placeholder="e.g. 29AABCU9603R1Z7"
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono uppercase focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                />
-                <p className="text-[11px] text-slate-400 mt-1">Leave empty or UNREGISTERED if composition/unregistered.</p>
-              </div>
-
-              {/* State Code */}
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-                  Operating State Code (GST)
-                </label>
-                <select
-                  value={taxConfig.stateCode}
-                  onChange={(e) => setTaxConfig({ ...taxConfig, stateCode: e.target.value })}
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                >
-                  <option value="29">29 — Karnataka</option>
-                  <option value="33">33 — Tamil Nadu</option>
-                  <option value="32">32 — Kerala</option>
-                  <option value="36">36 — Telangana</option>
-                  <option value="37">37 — Andhra Pradesh</option>
-                  <option value="27">27 — Maharashtra</option>
-                  <option value="07">07 — Delhi</option>
-                  <option value="19">19 — West Bengal</option>
-                  <option value="24">24 — Gujarat</option>
-                  <option value="06">06 — Haryana</option>
-                  <option value="08">08 — Rajasthan</option>
-                  <option value="09">09 — Uttar Pradesh</option>
-                </select>
-                <p className="text-[11px] text-slate-400 mt-1">Same state supply splits into CGST + SGST. Inter-state uses IGST.</p>
-              </div>
-
-              {/* Pricing Mode */}
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-                  Menu Pricing Mode
-                </label>
-                <select
-                  value={taxConfig.priceMode}
-                  onChange={(e) => setTaxConfig({ ...taxConfig, priceMode: e.target.value as 'TAX_INCLUSIVE' | 'TAX_EXCLUSIVE' })}
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                >
-                  <option value="TAX_INCLUSIVE">Tax-Inclusive (Menu price contains GST)</option>
-                  <option value="TAX_EXCLUSIVE">Tax-Exclusive (GST added on top)</option>
-                </select>
-                <p className="text-[11px] text-slate-400 mt-1">Indian canteens usually display MRP / inclusive prices.</p>
-              </div>
-
-              {/* Default Food GST Rate */}
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-                  Default Food GST Rate (%)
-                </label>
-                <select
-                  value={taxConfig.defaultFoodGstRate}
-                  onChange={(e) => setTaxConfig({ ...taxConfig, defaultFoodGstRate: Number(e.target.value) })}
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                >
-                  <option value={5}>5% (Restaurant service / Canteen without ITC - CGST 2.5% + SGST 2.5%)</option>
-                  <option value={12}>12% (Packaged food / with ITC)</option>
-                  <option value={18}>18% (Outdoor catering / Standard service)</option>
-                  <option value={0}>0% (Exempt / Nil Rated)</option>
-                </select>
-                <p className="text-[11px] text-slate-400 mt-1">Items can override this rate individually in the menu list.</p>
-              </div>
-
-              {/* Service Fee GST Rate */}
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-                  Service / Platform Fee GST (%)
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="28"
-                  value={taxConfig.serviceFeeGstRate}
-                  onChange={(e) => setTaxConfig({ ...taxConfig, serviceFeeGstRate: Number(e.target.value) })}
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                />
-                <p className="text-[11px] text-slate-400 mt-1">Platform service tax treatment rate (Default: 18%).</p>
-              </div>
-
-              {/* Legal Canteen Name */}
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-                  Canteen Legal / Invoice Name
-                </label>
-                <input
-                  type="text"
-                  value={taxConfig.legalBusinessName || ''}
-                  onChange={(e) => setTaxConfig({ ...taxConfig, legalBusinessName: e.target.value })}
-                  placeholder="e.g. SkipTray Campus Food Services"
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                />
-                <p className="text-[11px] text-slate-400 mt-1">Printed on formal tax invoice headers.</p>
-              </div>
-            </div>
-
-            {/* Statutory Formula Banner */}
-            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-xs text-amber-800 space-y-1.5">
-              <div className="font-bold flex items-center gap-1.5 text-amber-900">
-                <span>Tax Compliance Formula & Audit Rules:</span>
-              </div>
-              <ul className="list-disc list-inside space-y-1 text-amber-700">
-                <li>
-                  <strong>Tax-Inclusive Mode:</strong> Taxable Base = Price × 100 / (100 + Rate). For an ₹80.00 item at 5% GST, Base = ₹76.19, Total GST = ₹3.81.
-                </li>
-                <li>
-                  <strong>Intra-State Supplies (Karnataka to Karnataka):</strong> GST is split exactly into <strong>CGST ({taxConfig.defaultFoodGstRate / 2}%)</strong> and <strong>SGST ({taxConfig.defaultFoodGstRate / 2}%)</strong>.
-                </li>
-                <li>
-                  <strong>Inter-State Supplies:</strong> <strong>IGST ({taxConfig.defaultFoodGstRate}%)</strong> is charged; CGST/SGST are never charged simultaneously with IGST.
-                </li>
-              </ul>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex items-center justify-end gap-3 pt-2">
-              {taxSaveSuccess && (
-                <span className="text-xs font-bold text-emerald-600 flex items-center gap-1">
-                  <IconCheckCircle className="w-4 h-4" /> Tax Settings Saved
-                </span>
-              )}
-              <button
-                type="button"
-                onClick={handleSaveTaxConfig}
-                disabled={savingTaxConfig}
-                className="px-6 py-2.5 bg-emerald-600 text-white text-sm font-bold rounded-xl hover:bg-emerald-700 transition shadow-sm disabled:opacity-50"
-              >
-                {savingTaxConfig ? 'Saving Settings...' : 'Save Tax Configuration'}
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Lunch Pickup Time Slots Management */}
-      <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 shadow-sm flex flex-col">
-        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-6 pb-4 border-b border-slate-100">
-          <div>
-            <div className="flex items-center gap-2">
-              <div className="w-9 h-9 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600">
-                <IconClock size={20} className="w-5 h-5 text-indigo-600 shrink-0" />
-              </div>
-              <h2 className="text-xl font-bold text-slate-800">Lunch Pickup Time Slots Management</h2>
-            </div>
-            <p className="text-xs text-slate-500 mt-1">
-              Configure available lunch service hours, interval durations (5m, 10m, 15m, 20m, 30m), and toggle individual slot availability.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-              slotConfig.isLunchEnabled 
-                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
-                : 'bg-rose-50 text-rose-700 border border-rose-200'
-            }`}>
-              {slotConfig.isLunchEnabled ? 'Lunch Ordering Active' : 'Lunch Ordering Disabled'}
-            </span>
-          </div>
-        </div>
-
-        {slotConfigLoading ? (
-          <div className="text-slate-500 text-sm py-8 text-center">Loading lunch slot configuration...</div>
-        ) : (
-          <div className="space-y-6">
-            {/* Global Timing & Interval Settings */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 p-4 sm:p-5 bg-slate-50 border border-slate-200/80 rounded-2xl">
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-                  Service Start Time
-                </label>
-                <input
-                  type="time"
-                  value={slotConfig.serviceStartTime}
-                  onChange={e => setSlotConfig(prev => ({ ...prev, serviceStartTime: e.target.value }))}
-                  className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-                <span className="text-[11px] text-slate-400 mt-1 block">
-                  Current: {formatPickupTime(slotConfig.serviceStartTime)}
-                </span>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-                  Service End Time
-                </label>
-                <input
-                  type="time"
-                  value={slotConfig.serviceEndTime}
-                  onChange={e => setSlotConfig(prev => ({ ...prev, serviceEndTime: e.target.value }))}
-                  className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-                <span className="text-[11px] text-slate-400 mt-1 block">
-                  Current: {formatPickupTime(slotConfig.serviceEndTime)}
-                </span>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-                  Slot Interval Duration
-                </label>
-                <select
-                  value={slotConfig.slotDurationMinutes}
-                  onChange={e => setSlotConfig(prev => ({ ...prev, slotDurationMinutes: Number(e.target.value) }))}
-                  className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                >
-                  <option value={5}>5 Minutes</option>
-                  <option value={10}>10 Minutes</option>
-                  <option value={15}>15 Minutes (Default)</option>
-                  <option value={20}>20 Minutes</option>
-                  <option value={30}>30 Minutes</option>
-                  <option value={45}>45 Minutes</option>
-                  <option value={60}>60 Minutes</option>
-                </select>
-                <span className="text-[11px] text-slate-400 mt-1 block">
-                  Generates slots across service hours
-                </span>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-                  Advance Notice Cutoff
-                </label>
-                <select
-                  value={slotConfig.minNoticeMinutes}
-                  onChange={e => setSlotConfig(prev => ({ ...prev, minNoticeMinutes: Number(e.target.value) }))}
-                  className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                >
-                  <option value={0}>No notice required</option>
-                  <option value={15}>15 Minutes before slot</option>
-                  <option value={30}>30 Minutes before slot (Default)</option>
-                  <option value={45}>45 Minutes before slot</option>
-                  <option value={60}>60 Minutes before slot</option>
-                </select>
-                <span className="text-[11px] text-slate-400 mt-1 block">
-                  Buffer time for kitchen preparation
-                </span>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-                  Max Kitchen Capacity
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  max="100"
-                  value={slotConfig.maxConcurrentOrders ?? 15}
-                  onChange={e => setSlotConfig(prev => ({ ...prev, maxConcurrentOrders: Number(e.target.value) }))}
-                  className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-                <span className="text-[11px] text-slate-400 mt-1 block">
-                  Max orders cooking per 15m window
-                </span>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-                  Default Item Prep Time
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  max="60"
-                  value={slotConfig.defaultPrepTimeMinutes ?? 10}
-                  onChange={e => setSlotConfig(prev => ({ ...prev, defaultPrepTimeMinutes: Number(e.target.value) }))}
-                  className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-                <span className="text-[11px] text-slate-400 mt-1 block">
-                  Default cooking duration in minutes
-                </span>
-              </div>
-            </div>
-
-            {/* Service Toggle */}
-            <div className="flex items-center justify-between p-4 bg-indigo-50/50 border border-indigo-100 rounded-2xl">
-              <div className="flex items-center gap-3">
-                <input
-                  type="checkbox"
-                  id="enableLunchToggle"
-                  checked={slotConfig.isLunchEnabled}
-                  onChange={e => setSlotConfig(prev => ({ ...prev, isLunchEnabled: e.target.checked }))}
-                  className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
-                />
-                <label htmlFor="enableLunchToggle" className="text-sm font-bold text-slate-800 cursor-pointer">
-                  Enable Lunch Ordering Service
-                </label>
-              </div>
-              <span className="text-xs text-slate-500">
-                Turn off to temporarily stop accepting lunch pickup orders.
-              </span>
-            </div>
-
-            {/* Generated Slots Grid & Individual Slot Toggles */}
-            <div>
-              <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 mb-3">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-800">
-                    Active Slots ({generatedSlots.filter(s => s.enabled).length} of {generatedSlots.length} Enabled)
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    Click any slot badge to toggle availability on or off. Disabled slots will be hidden or grayed out for students.
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleToggleAllSlots(true)}
-                    className="text-xs font-semibold px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors"
-                  >
-                    Enable All
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleToggleAllSlots(false)}
-                    className="text-xs font-semibold px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors"
-                  >
-                    Disable All
-                  </button>
-                </div>
-              </div>
-
-              {generatedSlots.length === 0 ? (
-                <div className="p-6 text-center text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-2xl">
-                  No slots generated. Please check that End Time is later than Start Time and duration is valid.
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                  {generatedSlots.map(slot => {
-                    const isDisabled = !slot.enabled;
-                    return (
-                      <div
-                        key={slot.value}
-                        className={`p-3 rounded-xl border transition-all flex flex-col justify-between gap-2 ${
-                          isDisabled
-                            ? 'bg-slate-100 border-slate-200 opacity-60'
-                            : 'bg-white border-indigo-200/80 hover:border-indigo-400 shadow-xs'
-                        }`}
-                      >
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <span className="text-xs font-mono font-bold text-slate-800">
-                              {slot.rangeLabel}
-                            </span>
-                            <div className="text-[11px] text-slate-500">
-                              Pickup: {formatPickupTime(slot.value)}
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleToggleSlot(slot.value)}
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider transition-colors ${
-                              isDisabled
-                                ? 'bg-slate-200 text-slate-600 hover:bg-slate-300'
-                                : 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
-                            }`}
-                          >
-                            {isDisabled ? 'Disabled' : 'Enabled'}
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* Save Button Row */}
-            <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-4 border-t border-slate-200">
-              <button
-                type="button"
-                onClick={handleResetSlotDefaults}
-                className="text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors"
-              >
-                Reset to Default (12:00 PM – 2:00 PM, 15m intervals)
-              </button>
-
-              <div className="flex items-center gap-3">
-                {slotSaveSuccess && (
-                  <span className="text-xs text-emerald-600 font-bold flex items-center gap-1">
-                    <IconCheckCircle size={14} className="w-3.5 h-3.5 text-emerald-600" />
-                    Configuration Saved!
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={handleSaveSlotConfig}
-                  disabled={savingSlotConfig || generatedSlots.length === 0}
-                  className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl shadow-sm transition-all active:scale-95 flex items-center gap-2"
-                >
-                  <IconCheckCircle size={16} className="w-4 h-4" />
-                  <span>{savingSlotConfig ? 'Saving Configuration...' : 'Save Slot Configuration'}</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Student Penalties & Account Suspensions */}
-      <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 md:p-8 shadow-sm flex flex-col">
-        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 mb-6">
-          <div>
-            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-              <IconAlertTriangle size={20} className="w-5 h-5 text-amber-600 shrink-0" />
-              <span>Student No-Show Penalties &amp; Suspensions</span>
-            </h2>
-            <p className="text-xs text-slate-500 mt-1">
-              Students receive 1 strike per missed pickup. 2 strikes trigger an automatic 3-day account deactivation.
-            </p>
-          </div>
-          <span className="text-xs font-semibold px-3 py-1 bg-slate-100 text-slate-600 rounded-full w-fit">
-            {penalizedStudents.length} {penalizedStudents.length === 1 ? 'Student' : 'Students'} with records
-          </span>
-        </div>
-
-        {penaltiesLoading ? (
-          <div className="text-slate-500 text-sm py-4">Loading student penalty records...</div>
-        ) : penalizedStudents.length === 0 ? (
-          <div className="bg-slate-50 border border-slate-100 rounded-2xl p-6 text-center text-slate-500 text-sm flex items-center justify-center gap-2">
-            <IconSparkles size={18} className="w-4.5 h-4.5 text-emerald-500 shrink-0" />
-            <span>All clean! No students currently have active strikes or suspensions.</span>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
-                  <th className="py-3 px-4">Student</th>
-                  <th className="py-3 px-4">ID Number</th>
-                  <th className="py-3 px-4">Active Strikes</th>
-                  <th className="py-3 px-4">Account Status</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-sm">
-                {penalizedStudents.map(student => {
-                  const isSuspended = !!(student.suspended_until && new Date(student.suspended_until) > new Date());
-                  return (
-                    <tr key={student.id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="py-3 px-4 font-semibold text-slate-800">{student.name || 'Unnamed'}</td>
-                      <td className="py-3 px-4 text-slate-500 text-xs font-mono">{student.id_number || 'N/A'}</td>
-                      <td className="py-3 px-4">
-                        <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${student.strike_count > 0 ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'}`}>
-                          {student.strike_count} / 2 Strikes
-                        </span>
-                      </td>
-                      <td className="py-3 px-4">
-                        {isSuspended ? (
-                          <div className="flex flex-col">
-                            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-red-100 text-red-700 w-fit flex items-center gap-1">
-                              <IconBan size={12} className="w-3 h-3 text-red-600 shrink-0" />
-                              <span>Suspended (3-Day Penalty)</span>
-                            </span>
-                            <span className="text-[11px] text-slate-400 mt-0.5">
-                              Until: {new Date(student.suspended_until).toLocaleDateString()} {new Date(student.suspended_until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 w-fit">
-                            Active
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-3 px-4 text-right">
-                        <button
-                          onClick={() => handleResetStudentStrikes(student.id, student.name || 'Student')}
-                          className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition-colors active:scale-95"
-                          title="Clear strikes and lift any active suspension"
-                        >
-                          Clear & Unsuspend
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-
     </div>
-  );
+  ) : (
+    /* Executive Canteen Operations Hub (Shown on main /canteen-admin) */
+    <>
+      {/* Welcome Banner */}
+      <div className="bg-emerald-600 rounded-[2rem] p-6 sm:p-8 text-white shadow-sm relative overflow-hidden">
+        <span className="px-3 py-1 bg-emerald-500 text-xs font-bold uppercase tracking-wider rounded-full border border-emerald-400">
+          Canteen Admin
+        </span>
+        <h1 className="text-2xl sm:text-3xl font-extrabold mt-4 leading-tight">Welcome, {profile?.name || 'Admin'}</h1>
+        <p className="mt-2 text-emerald-100 max-w-2xl text-xs sm:text-sm leading-relaxed">
+          Executive canteen operations hub. Select any module from the navigation sidebar or quick cards below to manage orders, menu items, kitchen staff, and customer reviews.
+        </p>
+      </div>
+
+      {/* Today's Summary */}
+      <div className="bg-white border border-slate-200 rounded-[2rem] p-5 sm:p-7 shadow-xs">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold text-slate-800">Today's Summary</h2>
+          <span className="text-xs font-semibold text-slate-500">Live Shifts</span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+          <div className="p-5 bg-blue-50/80 border border-blue-100/80 rounded-2xl flex flex-col items-center">
+            <span className="text-3xl font-black text-blue-700">{stats.placed}</span>
+            <span className="text-xs font-bold text-blue-600 uppercase tracking-wide mt-1">Total Orders</span>
+          </div>
+          <div className="p-5 bg-emerald-50/80 border border-emerald-100/80 rounded-2xl flex flex-col items-center">
+            <span className="text-3xl font-black text-emerald-700">{stats.collected}</span>
+            <span className="text-xs font-bold text-emerald-600 uppercase tracking-wide mt-1">Collected</span>
+          </div>
+          <div className="p-5 bg-rose-50/80 border border-rose-100/80 rounded-2xl flex flex-col items-center">
+            <span className="text-3xl font-black text-rose-700">{stats.rejected}</span>
+            <span className="text-xs font-bold text-rose-600 uppercase tracking-wide mt-1">Rejected / Cancelled</span>
+          </div>
+        </div>
+      </div>
+
+      {/* 5 Interactive Hub Cards (Matching University Admin Pattern) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {/* Card 1: Order List */}
+        <div className="bg-white border border-slate-200 rounded-[2rem] p-6 shadow-xs flex flex-col justify-between hover:shadow-md transition">
+          <div>
+            <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-700 flex items-center justify-center mb-4 border border-blue-200/60">
+              <ClipboardList size={24} />
+            </div>
+            <div className="flex items-baseline justify-between mb-1">
+              <h3 className="font-extrabold text-slate-800 text-lg">Order List</h3>
+              <span className="text-2xl font-black text-slate-900">{allOrders.length}</span>
+            </div>
+            <p className="text-slate-500 text-xs mb-4">
+              Real-time order statuses, pickup time verification, and fulfillment stages.
+            </p>
+          </div>
+          <Link
+            to="/canteen-admin/orders"
+            className="w-full py-2.5 px-4 bg-slate-50 hover:bg-emerald-50 text-emerald-600 font-bold text-xs rounded-xl flex items-center justify-between border border-slate-200/80 hover:border-emerald-200 transition"
+          >
+            <span>Inspect Orders</span>
+            <ArrowRight size={14} />
+          </Link>
+        </div>
+
+        {/* Card 2: Manage Menu */}
+        <div className="bg-white border border-slate-200 rounded-[2rem] p-6 shadow-xs flex flex-col justify-between hover:shadow-md transition">
+          <div>
+            <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-700 flex items-center justify-center mb-4 border border-amber-200/60">
+              <Utensils size={24} />
+            </div>
+            <div className="flex items-baseline justify-between mb-1">
+              <h3 className="font-extrabold text-slate-800 text-lg">Manage Menu</h3>
+              <span className="text-2xl font-black text-slate-900">{menuItems.length}</span>
+            </div>
+            <p className="text-slate-500 text-xs mb-4">
+              {menuItems.filter(i => !i.is_sold_out).length} active items currently in stock and available for ordering.
+            </p>
+          </div>
+          <Link
+            to="/canteen-admin/menu"
+            className="w-full py-2.5 px-4 bg-slate-50 hover:bg-emerald-50 text-emerald-600 font-bold text-xs rounded-xl flex items-center justify-between border border-slate-200/80 hover:border-emerald-200 transition"
+          >
+            <span>Configure Menu</span>
+            <ArrowRight size={14} />
+          </Link>
+        </div>
+
+        {/* Card 3: Weekly Analytics */}
+        <div className="bg-white border border-slate-200 rounded-[2rem] p-6 shadow-xs flex flex-col justify-between hover:shadow-md transition">
+          <div>
+            <div className="w-12 h-12 rounded-2xl bg-purple-50 text-purple-700 flex items-center justify-center mb-4 border border-purple-200/60">
+              <BarChart3 size={24} />
+            </div>
+            <div className="flex items-baseline justify-between mb-1">
+              <h3 className="font-extrabold text-slate-800 text-lg">Weekly Analytics</h3>
+              <span className="text-2xl font-black text-slate-900">
+                {analytics.mostSold.reduce((acc, i) => acc + i.count, 0)}
+              </span>
+            </div>
+            <p className="text-slate-500 text-xs mb-4">
+              {analytics.mostSold.length > 0
+                ? `Top seller: "${analytics.mostSold[0]?.name}" (${analytics.mostSold[0]?.count} sold)`
+                : 'Track kitchen demand velocity and sales performance.'}
+            </p>
+          </div>
+          <Link
+            to="/canteen-admin/analytics"
+            className="w-full py-2.5 px-4 bg-slate-50 hover:bg-emerald-50 text-emerald-600 font-bold text-xs rounded-xl flex items-center justify-between border border-slate-200/80 hover:border-emerald-200 transition"
+          >
+            <span>View Analytics</span>
+            <ArrowRight size={14} />
+          </Link>
+        </div>
+
+        {/* Card 4: Manage Staff & Penalties */}
+        <div className="bg-white border border-slate-200 rounded-[2rem] p-6 shadow-xs flex flex-col justify-between hover:shadow-md transition">
+          <div>
+            <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-700 flex items-center justify-center mb-4 border border-indigo-200/60">
+              <Users size={24} />
+            </div>
+            <div className="flex items-baseline justify-between mb-1">
+              <h3 className="font-extrabold text-slate-800 text-lg">Staff &amp; Penalties</h3>
+              <span className="text-2xl font-black text-slate-900">{staffList.length}</span>
+            </div>
+            <p className="text-slate-500 text-xs mb-4">
+              {penalizedStudents.length > 0
+                ? `${penalizedStudents.length} student(s) currently flagged with no-show strikes.`
+                : 'Kitchen staff credentials and student no-show rules.'}
+            </p>
+          </div>
+          <Link
+            to="/canteen-admin/staff"
+            className="w-full py-2.5 px-4 bg-slate-50 hover:bg-emerald-50 text-emerald-600 font-bold text-xs rounded-xl flex items-center justify-between border border-slate-200/80 hover:border-emerald-200 transition"
+          >
+            <span>Staff & Strike Controls</span>
+            <ArrowRight size={14} />
+          </Link>
+        </div>
+
+        {/* Card 5: Student Feedback & Reviews */}
+        <div className="bg-white border border-slate-200 rounded-[2rem] p-6 shadow-xs flex flex-col justify-between hover:shadow-md transition sm:col-span-2">
+          <div>
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-700 flex items-center justify-center mb-4 border border-rose-200/60">
+              <MessageSquare size={24} />
+            </div>
+            <div className="flex items-baseline justify-between mb-1">
+              <h3 className="font-extrabold text-slate-800 text-lg">Student Feedback &amp; Reviews</h3>
+              <span className="text-2xl font-black text-slate-900">{reviews.length}</span>
+            </div>
+            <p className="text-slate-500 text-xs mb-4">
+              Read student dish reviews, quality feedback, and publish kitchen responses.
+            </p>
+          </div>
+          <Link
+            to="/canteen-admin/reviews"
+            className="w-full py-2.5 px-4 bg-slate-50 hover:bg-emerald-50 text-emerald-600 font-bold text-xs rounded-xl flex items-center justify-between border border-slate-200/80 hover:border-emerald-200 transition"
+          >
+            <span>Inspect Feedback</span>
+            <ArrowRight size={14} />
+          </Link>
+        </div>
+      </div>
+    </>
+  )}
+</div>
+);
 }

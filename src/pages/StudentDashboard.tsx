@@ -20,12 +20,8 @@ import {
 } from '../components/Icons';
 import { QRCodeSVG } from '../components/QRCode';
 import { calculateOrderLedger } from '../lib/ledger';
-import {
-  CanteenTaxConfig,
-  TaxableCartItem,
-  DEFAULT_CANTEEN_TAX_CONFIG,
-  fetchCanteenTaxConfig,
-} from '../lib/taxService';
+import { formatErrorMessage } from '../utils/validation';
+import { Lock, Radio } from 'lucide-react';
 
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 type Order = Database['public']['Tables']['orders']['Row'];
@@ -50,6 +46,10 @@ import {
   LunchSlotConfig,
   LunchSlot,
   DEFAULT_LUNCH_SLOT_CONFIG,
+  getAvailableServiceDates,
+  getNextFeasibleServiceDate,
+  getISTDateTime,
+  AvailableServiceDate,
 } from '../lib/lunchSlots';
 import {
   calculateLocalOrderSchedule,
@@ -75,12 +75,27 @@ export default function StudentDashboard() {
   const [foodTypeFilter, setFoodTypeFilter] = useState<'ALL' | 'VEG' | 'NON_VEG'>('ALL');
   const [categoryFilter, setCategoryFilter] = useState<'ALL' | 'PACKED_FOOD' | 'MEALS' | 'DRINKS'>('ALL');
 
+  // Date-Aware Service Scheduling State
+  const [selectedDate, setSelectedDate] = useState(() => {
+    return getNextFeasibleServiceDate(Date.now(), DEFAULT_LUNCH_SLOT_CONFIG, 10).dateStr;
+  });
+
   const getInitialPickupTime = () => {
-    const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-    const totalMin = now.getHours() * 60 + now.getMinutes();
-    const nextFeasible = totalMin < 720 ? 720 : Math.ceil((totalMin + 15) / 5) * 5;
-    const clamped = Math.min(840, Math.max(720, nextFeasible));
-    return minutesToTimeString(clamped);
+    const nowIST = getISTDateTime(Date.now());
+    const nextFeasible = getNextFeasibleServiceDate(Date.now(), DEFAULT_LUNCH_SLOT_CONFIG, 10);
+    const isToday = nextFeasible.dateStr === nowIST.dateStr;
+    const startMin = 720; // 12:00
+    const endMin = 840;   // 14:00
+
+    if (!isToday) {
+      return minutesToTimeString(startMin);
+    }
+
+    const earliest = Math.max(startMin, nowIST.totalMinutes + 15);
+    if (earliest <= endMin) {
+      return minutesToTimeString(earliest);
+    }
+    return minutesToTimeString(startMin);
   };
 
   const [cart, setCart] = useState<{ item: MenuItem, quantity: number }[]>([]);
@@ -90,6 +105,16 @@ export default function StudentDashboard() {
   const [cartOpen, setCartOpen] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
   const [currentTime, setCurrentTime] = useState(Date.now());
+
+  // Close cart on Escape key press
+  useEffect(() => {
+    if (!cartOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setCartOpen(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [cartOpen]);
 
   // Periodically refresh current time every 30s to dynamically update slot cutoffs
   useEffect(() => {
@@ -120,7 +145,6 @@ export default function StudentDashboard() {
 
   // Configurable Lunch Slot Management State
   const [slotConfig, setSlotConfig] = useState<LunchSlotConfig>(DEFAULT_LUNCH_SLOT_CONFIG);
-  const [taxConfig, setTaxConfig] = useState<CanteenTaxConfig>(DEFAULT_CANTEEN_TAX_CONFIG);
 
   useEffect(() => {
     let isMounted = true;
@@ -130,24 +154,13 @@ export default function StudentDashboard() {
       if (isMounted) setSlotConfig(cfg);
     });
 
-    fetchCanteenTaxConfig(canteenId || undefined).then(tcfg => {
-      if (isMounted) setTaxConfig(tcfg);
-    });
-
     const handleConfigUpdate = (e: any) => {
       if (e.detail && isMounted) {
         setSlotConfig(e.detail);
       }
     };
 
-    const handleTaxConfigUpdate = (e: any) => {
-      if (e.detail && isMounted) {
-        setTaxConfig(e.detail);
-      }
-    };
-
     window.addEventListener('lunch_slot_config_updated', handleConfigUpdate);
-    window.addEventListener('canteen_tax_config_updated', handleTaxConfigUpdate);
 
     const slotSub = supabase
       .channel('public:lunch_slot_configs')
@@ -158,21 +171,10 @@ export default function StudentDashboard() {
       })
       .subscribe();
 
-    const taxSub = supabase
-      .channel('public:canteen_tax_configs')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'canteen_tax_configs' }, () => {
-        fetchCanteenTaxConfig(canteenId || undefined).then(tcfg => {
-          if (isMounted) setTaxConfig(tcfg);
-        });
-      })
-      .subscribe();
-
     return () => {
       isMounted = false;
       window.removeEventListener('lunch_slot_config_updated', handleConfigUpdate);
-      window.removeEventListener('canteen_tax_config_updated', handleTaxConfigUpdate);
       slotSub.unsubscribe();
-      taxSub.unsubscribe();
     };
   }, [cart[0]?.item?.canteen_id, profile?.canteen_id]);
 
@@ -180,7 +182,8 @@ export default function StudentDashboard() {
     return generateSlotsFromConfig(slotConfig);
   }, [slotConfig]);
 
-  const isLunchClosedForToday = !slotConfig.isLunchEnabled;
+  const isTodayServiceEnded = currentISTMinutes >= parseTimeToMinutes(slotConfig.serviceEndTime || '14:00');
+  const isLunchClosedForToday = !slotConfig.isLunchEnabled || isTodayServiceEnded;
 
   // Helper to determine slot availability
   const getSlotAvailability = (slotValue: string) => {
@@ -203,6 +206,12 @@ export default function StudentDashboard() {
     }));
   }, [cart, slotConfig.defaultPrepTimeMinutes]);
 
+  // Available service dates based on canteen business rules
+  const availableServiceDates = useMemo(() => {
+    const prepDuration = calculateOrderPrepDuration(scheduledCartItems, slotConfig.defaultPrepTimeMinutes || 10);
+    return getAvailableServiceDates(currentTime, slotConfig, prepDuration, 3);
+  }, [currentTime, slotConfig, scheduledCartItems]);
+
   // Real-time backend-aligned smart scheduling calculation:
   // Planned Prep Start Time = Requested Pickup Time - Estimated Prep Duration
   const smartSchedule = useMemo(() => {
@@ -210,31 +219,34 @@ export default function StudentDashboard() {
       pickupTime,
       scheduledCartItems,
       slotConfig,
-      currentISTMinutes
+      currentISTMinutes,
+      selectedDate,
+      currentTime
     );
-  }, [pickupTime, scheduledCartItems, slotConfig, currentISTMinutes]);
+  }, [pickupTime, scheduledCartItems, slotConfig, currentISTMinutes, selectedDate, currentTime]);
 
   const suggestedQuickSlots = useMemo(() => {
     const startMin = parseTimeToMinutes(slotConfig.serviceStartTime || '12:00');
     const endMin = parseTimeToMinutes(slotConfig.serviceEndTime || '14:00');
     const prepDuration = calculateOrderPrepDuration(scheduledCartItems, slotConfig.defaultPrepTimeMinutes || 10);
-    const earliestFeasibleMin = Math.max(startMin, currentISTMinutes + prepDuration);
+    const todayDateStr = getISTDateTime(currentTime).dateStr;
+    const isToday = selectedDate === todayDateStr;
+
+    const earliestFeasibleMin = isToday
+      ? Math.max(startMin, currentISTMinutes + prepDuration)
+      : startMin;
+
+    if (isToday && earliestFeasibleMin > endMin) {
+      return [];
+    }
 
     const list: string[] = [];
-    if (earliestFeasibleMin <= endMin) {
-      const firstSlot = Math.ceil(earliestFeasibleMin / 15) * 15;
-      for (let m = firstSlot; m <= endMin && list.length < 6; m += 15) {
-        list.push(minutesToTimeString(m));
-      }
-    }
-
-    if (list.length === 0) {
-      for (let m = startMin + 15; m <= endMin && list.length < 6; m += 15) {
-        list.push(minutesToTimeString(m));
-      }
+    const firstSlot = Math.max(startMin, Math.ceil(earliestFeasibleMin / 15) * 15);
+    for (let m = firstSlot; m <= endMin && list.length < 6; m += 15) {
+      list.push(minutesToTimeString(m));
     }
     return list;
-  }, [slotConfig, currentISTMinutes, scheduledCartItems]);
+  }, [slotConfig, currentISTMinutes, scheduledCartItems, selectedDate, currentTime]);
 
   useEffect(() => {
     if (smartSchedule.isValid && error) {
@@ -464,22 +476,7 @@ export default function StudentDashboard() {
   const cartTotalItems = cart.reduce((acc, c) => acc + c.quantity, 0);
   const cartTotalPrice = cart.reduce((acc, c) => acc + (Number(c.item.price || 0) * c.quantity), 0);
 
-  // Convert cart items for item-level tax calculation
-  const taxableCartItems: TaxableCartItem[] = useMemo(() => {
-    return cart.map(c => ({
-      id: c.item.id,
-      name: c.item.name,
-      quantity: c.quantity,
-      price: Number(c.item.price || 0),
-      gstRatePercent: (c.item as any).gst_rate_percent,
-      hsnCode: (c.item as any).hsn_code,
-    }));
-  }, [cart]);
-
-  // Centralized, tax-aware Order Ledger
-  const ledger = useMemo(() => {
-    return calculateOrderLedger(cartTotalPrice, taxableCartItems, taxConfig);
-  }, [cartTotalPrice, taxableCartItems, taxConfig]);
+  const ledger = useMemo(() => calculateOrderLedger(cartTotalPrice), [cartTotalPrice]);
 
   const addToCart = (item: MenuItem) => {
     if (isSuspended) {
@@ -543,18 +540,6 @@ export default function StudentDashboard() {
 
   const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSunday) {
-      setError('Orders cannot be placed on Sundays. The canteen is closed.');
-      return;
-    }
-    if (isBeforeOpeningTime) {
-      setError('Lunch booking opens at 9:30 AM in the morning.');
-      return;
-    }
-    if (isLunchClosedForToday) {
-      setError('Lunch ordering for today is closed. Orders must be placed at least 30 minutes before the pickup slot.');
-      return;
-    }
     if (cart.length === 0) return;
 
     if (!smartSchedule.isValid) {
@@ -690,6 +675,7 @@ export default function StudentDashboard() {
                   total_amount: ledger.gross_payable,
                   ledger: ledger,
                   pickup_time: finalPickupTime,
+                  pickup_date: selectedDate,
                   requested_pickup_time: smartSchedule.requestedPickupTime,
                   estimated_prep_duration_minutes: smartSchedule.estimatedPrepDurationMinutes,
                   planned_prep_start_time: smartSchedule.plannedPrepStartTime,
@@ -724,6 +710,7 @@ export default function StudentDashboard() {
                 const { data: payRec } = await (supabase as any).from('payments').insert({
                   user_id: profile?.id,
                   tenant_id: tenantId,
+                  canteen_id: canteenId,
                   amount: ledger.gross_payable,
                   provider_order_id: idempotencyKey,
                   provider_payment_id: paymentId,
@@ -740,6 +727,10 @@ export default function StudentDashboard() {
                 canteen_id: canteenId,
                 tenant_id: tenantId,
                 pickup_time: finalPickupTime,
+                requested_pickup_time: smartSchedule.requestedPickupTime,
+                planned_prep_start_time: smartSchedule.plannedPrepStartTime,
+                target_ready_by_time: smartSchedule.targetReadyByTime,
+                estimated_prep_duration_minutes: smartSchedule.estimatedPrepDurationMinutes,
                 is_takeaway: false,
                 status: 'PLACED',
                 idempotency_key: idempotencyKey,
@@ -773,6 +764,7 @@ export default function StudentDashboard() {
                     order_id: createdOrderId,
                     student_id: profile?.id,
                     canteen_id: canteenId,
+                    tenant_id: tenantId,
                     food_subtotal: ledger.food_subtotal,
                     commission_fee: ledger.commission_fee,
                     target_net: ledger.target_net,
@@ -876,7 +868,7 @@ export default function StudentDashboard() {
     if (error) {
       showAlert({
         title: 'Submission Failed',
-        message: 'Failed to submit review. Please try again.',
+        message: formatErrorMessage(error, 'Failed to submit review. Please try again.'),
         type: 'error'
       });
     } else {
@@ -985,18 +977,6 @@ export default function StudentDashboard() {
                           </span>
                         )}
                       </div>
-                      {((o as any).tax_snapshot || (o as any).total_tax_amount) && (
-                        <div className="text-xs text-slate-500 mt-1 flex flex-wrap gap-2 items-center">
-                          <span className="bg-slate-100 px-2 py-0.5 rounded text-slate-700 font-medium">
-                            GST ({(o as any).tax_snapshot?.effective_food_gst_rate || 5}%): ₹{Number((o as any).total_tax_amount || (o as any).tax_snapshot?.food_gst_amount || 0).toFixed(2)}
-                          </span>
-                          {(o as any).tax_snapshot?.cgst_amount !== undefined && (
-                            <span className="text-[11px] text-slate-400">
-                              (CGST: ₹{Number((o as any).tax_snapshot.cgst_amount).toFixed(2)} + SGST: ₹{Number((o as any).tax_snapshot.sgst_amount).toFixed(2)})
-                            </span>
-                          )}
-                        </div>
-                      )}
                     </div>
                     <div className={`px-3 py-1 rounded-full text-xs font-bold border ${o.status === 'COLLECTED' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
                       {o.status}
@@ -1149,7 +1129,10 @@ export default function StudentDashboard() {
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400"></span>
                   </span>
-                  <span className="tracking-wide font-mono">🔴 LIVE PASS • {liveTickerTime}</span>
+                  <span className="tracking-wide font-mono inline-flex items-center gap-1.5">
+                    <Radio size={12} className="text-emerald-400 shrink-0" />
+                    <span>LIVE PASS • {liveTickerTime}</span>
+                  </span>
                 </div>
 
                 {/* High-Contrast QR Code Card with Pulsing Security Halo */}
@@ -1238,7 +1221,10 @@ export default function StudentDashboard() {
                   Your food is currently being cooked and boxed.
                 </p>
                 <div className="mt-4 px-3 py-2 bg-indigo-950/40 rounded-2xl border border-indigo-300/20 text-[11px] text-indigo-200 flex items-center gap-2">
-                  <span className="text-amber-300 font-bold">🔒 Secure Pass</span>
+                  <span className="text-amber-300 font-bold inline-flex items-center gap-1">
+                    <Lock size={12} className="shrink-0" />
+                    <span>Secure Pass</span>
+                  </span>
                   <span>• Unlocks automatically when READY</span>
                 </div>
               </div>
@@ -1269,20 +1255,6 @@ export default function StudentDashboard() {
                 </div>
               )}
             </div>
-
-            {/* Confirmed Bill & GST Summary */}
-            {((activeOrder as any).tax_snapshot || (activeOrder as any).total_tax_amount) && (
-              <div className="mt-3 pt-3 border-t border-indigo-400/20 flex flex-wrap items-center justify-between gap-2 text-xs text-indigo-100">
-                <span className="font-semibold">
-                  Bill Tax ({(activeOrder as any).tax_snapshot?.effective_food_gst_rate || 5}% GST): ₹{Number((activeOrder as any).total_tax_amount || (activeOrder as any).tax_snapshot?.food_gst_amount || 0).toFixed(2)}
-                </span>
-                {(activeOrder as any).tax_snapshot?.cgst_amount !== undefined && (
-                  <span className="text-[11px] text-indigo-200 font-mono">
-                    CGST: ₹{Number((activeOrder as any).tax_snapshot.cgst_amount).toFixed(2)} | SGST: ₹{Number((activeOrder as any).tax_snapshot.sgst_amount).toFixed(2)}
-                  </span>
-                )}
-              </div>
-            )}
           </div>
         </div>
       ) : (
@@ -1550,6 +1522,14 @@ export default function StudentDashboard() {
             )}
           </div>
 
+          {/* Background Blur Overlay when Cart is Open */}
+          <div
+            onClick={() => setCartOpen(false)}
+            aria-hidden="true"
+            className={`fixed inset-0 bg-slate-950/40 backdrop-blur-md transition-opacity duration-300 z-40 ${cartOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+              }`}
+          />
+
           {/* Floating Bottom Cart Bar */}
           <div
             style={{
@@ -1577,7 +1557,7 @@ export default function StudentDashboard() {
                   background: '#0f172a',
                   borderRadius: cartOpen ? '1.5rem 1.5rem 0 0' : '1.5rem',
                   overflow: 'hidden',
-                  boxShadow: '0 -8px 40px rgba(0,0,0,0.25)',
+                  boxShadow: cartOpen ? '0 -10px 50px rgba(0,0,0,0.5)' : '0 -8px 40px rgba(0,0,0,0.25)',
                   margin: cartOpen ? '0' : '0 1rem 1rem',
                   transition: 'all 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
                 }}
@@ -1780,6 +1760,53 @@ export default function StudentDashboard() {
                           </span>
                         </div>
 
+                        {/* Service Date Selector */}
+                        <div style={{ marginBottom: '0.75rem' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.375rem' }}>
+                            <label style={{ fontSize: '0.6875rem', color: '#cbd5e1', fontWeight: 600 }}>
+                              Service Date
+                            </label>
+                            <span style={{ fontSize: '0.625rem', color: '#818cf8', fontWeight: 600 }}>
+                              {smartSchedule.serviceDateFormatted}
+                            </span>
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.max(1, availableServiceDates.length)}, 1fr)`, gap: '0.375rem' }}>
+                            {availableServiceDates.map(d => {
+                              const isSelected = selectedDate === d.dateStr;
+                              return (
+                                <button
+                                  key={d.dateStr}
+                                  type="button"
+                                  onClick={() => {
+                                    if (d.isBookable) {
+                                      setSelectedDate(d.dateStr);
+                                      if (error) setError('');
+                                    }
+                                  }}
+                                  disabled={!d.isBookable}
+                                  title={d.unbookableReason || undefined}
+                                  style={{
+                                    padding: '0.45rem 0.25rem',
+                                    borderRadius: '0.5rem',
+                                    border: isSelected ? '1px solid #6366f1' : '1px solid #334155',
+                                    background: isSelected ? '#4f46e5' : d.isBookable ? '#0f172a' : 'rgba(30,41,59,0.5)',
+                                    color: isSelected ? 'white' : d.isBookable ? '#e2e8f0' : '#64748b',
+                                    cursor: d.isBookable ? 'pointer' : 'not-allowed',
+                                    opacity: d.isBookable ? 1 : 0.5,
+                                    textAlign: 'center',
+                                    transition: 'all 0.15s ease',
+                                  }}
+                                >
+                                  <div style={{ fontSize: '0.72rem', fontWeight: 700 }}>{d.dayName}</div>
+                                  <div style={{ fontSize: '0.6rem', color: isSelected ? '#e0e7ff' : d.isBookable ? '#94a3b8' : '#64748b' }}>
+                                    {d.isBookable ? d.displayLabel : 'Closed'}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
                         {/* Preferred Time Picker supporting any minute (12:17, 12:26, 12:43 etc.) */}
                         <div style={{ marginBottom: '0.625rem' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -1795,7 +1822,7 @@ export default function StudentDashboard() {
                                   setPickupTime(e.target.value);
                                   if (error) setError('');
                                 }}
-                                disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday}
+                                disabled={isSuspended}
                                 style={{
                                   width: '100%',
                                   background: '#0f172a',
@@ -1805,8 +1832,8 @@ export default function StudentDashboard() {
                                   borderRadius: '0.5rem',
                                   fontSize: '0.925rem',
                                   fontWeight: 700,
-                                  cursor: (isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday) ? 'not-allowed' : 'pointer',
-                                  opacity: (isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday) ? 0.6 : 1,
+                                  cursor: isSuspended ? 'not-allowed' : 'pointer',
+                                  opacity: isSuspended ? 0.6 : 1,
                                 }}
                               />
                             </div>
@@ -1833,47 +1860,41 @@ export default function StudentDashboard() {
                             Quick Suggestions (or pick any exact minute above):
                           </span>
                           <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap' }}>
-                            {suggestedQuickSlots.map(t => (
-                              <button
-                                key={t}
-                                type="button"
-                                onClick={() => {
-                                  setPickupTime(t);
-                                  if (error) setError('');
-                                }}
-                                disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday}
-                                style={{
-                                  background: (normalizeTimeTo24h(pickupTime) === t) ? '#4f46e5' : '#0f172a',
-                                  color: (normalizeTimeTo24h(pickupTime) === t) ? 'white' : '#94a3b8',
-                                  border: `1px solid ${(normalizeTimeTo24h(pickupTime) === t) ? '#6366f1' : '#334155'}`,
-                                  borderRadius: '0.375rem',
-                                  padding: '2px 7px',
-                                  fontSize: '0.6875rem',
-                                  fontWeight: 600,
-                                  cursor: 'pointer',
-                                  transition: 'all 0.15s ease'
-                                }}
-                              >
-                                {formatSingleTime(t)}
-                              </button>
-                            ))}
+                            {suggestedQuickSlots.length > 0 ? (
+                              suggestedQuickSlots.map(t => (
+                                <button
+                                  key={t}
+                                  type="button"
+                                  onClick={() => {
+                                    setPickupTime(t);
+                                    if (error) setError('');
+                                  }}
+                                  disabled={isSuspended}
+                                  style={{
+                                    background: (normalizeTimeTo24h(pickupTime) === t) ? '#4f46e5' : '#0f172a',
+                                    color: (normalizeTimeTo24h(pickupTime) === t) ? 'white' : '#94a3b8',
+                                    border: `1px solid ${(normalizeTimeTo24h(pickupTime) === t) ? '#6366f1' : '#334155'}`,
+                                    borderRadius: '0.375rem',
+                                    padding: '2px 7px',
+                                    fontSize: '0.6875rem',
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s ease'
+                                  }}
+                                >
+                                  {formatSingleTime(t)}
+                                </button>
+                              ))
+                            ) : (
+                              <span style={{ fontSize: '0.6875rem', color: '#94a3b8', fontStyle: 'italic', padding: '0.25rem 0' }}>
+                                No pickup times remain today. Choose the next available service date above.
+                              </span>
+                            )}
                           </div>
                         </div>
 
                         {/* Smart Preparation Scheduling Breakdown Box */}
-                        {isSunday ? (
-                          <div style={{ padding: '0.5rem', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '0.5rem', color: '#f87171', fontSize: '0.72rem' }}>
-                            Canteen is closed on Sundays.
-                          </div>
-                        ) : isBeforeOpeningTime ? (
-                          <div style={{ padding: '0.5rem', background: 'rgba(234,179,8,0.1)', border: '1px solid rgba(234,179,8,0.2)', borderRadius: '0.5rem', color: '#facc15', fontSize: '0.72rem' }}>
-                            Lunch booking opens at 9:30 AM.
-                          </div>
-                        ) : isLunchClosedForToday ? (
-                          <div style={{ padding: '0.5rem', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '0.5rem', color: '#f87171', fontSize: '0.72rem' }}>
-                            Lunch service is currently closed for today.
-                          </div>
-                        ) : smartSchedule.isValid ? (
+                        {smartSchedule.isValid ? (
                           <div style={{
                             padding: '0.75rem',
                             background: 'rgba(99,102,241,0.08)',
@@ -1903,7 +1924,7 @@ export default function StudentDashboard() {
                               </div>
                             </div>
                             <p style={{ margin: '0.5rem 0 0', fontSize: '0.65rem', color: '#94a3b8', textAlign: 'center' }}>
-                              Arrival at {smartSchedule.pickupTimeFormatted} allows fresh preparation starting at {smartSchedule.prepStartFormatted}.
+                              Arrival on {smartSchedule.serviceDateFormatted} at {smartSchedule.pickupTimeFormatted} allows fresh preparation starting at {smartSchedule.prepStartFormatted}.
                             </p>
                           </div>
                         ) : (
@@ -1920,7 +1941,12 @@ export default function StudentDashboard() {
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setPickupTime(smartSchedule.suggestedPickupTime!);
+                                  if (smartSchedule.suggestedDateStr) {
+                                    setSelectedDate(smartSchedule.suggestedDateStr);
+                                  }
+                                  if (smartSchedule.suggestedPickupTime) {
+                                    setPickupTime(smartSchedule.suggestedPickupTime);
+                                  }
                                   if (error) setError('');
                                 }}
                                 style={{
@@ -1928,7 +1954,7 @@ export default function StudentDashboard() {
                                   color: 'white',
                                   border: 'none',
                                   borderRadius: '0.375rem',
-                                  padding: '4px 8px',
+                                  padding: '5px 10px',
                                   fontSize: '0.7rem',
                                   fontWeight: 700,
                                   cursor: 'pointer',
@@ -1937,7 +1963,9 @@ export default function StudentDashboard() {
                                   gap: '4px'
                                 }}
                               >
-                                Switch to Feasible Time: {smartSchedule.suggestedPickupFormatted}
+                                {smartSchedule.suggestedDateStr && smartSchedule.suggestedDateStr !== selectedDate
+                                  ? `Switch to ${smartSchedule.suggestedDateFormatted || 'Next Date'}: ${smartSchedule.suggestedPickupFormatted}`
+                                  : `Switch to Feasible Time: ${smartSchedule.suggestedPickupFormatted}`}
                               </button>
                             )}
                           </div>
@@ -1946,86 +1974,26 @@ export default function StudentDashboard() {
 
                       {/* Transparent Customer Order Bill */}
                       {cart.length > 0 && (
-                        <div style={{ marginBottom: '1rem', padding: '0.875rem 1rem', background: '#1e293b', borderRadius: '0.75rem', border: '1px solid #334155' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px solid #334155' }}>
-                            <span style={{ color: '#cbd5e1', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                              Tax Invoice / Order Bill
-                            </span>
-                            <span style={{
-                              color: ledger.tax_mode === 'TAX_INCLUSIVE' ? '#34d399' : '#a5b4fc',
-                              fontSize: '0.65rem',
-                              fontWeight: 700,
-                              background: ledger.tax_mode === 'TAX_INCLUSIVE' ? 'rgba(52,211,153,0.15)' : 'rgba(99,102,241,0.15)',
-                              padding: '2px 6px',
-                              borderRadius: '4px'
-                            }}>
-                              {ledger.tax_mode === 'TAX_INCLUSIVE' ? 'Prices Include GST' : 'GST Added to Base'}
-                            </span>
+                        <div style={{ marginBottom: '1rem', padding: '1rem', background: '#1e293b', borderRadius: '0.75rem', border: '1px solid #334155' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>Food Subtotal</span>
+                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem' }}>₹{ledger.food_subtotal.toFixed(2)}</span>
                           </div>
-
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
-                            <span style={{ color: '#94a3b8', fontSize: '0.8125rem' }}>Food Subtotal</span>
-                            <span style={{ color: '#e2e8f0', fontSize: '0.8125rem', fontWeight: 600 }}>₹{ledger.food_subtotal.toFixed(2)}</span>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>Platform Fee (3%)</span>
+                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem' }}>₹{ledger.commission_fee.toFixed(2)}</span>
                           </div>
-
-                          {ledger.tax_mode === 'TAX_INCLUSIVE' && ledger.taxable_food_amount !== undefined && (
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
-                              <span style={{ color: '#64748b', fontSize: '0.72rem', paddingLeft: '0.5rem' }}>↳ Net Taxable Value</span>
-                              <span style={{ color: '#94a3b8', fontSize: '0.72rem' }}>₹{ledger.taxable_food_amount.toFixed(2)}</span>
-                            </div>
-                          )}
-
-                          {/* Itemized GST Breakdown (CGST / SGST / IGST) */}
-                          <div style={{
-                            margin: '0.5rem 0',
-                            padding: '0.5rem 0.625rem',
-                            background: '#0f172a',
-                            borderRadius: '0.5rem',
-                            border: '1px solid #334155'
-                          }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
-                              <span style={{ color: '#a5b4fc', fontSize: '0.7rem', fontWeight: 700 }}>
-                                GST ({ledger.food_gst_rate || 5}%) {ledger.tax_mode === 'TAX_INCLUSIVE' ? 'Included' : 'Levied'}
-                              </span>
-                              <span style={{ color: '#e2e8f0', fontSize: '0.75rem', fontWeight: 700 }}>
-                                ₹{(ledger.food_gst_amount || 0).toFixed(2)}
-                              </span>
-                            </div>
-
-                            {ledger.supply_type === 'INTRA_STATE' ? (
-                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '0.25rem' }}>
-                                <div style={{ fontSize: '0.6875rem', color: '#94a3b8' }}>
-                                  CGST ({ledger.cgst_rate || 2.5}%): <strong style={{ color: '#cbd5e1' }}>₹{(ledger.cgst_amount || 0).toFixed(2)}</strong>
-                                </div>
-                                <div style={{ fontSize: '0.6875rem', color: '#94a3b8', textAlign: 'right' }}>
-                                  SGST ({ledger.sgst_rate || 2.5}%): <strong style={{ color: '#cbd5e1' }}>₹{(ledger.sgst_amount || 0).toFixed(2)}</strong>
-                                </div>
-                              </div>
-                            ) : (
-                              <div style={{ fontSize: '0.6875rem', color: '#94a3b8', marginTop: '0.25rem' }}>
-                                IGST ({ledger.igst_rate || 5}%): <strong style={{ color: '#cbd5e1' }}>₹{(ledger.igst_amount || 0).toFixed(2)}</strong>
-                              </div>
-                            )}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>Payment Gateway Fee</span>
+                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem' }}>₹{ledger.gateway_fee.toFixed(2)}</span>
                           </div>
-
-                          {/* Service & Gateway Fees */}
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
-                            <span style={{ color: '#94a3b8', fontSize: '0.8125rem' }}>Platform Fee (3%)</span>
-                            <span style={{ color: '#e2e8f0', fontSize: '0.8125rem' }}>₹{ledger.commission_fee.toFixed(2)}</span>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem', paddingBottom: '0.75rem', borderBottom: '1px solid #334155' }}>
+                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>GST</span>
+                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>₹0.00 (Included)</span>
                           </div>
-
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px solid #334155' }}>
-                            <span style={{ color: '#94a3b8', fontSize: '0.8125rem' }}>Payment Gateway Fee</span>
-                            <span style={{ color: '#e2e8f0', fontSize: '0.8125rem' }}>₹{ledger.gateway_fee.toFixed(2)}</span>
-                          </div>
-
-                          {/* Grand Total */}
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <div>
-                              <span style={{ color: '#e2e8f0', fontSize: '0.875rem', fontWeight: 600, display: 'block' }}>Total Payable</span>
-                              <span style={{ color: '#64748b', fontSize: '0.625rem' }}>Includes all taxes and fees</span>
-                            </div>
-                            <span style={{ color: '#38bdf8', fontSize: '1.125rem', fontWeight: 800 }}>₹{ledger.gross_payable.toFixed(2)}</span>
+                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem', fontWeight: 600 }}>Total Amount to Pay</span>
+                            <span style={{ color: '#38bdf8', fontSize: '1.125rem', fontWeight: 700 }}>₹{ledger.gross_payable.toFixed(2)}</span>
                           </div>
                         </div>
                       )}
@@ -2147,7 +2115,8 @@ export default function StudentDashboard() {
             <div>
               <div className="inline-flex items-center justify-center gap-1.5 bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-[11px] font-extrabold border border-emerald-200 uppercase tracking-wider mb-1">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
-                <span>🔴 LIVE PASS • {liveTickerTime}</span>
+                <Radio size={12} className="text-emerald-600 shrink-0" />
+                <span>LIVE PASS • {liveTickerTime}</span>
               </div>
               <h3 className="text-2xl font-extrabold text-slate-900 mt-1">Order #{activeOrder.order_number}</h3>
               <p className="text-xs text-slate-500 font-mono mt-0.5">ID: {activeOrder.id.split('-')[0].toUpperCase()}</p>

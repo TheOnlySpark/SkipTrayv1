@@ -1,6 +1,16 @@
 // Smart Preparation Scheduling Engine for SkipTray Canteen
 import { supabase } from './supabase';
-import { formatSingleTime, parseTimeToMinutes, minutesToTimeString, LunchSlotConfig } from './lunchSlots';
+import {
+  formatSingleTime,
+  parseTimeToMinutes,
+  minutesToTimeString,
+  LunchSlotConfig,
+  getISTDateTime,
+  getAvailableServiceDates,
+  getNextFeasibleServiceDate,
+  AvailableServiceDate,
+  DEFAULT_LUNCH_SLOT_CONFIG,
+} from './lunchSlots';
 
 export interface ScheduledCartItem {
   id: string;
@@ -13,9 +23,12 @@ export type ScheduleValidationCode =
   | 'VALID'
   | 'INVALID_FORMAT'
   | 'SERVICE_CLOSED'
+  | 'CLOSED_ON_SUNDAYS'
+  | 'BEFORE_BOOKING_OPENS'
   | 'OUTSIDE_HOURS'
   | 'INSUFFICIENT_LEAD_TIME'
   | 'PAST_TIME'
+  | 'NO_FEASIBLE_TIME_TODAY'
   | 'CAPACITY_EXCEEDED';
 
 export interface OrderScheduleResult {
@@ -25,7 +38,13 @@ export interface OrderScheduleResult {
   statusBadge: string; // e.g. "12:30 PM", "Too Soon", "Past Time", "Outside Hours", "Invalid Time", "Closed"
   error?: string;
   reason?: string; // alias for error
-  requestedPickupTime: string; // ISO string or time string
+  
+  // Date-Aware Service Tracking
+  serviceDateStr: string; // "YYYY-MM-DD" e.g. "2026-10-14"
+  serviceDateFormatted: string; // e.g. "Tomorrow (Wed, 14 Oct)"
+  isServiceDateToday: boolean;
+
+  requestedPickupTime: string; // ISO string e.g. "2026-10-14T12:30:00+05:30"
   pickupTimeStr: string; // "14:00" (clean 24h)
   pickupTimeFormatted: string; // "2:00 PM" (12h display)
   estimatedPrepDurationMinutes: number; // e.g. 14
@@ -33,8 +52,13 @@ export interface OrderScheduleResult {
   prepStartFormatted: string; // "1:46 PM"
   targetReadyByTime: string; // ISO string
   readyByFormatted: string; // "2:00 PM"
-  suggestedPickupTime?: string; // "14:00" (clean 24h)
-  suggestedPickupFormatted?: string; // "2:00 PM"
+
+  // Feasible alternative suggestion (if selected time/date violates rules)
+  suggestedPickupTime?: string; // e.g. "12:15"
+  suggestedPickupFormatted?: string; // e.g. "12:15 PM"
+  suggestedDateStr?: string; // e.g. "2026-10-14"
+  suggestedDateFormatted?: string; // e.g. "Tomorrow"
+
   currentWorkloadCount?: number;
   maxCapacity?: number;
 }
@@ -69,185 +93,246 @@ export function calculateOrderPrepDuration(
 
 /**
  * Client-side calculation & validation of preparation schedule.
- * Provides instant feedback before network round-trips.
+ * Accurately date-aware: evaluates service date, operating hours, preparation lead time, and kitchen capacity.
  */
 export function calculateLocalOrderSchedule(
   pickupTimeStr: string,
   items: ScheduledCartItem[],
-  config: LunchSlotConfig,
-  currentISTMinutes: number,
-  orderDateStr?: string
+  config: LunchSlotConfig = DEFAULT_LUNCH_SLOT_CONFIG,
+  currentISTMinutes?: number,
+  orderDateStr?: string,
+  currentTimeMs = Date.now()
 ): OrderScheduleResult {
+  const prepDuration = calculateOrderPrepDuration(items, config.defaultPrepTimeMinutes || 10);
+  const nowIST = getISTDateTime(currentTimeMs);
+  const activeISTMinutes = typeof currentISTMinutes === 'number' ? currentISTMinutes : nowIST.totalMinutes;
+  const currentDateStr = nowIST.dateStr;
+
+  // Resolve service date
+  const nextFeasible = getNextFeasibleServiceDate(currentTimeMs, config, prepDuration);
+  const selectedDateStr = orderDateStr || nextFeasible.dateStr;
+  const isToday = selectedDateStr === currentDateStr;
+  const isPastDate = selectedDateStr < currentDateStr;
+  const isFutureDate = selectedDateStr > currentDateStr;
+
+  // Compute friendly date label
+  const dateObj = new Date(`${selectedDateStr}T12:00:00+05:30`);
+  const dayOfWeek = dateObj.getDay();
+  const isSunday = dayOfWeek === 0;
+  const dayName = isToday
+    ? 'Today'
+    : isFutureDate && Math.round((new Date(selectedDateStr).getTime() - new Date(currentDateStr).getTime()) / 86400000) === 1
+    ? 'Tomorrow'
+    : dateObj.toLocaleDateString('en-US', { weekday: 'long', timeZone: 'Asia/Kolkata' });
+  const dateMonthStr = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'Asia/Kolkata' });
+  const serviceDateFormatted = `${dayName} (${dateMonthStr})`;
+
+  // Next bookable future date (in case today is unbookable)
+  const nextBookableDate = getAvailableServiceDates(currentTimeMs, config, prepDuration, 5)
+    .find(d => !d.isToday && d.isBookable) || nextFeasible;
+
   const cleanTime = (pickupTimeStr || '').trim();
   const pickupMinutes = parseTimeToMinutes(cleanTime);
-  const prepDuration = calculateOrderPrepDuration(items, config.defaultPrepTimeMinutes || 10);
   const serviceStartMin = parseTimeToMinutes(config.serviceStartTime || '12:00');
   const serviceEndMin = parseTimeToMinutes(config.serviceEndTime || '14:00');
-  const todayStr = orderDateStr || new Date().toISOString().split('T')[0];
 
-  // 1. Invalid or Empty Format
-  if (isNaN(pickupMinutes) || !cleanTime) {
+  // Helper for consistent result building
+  const buildResult = (
+    isValid: boolean,
+    validationCode: ScheduleValidationCode,
+    statusBadge: string,
+    errorMsg?: string,
+    suggestedTime?: string,
+    suggestedDate?: string,
+    suggestedDateName?: string
+  ): OrderScheduleResult => {
+    const norm24h = isNaN(pickupMinutes) ? '' : minutesToTimeString(pickupMinutes);
+    const formattedDisplay = norm24h ? formatSingleTime(norm24h) : '';
+    const plannedStartMin = isNaN(pickupMinutes) ? 0 : pickupMinutes - prepDuration;
+    const requestedPickupIso = norm24h ? `${selectedDateStr}T${norm24h}:00+05:30` : '';
+    const prepStartIso = norm24h ? `${selectedDateStr}T${minutesToTimeString(Math.max(0, plannedStartMin))}:00+05:30` : '';
+
     return {
-      isAvailable: false,
-      isValid: false,
-      validationCode: 'INVALID_FORMAT',
-      statusBadge: 'Invalid Time',
-      error: 'Please choose a valid pickup time (e.g. 12:30 PM).',
-      reason: 'Please choose a valid pickup time (e.g. 12:30 PM).',
-      requestedPickupTime: '',
-      pickupTimeStr: '',
-      pickupTimeFormatted: '',
-      estimatedPrepDurationMinutes: prepDuration,
-      plannedPrepStartTime: '',
-      prepStartFormatted: '',
-      targetReadyByTime: '',
-      readyByFormatted: '',
-    };
-  }
-
-  const normalized24h = minutesToTimeString(pickupMinutes);
-  const formattedDisplay = formatSingleTime(normalized24h);
-  const plannedStartMinutes = pickupMinutes - prepDuration;
-  const requestedPickupIso = `${todayStr}T${normalized24h}:00+05:30`;
-  const prepStartIso = `${todayStr}T${minutesToTimeString(Math.max(0, plannedStartMinutes))}:00+05:30`;
-
-  // 2. Service Closed Check
-  if (config.isLunchEnabled === false) {
-    const err = 'Lunch ordering service is currently closed for today.';
-    return {
-      isAvailable: false,
-      isValid: false,
-      validationCode: 'SERVICE_CLOSED',
-      statusBadge: 'Closed',
-      error: err,
-      reason: err,
+      isAvailable: isValid,
+      isValid,
+      validationCode,
+      statusBadge,
+      error: errorMsg,
+      reason: errorMsg,
+      serviceDateStr: selectedDateStr,
+      serviceDateFormatted,
+      isServiceDateToday: isToday,
       requestedPickupTime: requestedPickupIso,
-      pickupTimeStr: normalized24h,
+      pickupTimeStr: norm24h,
       pickupTimeFormatted: formattedDisplay,
       estimatedPrepDurationMinutes: prepDuration,
       plannedPrepStartTime: prepStartIso,
-      prepStartFormatted: formatSingleTime(minutesToTimeString(Math.max(0, plannedStartMinutes))),
+      prepStartFormatted: norm24h ? formatSingleTime(minutesToTimeString(Math.max(0, plannedStartMin))) : '',
       targetReadyByTime: requestedPickupIso,
       readyByFormatted: formattedDisplay,
+      suggestedPickupTime: suggestedTime,
+      suggestedPickupFormatted: suggestedTime ? formatSingleTime(suggestedTime) : undefined,
+      suggestedDateStr: suggestedDate,
+      suggestedDateFormatted: suggestedDateName,
+      maxCapacity: config.maxConcurrentOrders || 15,
     };
-  }
-
-  // 3. Service Window Check: Before Opening
-  if (pickupMinutes < serviceStartMin) {
-    const err = `Pickup time must be during lunch service hours (${formatSingleTime(config.serviceStartTime)} – ${formatSingleTime(config.serviceEndTime)}).`;
-    return {
-      isAvailable: false,
-      isValid: false,
-      validationCode: 'OUTSIDE_HOURS',
-      statusBadge: 'Outside Hours',
-      error: err,
-      reason: err,
-      requestedPickupTime: requestedPickupIso,
-      pickupTimeStr: normalized24h,
-      pickupTimeFormatted: formattedDisplay,
-      estimatedPrepDurationMinutes: prepDuration,
-      plannedPrepStartTime: prepStartIso,
-      prepStartFormatted: formatSingleTime(minutesToTimeString(Math.max(0, plannedStartMinutes))),
-      targetReadyByTime: requestedPickupIso,
-      readyByFormatted: formattedDisplay,
-      suggestedPickupTime: minutesToTimeString(serviceStartMin),
-      suggestedPickupFormatted: formatSingleTime(config.serviceStartTime),
-    };
-  }
-
-  // 4. Service Window Check: After Closing
-  if (pickupMinutes > serviceEndMin) {
-    const err = `Pickup time cannot be after lunch closing time (${formatSingleTime(config.serviceEndTime)}).`;
-    return {
-      isAvailable: false,
-      isValid: false,
-      validationCode: 'OUTSIDE_HOURS',
-      statusBadge: 'Outside Hours',
-      error: err,
-      reason: err,
-      requestedPickupTime: requestedPickupIso,
-      pickupTimeStr: normalized24h,
-      pickupTimeFormatted: formattedDisplay,
-      estimatedPrepDurationMinutes: prepDuration,
-      plannedPrepStartTime: prepStartIso,
-      prepStartFormatted: formatSingleTime(minutesToTimeString(Math.max(0, plannedStartMinutes))),
-      targetReadyByTime: requestedPickupIso,
-      readyByFormatted: formattedDisplay,
-      suggestedPickupTime: minutesToTimeString(serviceEndMin),
-      suggestedPickupFormatted: formatSingleTime(config.serviceEndTime),
-    };
-  }
-
-  // 5. Past Time Check (Pickup time is already in the past)
-  if (pickupMinutes < currentISTMinutes) {
-    const earliestFeasiblePickupMin = Math.max(serviceStartMin, currentISTMinutes + prepDuration);
-    const cappedPickupMin = Math.min(serviceEndMin, earliestFeasiblePickupMin);
-    const suggestedTimeStr = minutesToTimeString(cappedPickupMin);
-    const err = `Selected time has already passed. Kitchen needs ${prepDuration} minutes to prepare this order. The earliest ready time is ${formatSingleTime(suggestedTimeStr)}.`;
-
-    return {
-      isAvailable: false,
-      isValid: false,
-      validationCode: 'PAST_TIME',
-      statusBadge: 'Past Time',
-      error: err,
-      reason: err,
-      requestedPickupTime: requestedPickupIso,
-      pickupTimeStr: normalized24h,
-      pickupTimeFormatted: formattedDisplay,
-      estimatedPrepDurationMinutes: prepDuration,
-      plannedPrepStartTime: prepStartIso,
-      prepStartFormatted: formatSingleTime(minutesToTimeString(Math.max(0, plannedStartMinutes))),
-      targetReadyByTime: requestedPickupIso,
-      readyByFormatted: formattedDisplay,
-      suggestedPickupTime: suggestedTimeStr,
-      suggestedPickupFormatted: formatSingleTime(suggestedTimeStr),
-    };
-  }
-
-  // 6. Minimum Preparation Lead Time (Pickup is in the future, but kitchen needs more lead time)
-  if (plannedStartMinutes < currentISTMinutes) {
-    const earliestFeasiblePickupMin = Math.max(serviceStartMin, currentISTMinutes + prepDuration);
-    const cappedPickupMin = Math.min(serviceEndMin, earliestFeasiblePickupMin);
-    const suggestedTimeStr = minutesToTimeString(cappedPickupMin);
-    const err = `Kitchen needs ${prepDuration} minutes to prepare this order. The earliest ready time is ${formatSingleTime(suggestedTimeStr)}.`;
-
-    return {
-      isAvailable: false,
-      isValid: false,
-      validationCode: 'INSUFFICIENT_LEAD_TIME',
-      statusBadge: 'Too Soon',
-      error: err,
-      reason: err,
-      requestedPickupTime: requestedPickupIso,
-      pickupTimeStr: normalized24h,
-      pickupTimeFormatted: formattedDisplay,
-      estimatedPrepDurationMinutes: prepDuration,
-      plannedPrepStartTime: prepStartIso,
-      prepStartFormatted: formatSingleTime(minutesToTimeString(Math.max(0, plannedStartMinutes))),
-      targetReadyByTime: requestedPickupIso,
-      readyByFormatted: formattedDisplay,
-      suggestedPickupTime: suggestedTimeStr,
-      suggestedPickupFormatted: formatSingleTime(suggestedTimeStr),
-    };
-  }
-
-  // 7. Valid and Feasible Schedule
-  return {
-    isAvailable: true,
-    isValid: true,
-    validationCode: 'VALID',
-    statusBadge: formattedDisplay,
-    requestedPickupTime: requestedPickupIso,
-    pickupTimeStr: normalized24h,
-    pickupTimeFormatted: formattedDisplay,
-    estimatedPrepDurationMinutes: prepDuration,
-    plannedPrepStartTime: prepStartIso,
-    prepStartFormatted: formatSingleTime(minutesToTimeString(plannedStartMinutes)),
-    targetReadyByTime: requestedPickupIso,
-    readyByFormatted: formattedDisplay,
-    maxCapacity: config.maxConcurrentOrders || 15,
   };
+
+  // 1. Invalid / Empty Time Format Check
+  if (isNaN(pickupMinutes) || !cleanTime) {
+    return buildResult(
+      false,
+      'INVALID_FORMAT',
+      'Invalid Time',
+      'Please enter a valid pickup time (e.g. 12:30 PM).'
+    );
+  }
+
+  // 2. Service Enabled Check
+  if (config.isLunchEnabled === false) {
+    return buildResult(
+      false,
+      'SERVICE_CLOSED',
+      'Closed',
+      'Lunch ordering service is currently closed for this canteen.'
+    );
+  }
+
+  // 3. Sunday Canteen Closed Check
+  if (isSunday) {
+    return buildResult(
+      false,
+      'CLOSED_ON_SUNDAYS',
+      'Closed',
+      'Orders cannot be placed on Sundays. The canteen is closed.',
+      minutesToTimeString(serviceStartMin),
+      nextBookableDate.dateStr,
+      nextBookableDate.dayName
+    );
+  }
+
+  // 4. Past Service Date Check
+  if (isPastDate) {
+    return buildResult(
+      false,
+      'PAST_TIME',
+      'Past Date',
+      'This service date has already passed. Please choose an upcoming service date.',
+      minutesToTimeString(serviceStartMin),
+      nextBookableDate.dateStr,
+      nextBookableDate.dayName
+    );
+  }
+
+  // 5. Operating Hours Window Check (12:00 PM – 2:00 PM)
+  if (pickupMinutes < serviceStartMin) {
+    return buildResult(
+      false,
+      'OUTSIDE_HOURS',
+      'Outside Hours',
+      `Pickup time must be within lunch service hours (${formatSingleTime(config.serviceStartTime)} – ${formatSingleTime(config.serviceEndTime)}).`,
+      minutesToTimeString(serviceStartMin),
+      selectedDateStr,
+      dayName
+    );
+  }
+
+  if (pickupMinutes > serviceEndMin) {
+    return buildResult(
+      false,
+      'OUTSIDE_HOURS',
+      'Outside Hours',
+      `Pickup time cannot be after lunch closing time (${formatSingleTime(config.serviceEndTime)}).`,
+      minutesToTimeString(serviceEndMin),
+      selectedDateStr,
+      dayName
+    );
+  }
+
+  // 6. Same-Day (Today) Specific Validations
+  if (isToday) {
+    // 6a. Has today's lunch service already closed or run out of feasible prep windows?
+    const hasServiceEndedToday = activeISTMinutes >= serviceEndMin;
+    const noFeasibleTimeRemainsToday = (activeISTMinutes + prepDuration) > serviceEndMin;
+
+    if (hasServiceEndedToday || noFeasibleTimeRemainsToday) {
+      return buildResult(
+        false,
+        'NO_FEASIBLE_TIME_TODAY',
+        'Closed',
+        hasServiceEndedToday
+          ? `Lunch service has closed for today (${formatSingleTime(config.serviceEndTime)}). No pickup times remain today.`
+          : `Your order needs approximately ${prepDuration} minutes to prepare, but lunch closes at ${formatSingleTime(config.serviceEndTime)}. No remaining pickup times today.`,
+        minutesToTimeString(serviceStartMin),
+        nextBookableDate.dateStr,
+        nextBookableDate.dayName
+      );
+    }
+
+    // 6b. Is the requested pickup time already in the past today?
+    if (pickupMinutes < activeISTMinutes) {
+      const earliestFeasiblePickupMin = activeISTMinutes + prepDuration;
+      if (earliestFeasiblePickupMin > serviceEndMin) {
+        // Preparation would exceed closing time: no feasible slot remains today
+        return buildResult(
+          false,
+          'NO_FEASIBLE_TIME_TODAY',
+          'Closed',
+          `This pickup time has already passed and lunch closes at ${formatSingleTime(config.serviceEndTime)}. Please select the next available service date.`,
+          minutesToTimeString(serviceStartMin),
+          nextBookableDate.dateStr,
+          nextBookableDate.dayName
+        );
+      }
+
+      const suggestedTimeStr = minutesToTimeString(earliestFeasiblePickupMin);
+      return buildResult(
+        false,
+        'PAST_TIME',
+        'Past Time',
+        `This pickup time has already passed. Kitchen needs approximately ${prepDuration} minutes to prepare this order. The earliest ready time is ${formatSingleTime(suggestedTimeStr)}.`,
+        suggestedTimeStr,
+        selectedDateStr,
+        dayName
+      );
+    }
+
+    // 6c. Insufficient Preparation Lead Time (Time is in the future today, but kitchen needs more notice)
+    const plannedStartMinutes = pickupMinutes - prepDuration;
+    if (plannedStartMinutes < activeISTMinutes) {
+      const earliestFeasiblePickupMin = activeISTMinutes + prepDuration;
+      if (earliestFeasiblePickupMin > serviceEndMin) {
+        return buildResult(
+          false,
+          'NO_FEASIBLE_TIME_TODAY',
+          'Closed',
+          `Your order needs approximately ${prepDuration} minutes to prepare, but lunch closes at ${formatSingleTime(config.serviceEndTime)}. Please select the next available service date.`,
+          minutesToTimeString(serviceStartMin),
+          nextBookableDate.dateStr,
+          nextBookableDate.dayName
+        );
+      }
+
+      const suggestedTimeStr = minutesToTimeString(earliestFeasiblePickupMin);
+      return buildResult(
+        false,
+        'INSUFFICIENT_LEAD_TIME',
+        'Too Soon',
+        `Your order needs approximately ${prepDuration} minutes to prepare. The earliest ready time is ${formatSingleTime(suggestedTimeStr)}.`,
+        suggestedTimeStr,
+        selectedDateStr,
+        dayName
+      );
+    }
+  }
+
+  // 7. Future Date Booking or Feasible Today
+  const normalized24h = minutesToTimeString(pickupMinutes);
+  return buildResult(
+    true,
+    'VALID',
+    formatSingleTime(normalized24h)
+  );
 }
 
 /**
@@ -258,10 +343,19 @@ export async function verifyBackendOrderSchedule(
   canteenId: string | undefined,
   pickupTimeStr: string,
   items: ScheduledCartItem[],
-  config: LunchSlotConfig,
-  currentISTMinutes: number
+  config: LunchSlotConfig = DEFAULT_LUNCH_SLOT_CONFIG,
+  currentISTMinutes?: number,
+  orderDateStr?: string,
+  currentTimeMs = Date.now()
 ): Promise<OrderScheduleResult> {
-  const localResult = calculateLocalOrderSchedule(pickupTimeStr, items, config, currentISTMinutes);
+  const localResult = calculateLocalOrderSchedule(
+    pickupTimeStr,
+    items,
+    config,
+    currentISTMinutes,
+    orderDateStr,
+    currentTimeMs
+  );
   if (!localResult.isAvailable) {
     return localResult;
   }
@@ -273,12 +367,14 @@ export async function verifyBackendOrderSchedule(
       p_canteen_id: canteenId,
       p_pickup_time_str: localResult.pickupTimeStr,
       p_items: items.map(i => ({ id: i.id, quantity: i.quantity })),
+      p_order_date: localResult.serviceDateStr,
     });
 
     if (!error && data) {
       const resp = data as any;
       const isAvail = resp.is_available ?? true;
       return {
+        ...localResult,
         isAvailable: isAvail,
         isValid: isAvail,
         validationCode: isAvail ? 'VALID' : (resp.error?.includes('capacity') ? 'CAPACITY_EXCEEDED' : 'OUTSIDE_HOURS'),
