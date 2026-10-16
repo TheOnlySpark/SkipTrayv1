@@ -169,6 +169,11 @@ export function NotificationBell() {
           icon: <Sparkles size={16} className="text-emerald-600 shrink-0" />,
           bg: 'bg-emerald-50 text-emerald-700 border-emerald-300',
         };
+      case 'COLLECTED':
+        return {
+          icon: <CheckCircle2 size={16} className="text-teal-600 shrink-0" />,
+          bg: 'bg-teal-50 text-teal-700 border-teal-300',
+        };
       default:
         return {
           icon: <CheckCircle2 size={16} className="text-indigo-600 shrink-0" />,

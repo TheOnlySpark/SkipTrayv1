@@ -3,7 +3,7 @@
  * Uses Web Audio API for zero-dependency, ultra-reliable harmonic chimes.
  */
 
-export type OrderNotificationStatus = 'ACCEPTED' | 'PREPARING' | 'READY';
+export type OrderNotificationStatus = 'ACCEPTED' | 'PREPARING' | 'READY' | 'COLLECTED';
 
 // Helper to get AudioContext cross-browser safely
 function getAudioContext(): AudioContext | null {
@@ -21,6 +21,7 @@ function getAudioContext(): AudioContext | null {
  * - ACCEPTED: Warm, reassuring 2-tone ascending chime (C5 -> E5)
  * - PREPARING: Upbeat 3-tone kitchen prep chime (A4 -> C#5 -> E5)
  * - READY: Celebratory 4-tone pickup fanfare (C5 -> E5 -> G5 -> C6)
+ * - COLLECTED: Harmonious, pleasant completion chime (F5 -> A5 -> C6)
  */
 export function playStatusChime(status: OrderNotificationStatus): void {
   try {
@@ -109,6 +110,31 @@ export function playStatusChime(status: OrderNotificationStatus): void {
         osc.start(now + time);
         osc.stop(now + time + duration);
       });
+    } else if (status === 'COLLECTED') {
+      // 3-tone sweet completion chime (F5: 698.46Hz -> A5: 880.00Hz -> C6: 1046.50Hz)
+      const notes = [
+        { freq: 698.46, time: 0, duration: 0.12 },
+        { freq: 880.00, time: 0.10, duration: 0.14 },
+        { freq: 1046.50, time: 0.22, duration: 0.40 },
+      ];
+
+      notes.forEach(({ freq, time, duration }) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now + time);
+
+        gain.gain.setValueAtTime(0, now + time);
+        gain.gain.linearRampToValueAtTime(0.20, now + time + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + time + duration);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start(now + time);
+        osc.stop(now + time + duration);
+      });
     }
   } catch {
     // Gracefully ignore autoplay or audio context errors
@@ -128,6 +154,9 @@ export function triggerHapticFeedback(status: OrderNotificationStatus): void {
       } else if (status === 'READY') {
         // High-priority pulsing vibration
         navigator.vibrate([200, 100, 200, 100, 400]);
+      } else if (status === 'COLLECTED') {
+        // Pleasant double pulse for collection confirmation
+        navigator.vibrate([120, 80, 220]);
       }
     }
   } catch {

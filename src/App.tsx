@@ -22,6 +22,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ModalDialogProvider } from './contexts/ModalDialogContext';
 import { NotificationProvider } from './contexts/NotificationContext';
 import { NotificationToast } from './components/NotificationToast';
+import ScrollToTop from './components/ScrollToTop';
 import BaseLayout from './partials/BaseLayout';
 
 const queryClient = new QueryClient();
@@ -74,6 +75,7 @@ export default function App() {
           <NotificationProvider>
             <ModalDialogProvider>
               <Router basename={import.meta.env.BASE_URL}>
+                <ScrollToTop />
                 <NotificationToast />
                 <BaseLayout>
                   <Routes>

@@ -7,7 +7,9 @@ import {
   Menu,
   ChevronDown,
   LogOut,
-  Building
+  Building,
+  History,
+  Utensils
 } from 'lucide-react';
 
 export interface HeaderProps {
@@ -139,6 +141,36 @@ export default function Header({
 
       {/* Right Area: Status + Notification Bell + User Profile / Login */}
       <div className="flex items-center gap-2 sm:gap-3">
+        {/* Order History Navigation Option in Header */}
+        {user && (profile?.role === 'STUDENT' || profile?.role === 'TEACHER' || location.pathname === '/student') && (
+          <div className="flex items-center p-1 bg-slate-100/90 border border-slate-200/80 rounded-xl gap-1 shadow-2xs">
+            <Link
+              to="/student"
+              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                location.pathname === '/student' && !location.search.includes('tab=history')
+                  ? 'bg-white text-indigo-700 shadow-2xs border border-slate-200/50'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/40'
+              }`}
+              title="Pre-Order Meals"
+            >
+              <Utensils size={14} className="shrink-0" />
+              <span className="hidden sm:inline">Menu</span>
+            </Link>
+            <Link
+              to="/student?tab=history"
+              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                location.pathname === '/student' && location.search.includes('tab=history')
+                  ? 'bg-white text-indigo-700 shadow-2xs border border-slate-200/50'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/40'
+              }`}
+              title="View Past Orders & Receipts"
+            >
+              <History size={14} className="shrink-0" />
+              <span className="hidden sm:inline">Order History</span>
+            </Link>
+          </div>
+        )}
+
         {/* Notification Bell (if user is authenticated) */}
         {user && (
           <div className="relative">
@@ -209,6 +241,20 @@ export default function Header({
                 </div>
 
 
+
+                {/* User quick links */}
+                {(profile?.role === 'STUDENT' || profile?.role === 'TEACHER' || location.pathname === '/student') && (
+                  <div className="py-1 border-b border-slate-100 px-1.5">
+                    <Link
+                      to="/student?tab=history"
+                      onClick={() => setProfileDropdownOpen(false)}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-600 rounded-xl transition-colors text-left"
+                    >
+                      <History size={15} />
+                      <span>Order History</span>
+                    </Link>
+                  </div>
+                )}
 
                 {/* Sign Out Action */}
                 <div className="pt-1 border-t border-slate-100 px-1.5">

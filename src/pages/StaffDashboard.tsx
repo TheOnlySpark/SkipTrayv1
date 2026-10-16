@@ -33,7 +33,7 @@ type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 
 // Extended Order type to include joined data (student name, items)
 type OrderWithDetails = Order & {
-  profiles: { name: string, id_number: string } | null;
+  profiles: { name: string, id_number: string, strike_count?: number } | null;
   order_items: (OrderItem & { menu_items: MenuItem | null })[];
 };
 
@@ -76,6 +76,33 @@ export default function StaffDashboard() {
   // Card-level OTP Verification state
   const [selectedOrderForOtp, setSelectedOrderForOtp] = useState<string | null>(null);
   const [otpInput, setOtpInput] = useState('');
+
+  // Helper to restrict OTP input to strictly numeric characters (0-9) and max 6 digits
+  const formatOtpInput = (value: string): string => {
+    return value.replace(/\D/g, '').slice(0, 6);
+  };
+
+  const handleOtpKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // Allow navigation, deletion, clipboard shortcuts
+    if (
+      ['Backspace', 'Delete', 'Tab', 'Escape', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key) ||
+      e.ctrlKey ||
+      e.metaKey
+    ) {
+      return;
+    }
+    // Block any key that is not a numeric digit (0-9)
+    if (!/^[0-9]$/.test(e.key)) {
+      e.preventDefault();
+    }
+  };
+
+  const handleOtpPaste = (e: React.ClipboardEvent<HTMLInputElement>, setter: (val: string) => void) => {
+    e.preventDefault();
+    const pastedText = e.clipboardData.getData('text') || '';
+    const numericOnly = formatOtpInput(pastedText);
+    setter(numericOnly);
+  };
 
 
   // 30-second interval to dynamically re-check 10-minute pickup overdue timers
@@ -243,7 +270,7 @@ export default function StaffDashboard() {
       .from('orders')
       .select(`
         *,
-        profiles ( name, id_number ),
+        profiles ( name, id_number, strike_count ),
         order_items (
           *,
           menu_items ( * )
@@ -341,9 +368,14 @@ export default function StaffDashboard() {
 
     const result = data as any;
     if (result.success) {
+      const matching = orders.find(o => o.id === orderId);
       setSelectedOrderForOtp(null);
       setOtpInput('');
       fetchOrders();
+      setQuickOtpToast({
+        message: `Order #${matching?.order_number || ''} verified and collected successfully!`,
+        isError: false
+      });
       return true;
     } else {
       if (result.requires_override) {
@@ -511,12 +543,31 @@ export default function StaffDashboard() {
   };
 
   const handleMarkNoShow = async (order: OrderWithDetails) => {
-    const studentName = order.profiles?.name || 'the student';
+    const studentName = order.profiles?.name?.trim() || 'Student';
+    const studentIdNumber = order.profiles?.id_number?.trim();
+    const studentLabel = studentIdNumber ? `${studentName} (ID: ${studentIdNumber})` : studentName;
+    const currentStrikes = order.profiles?.strike_count ?? 0;
+    const willBeSuspended = currentStrikes >= 1;
+
+    const message = [
+      `Order #${order.order_number} • Student: ${studentLabel}`,
+      '',
+      `Did student "${studentName}" fail to collect this order?`,
+      '',
+      '• Order Status: The food order will be CANCELLED and marked as uncollected.',
+      `• Penalty Issued: 1 penalty strike will be added to ${studentName}'s profile.`,
+      willBeSuspended
+        ? `• ⚠️ Account Suspension: ${studentName} already has 1 strike. This 2nd strike will immediately DEACTIVATE their account for 3 days (blocking them from placing food orders).`
+        : `• Account Impact: This will be their 1st strike (Warning). If they reach 2 strikes, their account will be deactivated for 3 days.`,
+      '',
+      'Please confirm only if the pickup time window has ended and the food was left uncollected.'
+    ].join('\n');
+
     const confirmed = await showConfirm({
-      title: 'Mark No-Show & Issue Strike',
-      message: `Mark Order #${order.order_number} for ${studentName} as a No-Show?\n\n• The order will be cancelled (REJECTED).\n• ${studentName} will receive 1 Strike.\n• If this is their 2nd strike, their account will be deactivated for 3 days.`,
-      confirmText: 'Confirm Strike',
-      cancelText: 'Keep Order',
+      title: 'Mark Order as Uncollected (No-Show)',
+      message,
+      confirmText: willBeSuspended ? 'Cancel Order & Deactivate (3 Days)' : 'Cancel Order & Issue Strike',
+      cancelText: 'Keep Order (Wait Longer)',
       isDangerous: true
     });
     if (!confirmed) return;
@@ -539,13 +590,13 @@ export default function StaffDashboard() {
     if (result.is_suspended) {
       showAlert({
         title: 'Account Deactivated (2 Strikes)',
-        message: `Order cancelled. ${studentName} has reached 2 strikes and their account is now DEACTIVATED for 3 days.`,
+        message: `Order #${order.order_number} has been cancelled. ${studentName} reached 2 strikes and their account is now DEACTIVATED for 3 days.`,
         type: 'danger'
       });
     } else {
       showAlert({
-        title: 'Strike Issued',
-        message: `Order cancelled. Strike added to ${studentName} (Total strikes: ${result.strike_count}/2).`,
+        title: 'Strike Issued (Warning)',
+        message: `Order #${order.order_number} has been cancelled. 1 strike was added to ${studentName} (Active strikes: 1/2).`,
         type: 'warning'
       });
     }
@@ -946,8 +997,12 @@ export default function StaffDashboard() {
                     type="text"
                     placeholder="OTP"
                     value={otpInput}
-                    onChange={(e) => setOtpInput(e.target.value)}
-                    autoComplete="off"
+                    onChange={(e) => setOtpInput(formatOtpInput(e.target.value))}
+                    onKeyDown={handleOtpKeyDown}
+                    onPaste={(e) => handleOtpPaste(e, setOtpInput)}
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    autoComplete="one-time-code"
                     maxLength={6}
                     size="sm"
                     className="w-20 text-center font-mono tracking-widest text-xs"
@@ -957,6 +1012,7 @@ export default function StaffDashboard() {
                     variant="primary"
                     size="sm"
                     onClick={() => handleVerifyOtp(order.id)}
+                    disabled={otpInput.length !== 6}
                     className="flex-1"
                   >
                     Verify
@@ -988,9 +1044,9 @@ export default function StaffDashboard() {
                   size="sm"
                   fullWidth
                   onClick={() => handleMarkNoShow(order)}
-                  title="Cancel order and add 1 strike to student"
+                  title="Cancel order and issue 1 strike for uncollected food"
                 >
-                  Cancel & Strike (No-Show)
+                  Cancel & Strike (Uncollected)
                 </Button>
               )}
             </div>
@@ -1171,8 +1227,12 @@ export default function StaffDashboard() {
                       type="text"
                       placeholder="OTP"
                       value={otpInput}
-                      onChange={(e) => setOtpInput(e.target.value)}
-                      autoComplete="off"
+                      onChange={(e) => setOtpInput(formatOtpInput(e.target.value))}
+                      onKeyDown={handleOtpKeyDown}
+                      onPaste={(e) => handleOtpPaste(e, setOtpInput)}
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      autoComplete="one-time-code"
                       maxLength={6}
                       size="sm"
                       className="w-16 px-1.5 py-1 text-center font-mono text-xs"
@@ -1182,6 +1242,7 @@ export default function StaffDashboard() {
                       size="sm"
                       variant="primary"
                       onClick={() => handleVerifyOtp(order.id)}
+                      disabled={otpInput.length !== 6}
                       className="px-2 py-1 text-xs"
                     >
                       OK
@@ -1212,10 +1273,10 @@ export default function StaffDashboard() {
                     size="sm"
                     variant="danger"
                     onClick={() => handleMarkNoShow(order)}
-                    title="Issue strike to student"
-                    className="text-xs px-2 py-1"
+                    title="Mark order as uncollected and issue strike"
+                    className="text-xs px-2 py-1 font-semibold"
                   >
-                    Strike
+                    Strike (Uncollected)
                   </Button>
                 )}
               </>
@@ -1546,7 +1607,12 @@ export default function StaffDashboard() {
                   <InputField
                     placeholder="6-Digit OTP..."
                     value={quickOtpInput}
-                    onChange={e => setQuickOtpInput(e.target.value)}
+                    onChange={e => setQuickOtpInput(formatOtpInput(e.target.value))}
+                    onKeyDown={handleOtpKeyDown}
+                    onPaste={e => handleOtpPaste(e, setQuickOtpInput)}
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    autoComplete="one-time-code"
                     maxLength={6}
                     size="sm"
                     fullWidth={false}
