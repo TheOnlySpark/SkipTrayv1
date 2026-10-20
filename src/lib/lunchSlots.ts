@@ -10,10 +10,18 @@ export interface LunchSlot {
   capacity?: number;
 }
 
+export interface CustomSlotItem {
+  startTime: string; // "12:00"
+  endTime: string;   // "12:30"
+  label?: string;    // optional custom name/label
+}
+
 export interface LunchSlotConfig {
   id?: string;
   canteenId?: string | null;
   tenantId?: string | null;
+  slotMode?: 'FIXED' | 'CUSTOM'; // 'FIXED' interval vs 'CUSTOM' explicit slots
+  customSlots?: CustomSlotItem[]; // list of custom defined slots
   serviceStartTime: string; // "12:00"
   serviceEndTime: string; // "14:00"
   slotDurationMinutes: number; // 5, 10, 15, 20, 30
@@ -28,6 +36,8 @@ export interface LunchSlotConfig {
 }
 
 export const DEFAULT_LUNCH_SLOT_CONFIG: LunchSlotConfig = {
+  slotMode: 'FIXED',
+  customSlots: [],
   serviceStartTime: '08:00',
   serviceEndTime: '20:00',
   slotDurationMinutes: 15,
@@ -230,11 +240,50 @@ export const validateUserCustomPickupTiming = (
 
 /**
  * Generates an array of lunch slots based on configuration.
+ * Supports both FIXED interval-based generation and CUSTOM user-defined slot lists.
  * Respects duration (5, 10, 15, 20, 30 min) and strictly caps within service end time.
  */
 export const generateSlotsFromConfig = (config: LunchSlotConfig): LunchSlot[] => {
-  const startMin = parseTimeToMinutes(config.serviceStartTime || '12:00');
-  const endMin = parseTimeToMinutes(config.serviceEndTime || '14:00');
+  const disabledSet = new Set(config.disabledSlots || []);
+
+  // 1. If mode is CUSTOM and custom slots are provided, generate directly from them
+  if (config.slotMode === 'CUSTOM' && Array.isArray(config.customSlots) && config.customSlots.length > 0) {
+    const validCustomSlots: LunchSlot[] = [];
+
+    // Sort by startTime
+    const sorted = [...config.customSlots].sort((a, b) => {
+      return parseTimeToMinutes(a.startTime) - parseTimeToMinutes(b.startTime);
+    });
+
+    for (const item of sorted) {
+      if (!item.startTime || !item.endTime) continue;
+      const startMin = parseTimeToMinutes(item.startTime);
+      const endMin = parseTimeToMinutes(item.endTime);
+      if (isNaN(startMin) || isNaN(endMin) || startMin >= endMin) continue;
+
+      const slotStart = normalizeTimeTo24h(item.startTime);
+      const slotEnd = normalizeTimeTo24h(item.endTime);
+      const range = formatTimeRange(slotStart, slotEnd);
+
+      validCustomSlots.push({
+        value: slotStart,
+        label: item.label ? `${item.label} (${range})` : `${formatPickupTime(slotStart)} (${range})`,
+        startTime: slotStart,
+        endTime: slotEnd,
+        rangeLabel: range,
+        enabled: !disabledSet.has(slotStart),
+        capacity: config.slotCapacities?.[slotStart] ?? 50,
+      });
+    }
+
+    if (validCustomSlots.length > 0) {
+      return validCustomSlots;
+    }
+  }
+
+  // 2. Default: FIXED interval duration mode across service hours
+  const startMin = parseTimeToMinutes(config.serviceStartTime || '08:00');
+  const endMin = parseTimeToMinutes(config.serviceEndTime || '20:00');
   const duration = Number(config.slotDurationMinutes) || 15;
 
   if (startMin >= endMin || duration <= 0) {
@@ -242,7 +291,6 @@ export const generateSlotsFromConfig = (config: LunchSlotConfig): LunchSlot[] =>
   }
 
   const slots: LunchSlot[] = [];
-  const disabledSet = new Set(config.disabledSlots || []);
 
   let current = startMin;
   while (current + duration <= endMin) {
@@ -299,7 +347,7 @@ export async function fetchLunchSlotConfig(canteenId?: string | null): Promise<L
 
   // 2. Fetch from Supabase
   try {
-    const baseColumns = 'id, canteen_id, tenant_id, service_start_time, service_end_time, slot_duration_minutes, min_notice_minutes, is_lunch_enabled, disabled_slots, slot_capacities, updated_at';
+    const baseColumns = 'id, canteen_id, tenant_id, slot_mode, custom_slots, service_start_time, service_end_time, slot_duration_minutes, min_notice_minutes, is_lunch_enabled, disabled_slots, slot_capacities, updated_at';
     let query = supabase.from('lunch_slot_configs').select(baseColumns);
     if (canteenId) {
       query = query.eq('canteen_id', canteenId);
@@ -311,6 +359,8 @@ export async function fetchLunchSlotConfig(canteenId?: string | null): Promise<L
         id: (data as any).id,
         canteenId: (data as any).canteen_id,
         tenantId: (data as any).tenant_id,
+        slotMode: (data as any).slot_mode === 'CUSTOM' ? 'CUSTOM' : 'FIXED',
+        customSlots: Array.isArray((data as any).custom_slots) ? (data as any).custom_slots : [],
         serviceStartTime: (data as any).service_start_time || '08:00',
         serviceEndTime: (data as any).service_end_time || '20:00',
         slotDurationMinutes: Number((data as any).slot_duration_minutes) || 15,
@@ -352,6 +402,8 @@ export async function saveLunchSlotConfig(
 
   const updatedConfig: LunchSlotConfig = {
     ...config,
+    slotMode: config.slotMode || 'FIXED',
+    customSlots: config.customSlots || [],
     canteenId: canteenId || config.canteenId || null,
     tenantId: tenantId || config.tenantId || null,
     updatedAt: new Date().toISOString(),
@@ -372,6 +424,8 @@ export async function saveLunchSlotConfig(
     const payload = {
       canteen_id: canteenId || null,
       tenant_id: tenantId || null,
+      slot_mode: updatedConfig.slotMode || 'FIXED',
+      custom_slots: updatedConfig.customSlots || [],
       service_start_time: updatedConfig.serviceStartTime,
       service_end_time: updatedConfig.serviceEndTime,
       slot_duration_minutes: updatedConfig.slotDurationMinutes,
