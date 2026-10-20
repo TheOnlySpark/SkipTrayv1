@@ -110,6 +110,14 @@ export default function App() {
                       }
                     />
                     <Route
+                      path="/staff/collect"
+                      element={
+                        <ProtectedRoute allowedRoles={['STAFF', 'CANTEEN_ADMIN', 'UNI_ADMIN', 'SUPER_ADMIN']}>
+                          <StaffDashboard />
+                        </ProtectedRoute>
+                      }
+                    />
+                    <Route
                       path="/staff/menu"
                       element={
                         <ProtectedRoute allowedRoles={['STAFF', 'CANTEEN_ADMIN', 'UNI_ADMIN', 'SUPER_ADMIN']}>

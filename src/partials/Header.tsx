@@ -9,8 +9,13 @@ import {
   LogOut,
   Building,
   History,
-  Utensils
+  Utensils,
+  Clock,
+  Calendar,
+  Sparkles,
+  Building2
 } from 'lucide-react';
+import { motion } from 'motion/react';
 
 export interface HeaderProps {
   onToggleMobileSidebar: () => void;
@@ -52,8 +57,14 @@ export default function Header({
         setProfileDropdownOpen(false);
       }
     }
-    document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Live Time state updated every 30s
+  const [currentDateTime, setCurrentDateTime] = useState(new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentDateTime(new Date()), 30000);
+    return () => clearInterval(timer);
   }, []);
 
 
@@ -87,69 +98,76 @@ export default function Header({
   const roleBadge = getRoleBadgeStyle(profile?.role);
 
   return (
-    <header
-      className={`sticky top-0 z-30 w-full h-16 bg-white/85 backdrop-blur-md border-b border-slate-200/80 px-4 sm:px-6 flex items-center justify-between transition-colors shadow-2xs ${className}`}
+    <motion.header
+      initial={{ opacity: 0, y: -16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+      className={`w-full h-15 bg-white/95 backdrop-blur-md border border-slate-200/90 rounded-2xl px-2.5 sm:px-4 flex items-center justify-between transition-colors shadow-xs ${className}`}
     >
-      {/* Left Area: Mobile menu toggle */}
-      <div className="flex items-center gap-3 md:gap-4 min-w-0">
+      {/* Left Area: Mobile Drawer & Useful Context Badges */}
+      <div className="flex items-center gap-2 sm:gap-3 min-w-0">
         {/* Mobile Hamburger Drawer Button */}
         {Boolean(user && !hideSidebarToggle) && (
           <button
             type="button"
             onClick={onToggleMobileSidebar}
-            className="md:hidden p-2 -ml-1 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
+            className="md:hidden p-2 -ml-1 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors focus:outline-hidden focus:ring-2 focus:ring-blue-500"
             aria-label="Open Navigation Drawer"
           >
-            <Menu size={22} />
+            <Menu size={20} />
           </button>
         )}
-      </div>
 
-      {/* Center Area: Organization / Tenant branding pill (desktop) */}
-      <div className="hidden lg:flex items-center gap-2.5 px-3 py-1.5 bg-slate-50 border border-slate-200/80 rounded-xl">
-        {error ? (
-          <span className="text-xs font-semibold text-rose-500 flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-rose-500" />
-            No Tenant Assigned
-          </span>
-        ) : settings?.logo_url ? (
-          <div className="flex items-center gap-2">
-            <img src={settings.logo_url} alt={tenantName} className="h-6 object-contain" />
-            <span className="text-xs font-semibold text-slate-700">{tenantName}</span>
-          </div>
-        ) : (
-          <div className="flex items-center gap-2">
-            <div className="w-5 h-5 rounded-md bg-indigo-100 text-indigo-600 flex items-center justify-center">
-              <Building size={13} />
-            </div>
-            <span className="text-xs font-semibold text-slate-700 truncate max-w-[160px]">
-              {tenantName}
-            </span>
+        {/* Useful Info Pill: Tenant / Campus Name */}
+        {tenantName && (
+          <div className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 text-xs font-semibold">
+            <Building2 size={13} className="text-blue-600 shrink-0" />
+            <span className="truncate max-w-[160px] sm:max-w-[220px]">{tenantName}</span>
           </div>
         )}
 
-        <div className="w-px h-3.5 bg-slate-200" />
-
-        <div className="flex items-center gap-1.5 text-[11px] font-medium text-emerald-600">
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-          </span>
-          <span className="hidden xl:inline">Operational</span>
+        {/* Live Service Status Indicator */}
+        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold">
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+          <span>Live Service</span>
         </div>
       </div>
 
-      {/* Right Area: Status + Notification Bell + User Profile / Login */}
-      <div className="flex items-center gap-2 sm:gap-3">
+      {/* Middle Area: Useful Live Date & Clock display */}
+      <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-50/80 border border-slate-200/80 text-xs text-slate-600 font-medium">
+        <Calendar size={13} className="text-slate-400" />
+        <span>
+          {currentDateTime.toLocaleDateString('en-US', {
+            weekday: 'short',
+            month: 'short',
+            day: 'numeric'
+          })}
+        </span>
+        <span className="text-slate-300">•</span>
+        <Clock size={13} className="text-blue-500" />
+        <span className="font-bold text-slate-800">
+          {currentDateTime.toLocaleTimeString('en-US', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true
+          })}
+        </span>
+      </div>
+
+
+
+      {/* Right Area: Notification Bell + User Profile / Login */}
+      <div className="flex items-center gap-2.5 sm:gap-3">
+
         {/* Order History Navigation Option in Header */}
         {user && (profile?.role === 'STUDENT' || profile?.role === 'TEACHER' || location.pathname === '/student') && (
-          <div className="flex items-center p-1 bg-slate-100/90 border border-slate-200/80 rounded-xl gap-1 shadow-2xs">
+          <div className="flex items-center p-1 bg-slate-50 border border-slate-200 rounded-xl gap-1">
             <Link
               to="/student"
               className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
                 location.pathname === '/student' && !location.search.includes('tab=history')
-                  ? 'bg-white text-indigo-700 shadow-2xs border border-slate-200/50'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/40'
+                  ? 'bg-[#1d68f2] text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/70'
               }`}
               title="Pre-Order Meals"
             >
@@ -160,8 +178,8 @@ export default function Header({
               to="/student?tab=history"
               className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
                 location.pathname === '/student' && location.search.includes('tab=history')
-                  ? 'bg-white text-indigo-700 shadow-2xs border border-slate-200/50'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/40'
+                  ? 'bg-[#1d68f2] text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/70'
               }`}
               title="View Past Orders & Receipts"
             >
@@ -171,9 +189,9 @@ export default function Header({
           </div>
         )}
 
-        {/* Notification Bell (if user is authenticated) */}
+        {/* Notification Bell */}
         {user && (
-          <div className="relative">
+          <div className="relative text-slate-700">
             <NotificationBell />
           </div>
         )}
@@ -186,24 +204,24 @@ export default function Header({
               onClick={() => setProfileDropdownOpen(prev => !prev)}
               aria-expanded={profileDropdownOpen}
               aria-haspopup="true"
-              className="flex items-center gap-2 p-1 sm:px-2.5 sm:py-1.5 rounded-xl border border-slate-200/80 bg-slate-50/70 hover:bg-slate-100 transition-colors focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
+              className="flex items-center gap-2 p-1 sm:px-2.5 sm:py-1.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 transition-colors focus:outline-hidden focus:ring-2 focus:ring-blue-500"
             >
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-indigo-600 to-violet-600 text-white flex items-center justify-center font-bold text-xs shadow-2xs">
+              <div className="w-8 h-8 rounded-full bg-[#1d68f2] text-white flex items-center justify-center font-bold text-xs shadow-xs">
                 {userInitials}
               </div>
 
-              <div className="hidden md:flex flex-col text-left min-w-0 max-w-[120px]">
-                <span className="text-xs font-bold text-slate-800 truncate">
+              <div className="hidden md:flex flex-col text-left min-w-0">
+                <span className="text-xs font-bold text-slate-800 leading-tight truncate">
                   {profile?.name || user.email?.split('@')[0]}
                 </span>
-                <span className="text-[10px] text-slate-500 truncate">
+                <span className="text-[10px] text-slate-400 font-medium leading-tight truncate">
                   {roleBadge.label}
                 </span>
               </div>
 
               <ChevronDown
                 size={14}
-                className={`text-slate-400 transition-transform duration-200 ${
+                className={`text-slate-600 transition-transform duration-200 ${
                   profileDropdownOpen ? 'rotate-180' : ''
                 }`}
               />
@@ -286,6 +304,6 @@ export default function Header({
           )
         )}
       </div>
-    </header>
+    </motion.header>
   );
 }

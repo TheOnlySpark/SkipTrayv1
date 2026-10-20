@@ -65,7 +65,12 @@ export default function BaseLayout({
     (location.pathname.startsWith('/canteen-admin/') && location.pathname !== '/canteen-admin');
 
   return (
-    <div className={`min-h-screen bg-[#f8fafc] flex flex-col font-sans text-slate-900 selection:bg-indigo-500 selection:text-white ${className}`}>
+    <div className={`min-h-screen bg-[#edf2f8] flex flex-col font-sans text-slate-900 selection:bg-[#1d68f2] selection:text-white ${className}`}>
+      {/* Skip to Main Content Link for Keyboard Users */}
+      <a href="#main-content" className="skip-to-content">
+        Skip to main content
+      </a>
+
       {/* 1. Sidebar (Desktop rail/expanded + Mobile Drawer) */}
       {!shouldHideSidebar && (
         <SideBar
@@ -88,22 +93,30 @@ export default function BaseLayout({
       >
         {/* Header Bar */}
         {!hideHeader && (
-          <Header
-            onToggleMobileSidebar={() => setMobileSidebarOpen(prev => !prev)}
-            isSidebarCollapsed={sidebarCollapsed}
-            onToggleSidebarCollapse={!shouldHideSidebar ? handleToggleCollapse : undefined}
-            hideSidebarToggle={shouldHideSidebar}
-            title={title}
-          />
+          <div className="pt-2 pl-1 pr-2 sm:pl-1.5 sm:pr-3 md:pl-2 md:pr-4 sticky top-0 z-30 pointer-events-none">
+            <div className="pointer-events-auto">
+              <Header
+                onToggleMobileSidebar={() => setMobileSidebarOpen(prev => !prev)}
+                isSidebarCollapsed={sidebarCollapsed}
+                onToggleSidebarCollapse={!shouldHideSidebar ? handleToggleCollapse : undefined}
+                hideSidebarToggle={shouldHideSidebar}
+                title={title}
+              />
+            </div>
+          </div>
         )}
 
         {/* Page Content Body */}
         <main
-          className={`flex-1 w-full flex flex-col items-center ${
+          id="main-content"
+          tabIndex={-1}
+          className={`flex-1 w-full flex flex-col items-center outline-none ${
             isLoginPage || isDedicatedAdminView ? 'justify-center' : ''
           } ${
-            fullWidth
-              ? 'p-4 sm:p-6 lg:p-8'
+            location.pathname === '/canteen-admin' || location.pathname === '/staff' || location.pathname === '/student'
+              ? 'max-w-[1440px] w-full mx-auto px-3 sm:px-6 py-2.5 min-h-[calc(100vh-4rem)] overflow-y-auto'
+              : fullWidth
+              ? 'max-w-[1440px] w-full mx-auto p-4 sm:p-6 lg:p-7'
               : isDedicatedAdminView
               ? 'max-w-7xl mx-auto p-2 sm:p-3'
               : 'max-w-7xl mx-auto p-4 sm:p-6 lg:p-8'
@@ -113,10 +126,15 @@ export default function BaseLayout({
         </main>
 
         {/* Modern App Footer */}
-        {!hideFooter && !isLoginPage && (
+        {!hideFooter && !isLoginPage && location.pathname !== '/canteen-admin' && location.pathname !== '/staff' && (
           <footer className="w-full border-t border-slate-200/80 bg-white/60 backdrop-blur-xs py-5 px-6 text-xs text-slate-500 flex flex-col sm:flex-row items-center justify-between gap-3 mt-auto">
             <div className="flex items-center gap-2">
-              <span className="font-semibold text-slate-700">SkipTray</span>
+              <img
+                src="/assets/skiptray-hat-transparent.png"
+                alt="SkipTray"
+                className="w-5 h-auto object-contain"
+              />
+              <span className="font-bold text-slate-800">SkipTray</span>
               <span className="text-slate-300">•</span>
               <span>&copy; {new Date().getFullYear()} All rights reserved.</span>
               {tenantName && (

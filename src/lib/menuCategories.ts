@@ -13,32 +13,34 @@ export type FoodCategory = 'Packed Food' | 'Meals' | 'Drinks';
  */
 export const getItemCategory = (item: { category?: string | null; name: string }): FoodCategory => {
   const rawCat = (item.category || '').trim().toLowerCase();
-  
-  // Explicit category matches & enum aliases
-  if (rawCat === 'drinks' || rawCat === 'drink' || rawCat === 'soft_drink' || rawCat === 'beverage') {
-    return 'Drinks';
-  }
+  const name = (item.name || '').toLowerCase();
+
+  // Check explicit 'Packed Food' or 'Drinks' first
   if (
     rawCat === 'packed food' || 
     rawCat === 'packaged' || 
     rawCat === 'packed' || 
     rawCat === 'snacks' || 
-    rawCat === 'snack'
+    rawCat === 'snack' ||
+    rawCat.includes('pack')
   ) {
     return 'Packed Food';
   }
-  if (rawCat === 'meals' || rawCat === 'meal' || rawCat === 'fresh_food') {
-    return 'Meals';
+  if (rawCat === 'drinks' || rawCat === 'drink' || rawCat === 'soft_drink' || rawCat === 'beverage') {
+    return 'Drinks';
   }
-  
-  // Keyword heuristics fallback based on item name
-  const name = (item.name || '').toLowerCase();
+
+  // Keyword heuristics based on item name (takes precedence over generic 'meals' column default)
   if (/\b(juice|tea|chai|coffee|drink|drinks|soda|beverage|water|lassi|shake|cooler|mojito|coke|pepsi|sprite|fanta|bovonto|maaza|frooti|sting|milk|boost|horlicks)\b/i.test(name)) {
     return 'Drinks';
   }
-  if (/\b(chips|biscuit|biscuits|chocolate|cookie|cookies|snack|snacks|puffs|puff|roll|rolls|sandwich|samosa|bar|cake|packaged|lays|kurkure|bingo|oreo|maggi|bun|bread)\b/i.test(name)) {
+  if (/\b(chips|biscuit|biscuits|chocolate|cookie|cookies|snack|snacks|puffs|puff|roll|rolls|sandwich|samosa|bar|cake|packaged|lays|kurkure|bingo|oreo|maggi|bun|bread|wafer|wafers|namkeen|mixture)\b/i.test(name)) {
     return 'Packed Food';
   }
-  
+
+  if (rawCat === 'meals' || rawCat === 'meal' || rawCat === 'fresh_food') {
+    return 'Meals';
+  }
+
   return 'Meals';
 };

@@ -58,7 +58,10 @@ import {
   ArrowRight,
   Utensils,
   TrendingUp,
-  Plus
+  ChefHat,
+  Plus,
+  Kanban,
+  Table
 } from 'lucide-react';
 import { SalesCollectionDashboard } from '../components/SalesCollectionDashboard';
 import {
@@ -98,16 +101,36 @@ export default function CanteenAdminDashboard() {
   const isReviewsView = location.pathname === '/canteen-admin/reviews' || location.search.includes('tab=reviews');
   const isDedicatedView = isOrdersView || isMenuView || isAnalyticsView || isStaffView || isReviewsView;
 
-  const currentCanteenId = profile?.canteen_id;
   const currentTenantId = profile?.tenant_id ?? tenantId ?? null;
+
+  // Fetch available canteens for fallback when profile.canteen_id is not yet set
+  const { data: availableCanteens = [] } = useQuery({
+    queryKey: ['canteenAdminCanteens', currentTenantId],
+    queryFn: async () => {
+      let q = supabase.from('canteens').select('id, name, tenant_id');
+      if (currentTenantId) q = q.eq('tenant_id', currentTenantId);
+      const { data } = await q.order('created_at', { ascending: true });
+      return data || [];
+    },
+    staleTime: 60000,
+  });
+
+  const currentCanteenId = profile?.canteen_id || availableCanteens[0]?.id || null;
 
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({ placed: 0, collected: 0, rejected: 0 });
 
+  // Lunch Pickup Time Slots Management State
+  const [slotConfig, setSlotConfig] = useState<LunchSlotConfig>(DEFAULT_LUNCH_SLOT_CONFIG);
+  const [slotConfigLoading, setSlotConfigLoading] = useState(true);
+  const [savingSlotConfig, setSavingSlotConfig] = useState(false);
+  const [slotSaveSuccess, setSlotSaveSuccess] = useState(false);
+
   // Menu Search & Filter State
   const [menuSearch, setMenuSearch] = useState('');
   const [menuTypeFilter, setMenuTypeFilter] = useState<'ALL' | 'VEG' | 'NON_VEG' | 'PACKED' | 'AVAILABLE' | 'SOLD_OUT'>('ALL');
+  const [menuViewMode, setMenuViewMode] = useState<'GRID' | 'TABLE' | 'KANBAN'>('TABLE');
   const [filterDropdownOpen, setFilterDropdownOpen] = useState(false);
 
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
@@ -149,6 +172,13 @@ export default function CanteenAdminDashboard() {
     });
   };
 
+  // Live real-time clock for the dashboard
+  const [currentDashboardTime, setCurrentDashboardTime] = useState(new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentDashboardTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   // Dedicated query for 60-day orders to compute all 4 sales collection cards and comparative trends
   const { data: salesCollectionOrders = [], isLoading: salesLoading } = useQuery({
     queryKey: ['canteenSalesCollectionOrders', currentCanteenId],
@@ -162,7 +192,7 @@ export default function CanteenAdminDashboard() {
         const { data, error } = await supabase
           .from('orders')
           .select(`
-            id, order_number, status, created_at, pickup_time, total_tax_amount,
+            id, order_number, status, created_at, pickup_time,
             profiles (name, id_number),
             order_items (
               id, quantity,
@@ -186,7 +216,7 @@ export default function CanteenAdminDashboard() {
       const { data: fallbackData } = await supabase
         .from('orders')
         .select(`
-          id, order_number, status, created_at, pickup_time, total_tax_amount,
+          id, order_number, status, created_at, pickup_time,
           profiles (name, id_number),
           order_items (
             id, quantity,
@@ -219,7 +249,6 @@ export default function CanteenAdminDashboard() {
           status,
           created_at,
           pickup_time,
-          total_tax_amount,
           is_takeaway,
           canteen_id,
           tenant_id,
@@ -276,7 +305,6 @@ export default function CanteenAdminDashboard() {
           status,
           created_at,
           pickup_time,
-          total_tax_amount,
           is_takeaway,
           canteen_id,
           tenant_id,
@@ -368,6 +396,26 @@ export default function CanteenAdminDashboard() {
     return filteredAdminOrders.slice(start, start + pageSize);
   }, [filteredAdminOrders, currentPage, pageSize]);
 
+  // Real live active orders (PLACED, ACCEPTED, PREPARING, READY) for executive overview
+  const liveActiveOrders = useMemo(() => {
+    return allOrders.filter(o => ['PLACED', 'ACCEPTED', 'PREPARING', 'READY'].includes(o.status));
+  }, [allOrders]);
+
+  // Real today's revenue and average prep duration
+  const todayRevenue = salesCollectionSummary?.today?.totalAmount ?? 0;
+  const todayOrdersCount = salesCollectionSummary?.today?.orderCount ?? 0;
+  const todayComparison = salesCollectionSummary?.today?.percentChange ?? null;
+  const todayTrend = salesCollectionSummary?.today?.trend ?? 'NEUTRAL';
+
+  // Real average prep time calculated from slotConfig and menu items
+  const avgPrepTimeMinutes = useMemo(() => {
+    if (slotConfig?.defaultPrepTimeMinutes) return slotConfig.defaultPrepTimeMinutes;
+    const freshItems = menuItems.filter(i => (i as any).prep_time_minutes > 0);
+    if (freshItems.length === 0) return 10;
+    const total = freshItems.reduce((sum, item) => sum + Number((item as any).prep_time_minutes || 10), 0);
+    return Math.round(total / freshItems.length);
+  }, [slotConfig, menuItems]);
+
   // Filtered menu items based on menuSearch and menuTypeFilter
   const filteredMenuItems = useMemo(() => {
     return menuItems.filter(item => {
@@ -380,7 +428,18 @@ export default function CanteenAdminDashboard() {
       // Type/Status filter
       if (menuTypeFilter === 'VEG' && item.veg_non_veg !== 'VEG') return false;
       if (menuTypeFilter === 'NON_VEG' && item.veg_non_veg !== 'NON_VEG') return false;
-      const isPacked = (item as any).category === 'Packed Food' || (item as any).category === 'PACKED' || getItemCategory(item) === 'Packed Food' || (item.name || '').toLowerCase().includes('packed');
+      const rawCat = String((item as any).category || '').toLowerCase();
+      const isPacked =
+        rawCat === 'packed food' ||
+        rawCat === 'packed' ||
+        rawCat === 'packaged' ||
+        rawCat === 'snacks' ||
+        rawCat === 'snack' ||
+        rawCat.includes('pack') ||
+        (item as any).stock_quantity != null ||
+        (item as any).prep_time_minutes === 0 ||
+        (item.name || '').toLowerCase().includes('packed') ||
+        getItemCategory(item) === 'Packed Food';
       if (menuTypeFilter === 'PACKED' && !isPacked) return false;
       if (menuTypeFilter === 'AVAILABLE' && item.is_sold_out) return false;
       if (menuTypeFilter === 'SOLD_OUT' && !item.is_sold_out) return false;
@@ -764,19 +823,27 @@ export default function CanteenAdminDashboard() {
   const [newItemPrepTime, setNewItemPrepTime] = useState('10');
   const [newItemQuantity, setNewItemQuantity] = useState('20');
   const [priceError, setPriceError] = useState<string | null>(null);
+  const [isAddItemModalOpen, setIsAddItemModalOpen] = useState(false);
 
-  const saveItemMetadata = (itemId: string, meta: { category?: string; prep_time_minutes?: number; stock_quantity?: number | null }) => {
+  const saveItemMetadata = (itemId: string, meta: { category?: string; prep_time_minutes?: number; stock_quantity?: number | null }, itemName?: string) => {
     try {
+      const normalizedNameKey = itemName ? itemName.trim().toLowerCase() : null;
       const key = `canteen_menu_meta_${currentCanteenId}`;
       const existing = localStorage.getItem(key);
       const map = existing ? JSON.parse(existing) : {};
       map[itemId] = { ...(map[itemId] || {}), ...meta };
+      if (normalizedNameKey) {
+        map[`name:${normalizedNameKey}`] = { ...(map[`name:${normalizedNameKey}`] || {}), ...meta };
+      }
       localStorage.setItem(key, JSON.stringify(map));
 
       const globalMapKey = 'skiptray_menu_meta_global';
       const globalExisting = localStorage.getItem(globalMapKey);
       const globalMap = globalExisting ? JSON.parse(globalExisting) : {};
       globalMap[itemId] = { ...(globalMap[itemId] || {}), ...meta };
+      if (normalizedNameKey) {
+        globalMap[`name:${normalizedNameKey}`] = { ...(globalMap[`name:${normalizedNameKey}`] || {}), ...meta };
+      }
       localStorage.setItem(globalMapKey, JSON.stringify(globalMap));
     } catch {}
   };
@@ -805,12 +872,6 @@ export default function CanteenAdminDashboard() {
       return item;
     }));
   };
-
-  // Lunch Pickup Time Slots Management State
-  const [slotConfig, setSlotConfig] = useState<LunchSlotConfig>(DEFAULT_LUNCH_SLOT_CONFIG);
-  const [slotConfigLoading, setSlotConfigLoading] = useState(true);
-  const [savingSlotConfig, setSavingSlotConfig] = useState(false);
-  const [slotSaveSuccess, setSlotSaveSuccess] = useState(false);
 
   useEffect(() => {
     async function loadSlotConfig() {
@@ -969,13 +1030,29 @@ export default function CanteenAdminDashboard() {
           return true;
         })
         .map(item => {
-          const meta = metaMap[item.id] || {};
-          const isPacked = meta.category === 'Packed Food' || (item as any).category === 'Packed Food' || getItemCategory(item) === 'Packed Food';
+          const lowerName = (item.name || '').toLowerCase();
+          const meta = metaMap[item.id] || metaMap[`name:${lowerName}`] || {};
+          const rawCat = String((item as any).category || meta.category || '').toLowerCase();
+          const isPacked =
+            rawCat === 'packed food' ||
+            rawCat === 'packed' ||
+            rawCat === 'packaged' ||
+            rawCat === 'snacks' ||
+            rawCat === 'snack' ||
+            rawCat.includes('pack') ||
+            (item as any).stock_quantity != null ||
+            meta.stock_quantity != null ||
+            (item as any).prep_time_minutes === 0 ||
+            meta.prep_time_minutes === 0 ||
+            getItemCategory(item) === 'Packed Food';
+
+          const resolvedCategory = isPacked ? 'Packed Food' : ((item as any).category || meta.category || 'Meals');
+
           return {
             ...item,
-            category: (item as any).category || meta.category || (isPacked ? 'Packed Food' : 'Meals'),
+            category: resolvedCategory,
             prep_time_minutes: (item as any).prep_time_minutes ?? meta.prep_time_minutes ?? (isPacked ? 0 : 10),
-            stock_quantity: (item as any).stock_quantity ?? meta.stock_quantity ?? (isPacked ? 20 : null),
+            stock_quantity: (item as any).stock_quantity ?? meta.stock_quantity ?? null,
           } as any;
         })
       );
@@ -1095,7 +1172,7 @@ export default function CanteenAdminDashboard() {
         category: categoryLabel,
         prep_time_minutes: parsedPrepTime,
         stock_quantity: parsedStock,
-      });
+      }, data.name || newItemName.trim());
 
       setMenuItems([enhancedItem as any, ...menuItems]);
       setNewItemName('');
@@ -1103,6 +1180,7 @@ export default function CanteenAdminDashboard() {
       setNewItemPrepTime('10');
       setNewItemQuantity('20');
       setPriceError(null);
+      setIsAddItemModalOpen(false);
       showAlert({
         title: 'Item Added',
         message: `Successfully added ${newItemName.trim()} (${isPacked ? `Packed Food • Stock: ${parsedStock} pcs` : `Fresh Food • Prep: ${parsedPrepTime}m`}).`,
@@ -1112,10 +1190,13 @@ export default function CanteenAdminDashboard() {
   };
 
   const handleToggleSoldOut = async (id: string, currentStatus: boolean) => {
+    // Instant optimistic update
+    setMenuItems(prev => prev.map(item => item.id === id ? { ...item, is_sold_out: !currentStatus } : item));
+
     const { error } = await supabase.rpc('toggle_sold_out', { item_id: id, new_status: !currentStatus });
-    if (!error) {
-      setMenuItems(menuItems.map(item => item.id === id ? { ...item, is_sold_out: !currentStatus } : item));
-    } else {
+    if (error) {
+      // Revert if error
+      setMenuItems(prev => prev.map(item => item.id === id ? { ...item, is_sold_out: currentStatus } : item));
       showAlert({ title: 'Action Failed', message: `Failed to update sold out status: ${error.message}`, type: 'error' });
     }
   };
@@ -1245,7 +1326,7 @@ export default function CanteenAdminDashboard() {
   }
 
   return (
-    <div className={`w-full ${isOrdersView || !isDedicatedView ? 'max-w-5xl' : 'max-w-4xl'} mx-auto grid grid-cols-1 gap-5`}>
+    <div className={`w-full ${!isDedicatedView ? 'max-w-7xl h-full flex flex-col' : isMenuView ? 'max-w-6xl' : isOrdersView ? 'max-w-5xl' : 'max-w-4xl'} mx-auto`}>
       {isOrdersView ? (
         /* Dedicated View 1: Order List */
         <>
@@ -1352,7 +1433,7 @@ export default function CanteenAdminDashboard() {
             { key: 'PREPARING', label: 'Preparing', count: statusCounts.PREPARING || 0 },
             { key: 'READY', label: 'Ready', count: statusCounts.READY || 0 },
             { key: 'COLLECTED', label: 'Collected', count: statusCounts.COLLECTED || 0 },
-            { key: 'REJECTED', label: 'Cancelled', count: statusCounts.REJECTED || 0 },
+            { key: 'REJECTED', label: 'Rejected / Cancelled', count: statusCounts.REJECTED || 0 },
           ].map(tab => {
             const isSelected = orderStatusFilter === tab.key;
             return (
@@ -1478,7 +1559,7 @@ export default function CanteenAdminDashboard() {
                         <td className="py-2.5 px-2 sm:px-3 text-slate-500 text-[11px]">
                           <div className="truncate">{new Date(order.created_at).toLocaleDateString([], { day: '2-digit', month: '2-digit', year: '2-digit' })}</div>
                           <div className="text-slate-400 text-[10px] truncate">
-                            {new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            {new Date(order.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })}
                           </div>
                         </td>
                         <td className="py-2.5 px-2.5 sm:px-3 overflow-hidden">
@@ -1504,7 +1585,9 @@ export default function CanteenAdminDashboard() {
                                     order.status === 'REJECTED' ? 'bg-red-50 text-red-700 border-red-200' :
                                       'bg-slate-100 text-slate-700 border-slate-200'
                             }`}>
-                            {order.status === 'REJECTED' ? 'CANCELLED' : order.status}
+                            {order.status === 'REJECTED'
+                              ? ((order as any).cancellation_reason === 'USER_CANCELLED' || (order as any).cancellation_reason?.toLowerCase().includes('cancel') ? 'CANCELLED' : 'REJECTED')
+                              : order.status}
                           </span>
                         </td>
                         <td className="py-2.5 px-2 sm:px-3 text-center">
@@ -1632,7 +1715,9 @@ export default function CanteenAdminDashboard() {
                                   order.status === 'REJECTED' ? 'bg-red-50 text-red-700 border-red-200' :
                                     'bg-slate-100 text-slate-700 border-slate-200'
                           }`}>
-                          {order.status === 'REJECTED' ? 'CANCELLED' : order.status}
+                          {order.status === 'REJECTED'
+                            ? ((order as any).cancellation_reason === 'USER_CANCELLED' || (order as any).cancellation_reason?.toLowerCase().includes('cancel') ? 'CANCELLED' : 'REJECTED')
+                            : order.status}
                         </span>
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border ${payInfo.badgeClass}`}>
                           {payInfo.label}
@@ -1688,7 +1773,7 @@ export default function CanteenAdminDashboard() {
 
                     <div className="text-[11px] text-slate-400 flex justify-between pt-1 border-t border-slate-50">
                       <span>{new Date(order.created_at).toLocaleDateString()}</span>
-                      <span>{new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      <span>{new Date(order.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })}</span>
                     </div>
                   </div>
                 </div>
@@ -1772,63 +1857,141 @@ export default function CanteenAdminDashboard() {
       </div>
     </>
   ) : isMenuView ? (
-    /* Dedicated View 2: Manage Menu */
-    <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-5 sm:p-8 shadow-sm flex flex-col">
-        <div className="flex justify-between items-center mb-5 shrink-0 flex-wrap gap-2">
-          <div className="flex items-center gap-2.5">
-            <h2 className="text-xl font-bold text-slate-800">Manage Menu</h2>
-            <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">
-              {filteredMenuItems.length} {filteredMenuItems.length === 1 ? 'item' : 'items'}
+    /* Dedicated View 2: Manage Menu (Exact Match to Design Screenshot) */
+    <div className="col-span-12 flex flex-col gap-5 w-full">
+      {/* 1. Top Hero Banner (Rich Dark Thematic Banner) */}
+      <div className="relative overflow-hidden rounded-[1.75rem] bg-[#0b192e] text-white p-6 sm:p-8 shadow-xl border border-slate-800">
+        {/* Ambient background glows */}
+        <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 w-80 h-80 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+          <div className="max-w-xl">
+            <span className="text-[10px] sm:text-xs font-black tracking-widest uppercase text-slate-400 block mb-1">
+              CANTEEN MANAGEMENT
             </span>
+            <h1 className="text-2xl sm:text-4xl font-black tracking-tight text-white flex items-center gap-2">
+              <span>Manage</span>
+              <span className="text-[#38bdf8]">Menu</span>
+            </h1>
+            <p className="mt-1.5 text-xs sm:text-sm text-slate-300 font-medium">
+              Add, edit and manage your canteen menu items easily.
+            </p>
+
+            {/* Feature Pills */}
+            <div className="flex flex-wrap items-center gap-2 mt-4 sm:mt-5">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900/80 border border-slate-700/70 text-[11px] font-semibold text-slate-200 backdrop-blur-xs">
+                <Leaf size={12} className="text-emerald-400" />
+                <span>Fresh & Healthy Food</span>
+              </span>
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900/80 border border-slate-700/70 text-[11px] font-semibold text-slate-200 backdrop-blur-xs">
+                <Flame size={12} className="text-amber-400" />
+                <span>Great Taste</span>
+              </span>
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900/80 border border-slate-700/70 text-[11px] font-semibold text-slate-200 backdrop-blur-xs">
+                <Sparkles size={12} className="text-sky-400" />
+                <span>Happy Customers</span>
+              </span>
+            </div>
+          </div>
+
+          {/* Right Hero Food Image Card with "Good Food Always" handwritten text */}
+          <div className="relative shrink-0 flex items-center justify-center self-center lg:self-auto">
+            <div className="relative w-72 sm:w-80 h-36 sm:h-40 rounded-2xl overflow-hidden shadow-2xl border-2 border-white/10 group">
+              <img
+                src="https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80"
+                alt="Delicious Indian Food"
+                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+            </div>
+
+            {/* Handwritten overlay script */}
+            <div className="hidden sm:block absolute -right-3 -top-2 text-right pointer-events-none transform rotate-3 select-none">
+              <span className="block font-serif italic text-white/90 text-sm font-bold drop-shadow">
+                Good<br />Food<br />Always
+              </span>
+              <span className="text-rose-400 text-xs">♥</span>
+            </div>
           </div>
         </div>
-        <form onSubmit={handleAddItem} className="flex flex-col gap-3.5 mb-5 bg-slate-50 p-4.5 rounded-2xl border border-slate-200/80 shadow-xs shrink-0">
-          {/* Category Selector: Fresh Food vs Packed Food */}
+      </div>
+
+      {/* 2. Main White Container Card */}
+      <div className="bg-white border border-slate-100 rounded-[2rem] p-5 sm:p-7 shadow-sm flex flex-col gap-5">
+        {/* Top Header: Purple Chef Icon + Title + Count Badge + Action Buttons */}
+        <div className="flex items-center justify-between flex-wrap gap-3 pb-1">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-[#6366f1] text-white flex items-center justify-center shadow-md shadow-indigo-500/25">
+              <ChefHat size={22} strokeWidth={2.2} />
+            </div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight">
+                Manage Menu
+              </h2>
+              <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2.5 py-0.5 rounded-full">
+                {filteredMenuItems.length} {filteredMenuItems.length === 1 ? 'item' : 'items'}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* 3. Embedded Quick-Add Food Bar */}
+        <form onSubmit={handleAddItem} className="bg-slate-50/70 border border-slate-200/80 rounded-2xl p-4 flex flex-col gap-3">
+          {/* Category Toggle Row */}
           <div className="flex items-center gap-2.5 flex-wrap">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Category:</span>
-            <div className="inline-flex p-1 bg-white border border-slate-200 rounded-xl gap-1 shadow-2xs">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-600">
+              <LayoutGrid size={14} className="text-slate-400" />
+              <span>Category</span>
+            </div>
+
+            <div className="flex items-center gap-1.5">
               <button
                 type="button"
                 onClick={() => setNewItemCategory('FRESH')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all ${
+                className={`px-3 py-1.5 rounded-full text-xs font-bold transition flex items-center gap-1.5 ${
                   newItemCategory === 'FRESH'
                     ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                    : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
                 }`}
               >
-                <span>🍳 Fresh Food</span>
-                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${newItemCategory === 'FRESH' ? 'bg-emerald-700 text-emerald-100' : 'bg-slate-100 text-slate-500'}`}>
-                  Prep Time
-                </span>
+                <Leaf size={12} className={newItemCategory === 'FRESH' ? 'text-white' : 'text-emerald-600'} />
+                <span>Fresh Food</span>
               </button>
+
               <button
                 type="button"
                 onClick={() => setNewItemCategory('PACKED')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all ${
+                className={`px-3 py-1.5 rounded-full text-xs font-bold transition flex items-center gap-1.5 ${
                   newItemCategory === 'PACKED'
                     ? 'bg-purple-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                    : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
                 }`}
               >
-                <span>📦 Packed Food</span>
-                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${newItemCategory === 'PACKED' ? 'bg-purple-700 text-purple-100' : 'bg-slate-100 text-slate-500'}`}>
-                  Quantity
-                </span>
+                <Package size={12} className={newItemCategory === 'PACKED' ? 'text-white' : 'text-purple-600'} />
+                <span>Packed Food</span>
               </button>
             </div>
           </div>
 
-          <input
-            type="text"
-            placeholder={newItemCategory === 'FRESH' ? 'Fresh Food Name (e.g., Sambar Rice, KFC Chicken, Paneer Dosa, Meals)' : 'Packed Food Name (e.g., Lays Classic, Oreo Biscuits, Amul Lassi, Packed Chips)'}
-            value={newItemName}
-            onChange={(e) => setNewItemName(e.target.value)}
-            maxLength={100}
-            className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm text-slate-800 placeholder:text-slate-400 font-medium"
-          />
+          {/* Input Row: Food Name + Price + Prep Time/Qty + Veg Selector + Add Button */}
+          <div className="flex items-center gap-2 flex-wrap lg:flex-nowrap">
+            {/* Food Name Input */}
+            <div className="relative flex-1 min-w-[200px]">
+              <Utensils size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                placeholder={newItemCategory === 'FRESH' ? 'Enter food name (e.g., Sambar Rice, KFC Chicken, Paneer Dosa, Meals)' : 'Enter food name (e.g., Lays Classic, Oreo Biscuits, Amul Lassi)'}
+                value={newItemName}
+                onChange={(e) => setNewItemName(e.target.value)}
+                maxLength={100}
+                className="w-full pl-9 pr-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm font-medium text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
 
-          <div className="flex flex-col gap-1">
-            <div className="flex gap-2 items-center flex-wrap sm:flex-nowrap">
+            {/* Price Input */}
+            <div className="relative w-28 sm:w-32 shrink-0">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-500">₹</span>
               <input
                 type="number"
                 placeholder="Price (₹)"
@@ -1839,105 +2002,102 @@ export default function CanteenAdminDashboard() {
                 }}
                 min="0.01"
                 step="any"
-                className={`w-28 px-3.5 py-2.5 bg-white border ${priceError ? 'border-rose-400 ring-1 ring-rose-400' : 'border-slate-200'} rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm font-semibold text-slate-800`}
+                className={`w-full pl-7 pr-3 py-2.5 bg-white border ${priceError ? 'border-rose-400 ring-1 ring-rose-400' : 'border-slate-200'} rounded-xl text-xs sm:text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500`}
               />
+            </div>
 
-              {/* Conditional Input: Fresh Food has Preparation Time; Packed Food has Select Quantity */}
-              {newItemCategory === 'FRESH' ? (
-                <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 py-1.5">
-                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider shrink-0">⏱️ Prep:</span>
-                  <input
-                    type="number"
-                    placeholder="10"
-                    title="Estimated kitchen preparation duration in minutes"
-                    value={newItemPrepTime}
-                    onChange={(e) => setNewItemPrepTime(e.target.value)}
-                    min="1"
-                    max="60"
-                    className="w-12 px-1 py-1 text-sm font-bold text-slate-800 text-center border-none outline-none focus:ring-0"
-                  />
-                  <span className="text-[11px] font-semibold text-slate-400">mins</span>
+            {/* Prep Time or Stock Input */}
+            {newItemCategory === 'FRESH' ? (
+              <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 shrink-0">
+                <Clock size={13} className="text-slate-400" />
+                <div className="flex flex-col">
+                  <span className="text-[8px] font-black uppercase text-slate-400 tracking-wider">PREP TIME</span>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      placeholder="10"
+                      value={newItemPrepTime}
+                      onChange={(e) => setNewItemPrepTime(e.target.value)}
+                      min="1"
+                      max="60"
+                      className="w-8 text-xs font-black text-slate-800 text-center border-none p-0 focus:ring-0"
+                    />
+                    <span className="text-[10px] font-bold text-slate-500">mins</span>
+                  </div>
                 </div>
-              ) : (
-                <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 py-1.5">
-                  <span className="text-[11px] font-bold text-purple-600 uppercase tracking-wider shrink-0">📦 Qty:</span>
-                  <input
-                    type="number"
-                    placeholder="20"
-                    title="Available stock quantity in pieces"
-                    value={newItemQuantity}
-                    onChange={(e) => setNewItemQuantity(e.target.value)}
-                    min="0"
-                    max="1000"
-                    className="w-14 px-1 py-1 text-sm font-bold text-slate-800 text-center border-none outline-none focus:ring-0"
-                  />
-                  <select
-                    value={newItemQuantity}
-                    onChange={(e) => setNewItemQuantity(e.target.value)}
-                    className="text-xs font-semibold text-slate-600 bg-slate-50 border border-slate-200 rounded px-1.5 py-1 cursor-pointer"
-                    title="Quick preset quantity options"
-                  >
-                    <option value="5">5 pcs</option>
-                    <option value="10">10 pcs</option>
-                    <option value="15">15 pcs</option>
-                    <option value="20">20 pcs</option>
-                    <option value="25">25 pcs</option>
-                    <option value="50">50 pcs</option>
-                    <option value="100">100 pcs</option>
-                  </select>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 shrink-0">
+                <Package size={13} className="text-purple-600" />
+                <div className="flex flex-col">
+                  <span className="text-[8px] font-black uppercase text-purple-600 tracking-wider">QTY</span>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      placeholder="20"
+                      value={newItemQuantity}
+                      onChange={(e) => setNewItemQuantity(e.target.value)}
+                      min="0"
+                      max="1000"
+                      className="w-10 text-xs font-black text-slate-800 text-center border-none p-0 focus:ring-0"
+                    />
+                    <span className="text-[10px] font-bold text-slate-500">pcs</span>
+                  </div>
                 </div>
-              )}
+              </div>
+            )}
 
+            {/* Veg / Non-Veg Dropdown */}
+            <div className="shrink-0">
               <select
                 value={newItemType}
                 onChange={(e) => setNewItemType(e.target.value as FoodType)}
-                className="w-28 px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm font-semibold text-slate-800"
+                className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
               >
                 <option value="VEG">🟢 Veg</option>
                 <option value="NON_VEG">🔴 Non-Veg</option>
               </select>
-
-              <button
-                type="submit"
-                className={`px-5 py-2.5 text-white rounded-xl text-sm font-bold active:scale-95 transition-all shrink-0 cursor-pointer shadow-xs ${
-                  newItemCategory === 'FRESH'
-                    ? 'bg-emerald-600 hover:bg-emerald-700'
-                    : 'bg-purple-600 hover:bg-purple-700'
-                }`}
-              >
-                + Add {newItemCategory === 'FRESH' ? 'Fresh Food' : 'Packed Item'}
-              </button>
             </div>
-            {priceError && (
-              <p className="text-xs text-rose-600 font-semibold mt-0.5">{priceError}</p>
-            )}
+
+            {/* Submit Button */}
+            <button
+              type="submit"
+              className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 shadow-sm transition shrink-0 cursor-pointer active:scale-95 whitespace-nowrap"
+            >
+              <Plus size={15} strokeWidth={2.5} />
+              <span>Add {newItemCategory === 'FRESH' ? 'Fresh Food' : 'Packed Food'}</span>
+            </button>
           </div>
+          {priceError && (
+            <p className="text-xs text-rose-600 font-semibold">{priceError}</p>
+          )}
         </form>
 
-        {/* Search & Filter Toolbar */}
-        <div className="space-y-2.5 mb-4 shrink-0">
-          <div className="relative">
+        {/* 4. Search and Filter Toolbar (Exact Match to Design Screenshot) */}
+        <div className="flex items-center gap-3 flex-wrap lg:flex-nowrap">
+          {/* Search Input */}
+          <div className="relative flex-1 min-w-[220px]">
             <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
               placeholder="Search by item name, price, or category..."
               value={menuSearch}
               onChange={(e) => setMenuSearch(e.target.value)}
-              className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-800 placeholder:text-slate-400"
+              className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
             {menuSearch && (
               <button
+                type="button"
                 onClick={() => setMenuSearch('')}
                 className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                title="Clear search"
               >
                 <X size={14} />
               </button>
             )}
           </div>
 
-          {/* Filter Pills */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
+          {/* Filter Pill Buttons Row */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
             {([
               { key: 'ALL', label: 'All', icon: ListFilter, iconColor: 'text-slate-500' },
               { key: 'VEG', label: 'Veg', icon: Leaf, iconColor: 'text-emerald-500' },
@@ -1950,11 +2110,12 @@ export default function CanteenAdminDashboard() {
               return (
                 <button
                   key={key}
+                  type="button"
                   onClick={() => setMenuTypeFilter(key)}
                   className={`px-3 py-1.5 rounded-full text-xs font-bold shrink-0 transition-all border inline-flex items-center gap-1.5 ${
                     isSelected
                       ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
-                      : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
                   }`}
                 >
                   <IconComp size={13} className={isSelected ? 'text-white' : iconColor} />
@@ -1963,116 +2124,730 @@ export default function CanteenAdminDashboard() {
               );
             })}
           </div>
+          {/* View Mode Toggle: Grid, Table, Kanban */}
+          <div className="flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200 shrink-0">
+            <button
+              type="button"
+              onClick={() => setMenuViewMode('GRID')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                menuViewMode === 'GRID'
+                  ? 'bg-white text-indigo-600 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+              title="Grid / Card View"
+            >
+              <LayoutGrid size={13} />
+              <span>Grid</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMenuViewMode('TABLE')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                menuViewMode === 'TABLE'
+                  ? 'bg-white text-indigo-600 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+              title="Table View"
+            >
+              <Table size={13} />
+              <span>Table</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMenuViewMode('KANBAN')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                menuViewMode === 'KANBAN'
+                  ? 'bg-white text-indigo-600 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+              title="Kanban Board View"
+            >
+              <Kanban size={13} />
+              <span>Kanban</span>
+            </button>
+          </div>
         </div>
 
-        {/* Menu Items List Container */}
-        <div className="flex-1 overflow-y-auto pr-1">
-        {loading ? (
-          <div className="text-slate-500 text-sm py-12 text-center">Loading menu...</div>
-        ) : filteredMenuItems.length === 0 ? (
-          <div className="col-span-full text-slate-400 text-sm text-center py-12 bg-slate-50/70 rounded-2xl border border-slate-100">
-            {menuSearch || menuTypeFilter !== 'ALL'
-              ? 'No menu items match your search or filter.'
-              : 'No menu items for this location yet.'}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            {filteredMenuItems.map(item => {
-              const isPacked = (item as any).category === 'Packed Food' || item.name.toLowerCase().includes('packed') || getItemCategory(item) === 'Packed Food';
-              const stock = (item as any).stock_quantity ?? (isPacked ? 20 : null);
-              const prepMinutes = (item as any).prep_time_minutes ?? (isPacked ? 0 : 10);
+        {/* 5. Menu Items Views Container: Grid, Table, or Kanban */}
+        <div>
+          {loading ? (
+            <div className="text-slate-500 text-sm py-12 text-center">Loading menu items...</div>
+          ) : filteredMenuItems.length === 0 ? (
+            <div className="text-slate-400 text-sm text-center py-12 bg-slate-50/70 rounded-2xl border border-slate-100">
+              {menuSearch || menuTypeFilter !== 'ALL'
+                ? 'No menu items match your search or filter.'
+                : 'No menu items for this location yet.'}
+            </div>
+          ) : menuViewMode === 'TABLE' ? (
+            /* Table View */
+            <div className="overflow-x-auto rounded-2xl border border-slate-200/90 bg-white shadow-xs">
+              <table className="w-full text-left border-collapse text-xs sm:text-sm">
+                <thead>
+                  <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 text-[11px] font-extrabold uppercase tracking-wider">
+                    <th className="py-3 px-4">Item Name</th>
+                    <th className="py-3 px-3">Type</th>
+                    <th className="py-3 px-3">Category</th>
+                    <th className="py-3 px-3">Price</th>
+                    <th className="py-3 px-3">Prep / Stock</th>
+                    <th className="py-3 px-3">Status</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredMenuItems.map((item) => {
+                    const rawCat = String((item as any).category || '').toLowerCase();
+                    const isPacked =
+                      rawCat === 'packed food' ||
+                      rawCat === 'packed' ||
+                      rawCat === 'packaged' ||
+                      rawCat === 'snacks' ||
+                      rawCat === 'snack' ||
+                      rawCat.includes('pack') ||
+                      (item as any).stock_quantity != null ||
+                      (item.name || '').toLowerCase().includes('packed') ||
+                      getItemCategory(item) === 'Packed Food';
+                    const stock = (item as any).stock_quantity ?? null;
+                    const prepMinutes = (item as any).prep_time_minutes ?? (isPacked ? 0 : 10);
+                    const isItemSoldOut = item.is_sold_out || (isPacked && stock !== null && stock <= 0);
+                    const isVeg = item.veg_non_veg === 'VEG';
 
-              return (
-                <div
-                  key={item.id}
-                  className={`p-3.5 rounded-2xl border transition-all flex flex-col justify-between gap-2 shadow-xs ${item.is_sold_out
-                      ? 'bg-slate-50/60 border-slate-200 opacity-70'
-                      : 'bg-white border-slate-200/90 hover:border-emerald-300'
-                    }`}
-                >
-                  <div className="flex justify-between items-start gap-2">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <h4 className="font-extrabold text-slate-900 text-sm truncate">{item.name}</h4>
-                        <span className={`text-[10px] px-1.5 py-0.2 rounded font-black border ${item.veg_non_veg === 'VEG'
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                            : 'bg-rose-50 text-rose-700 border-rose-200'
-                          }`}>
-                          {item.veg_non_veg === 'VEG' ? 'VEG' : 'NON-VEG'}
-                        </span>
-                        {isPacked ? (
-                          <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-black bg-purple-50 text-purple-700 border border-purple-200">
-                            📦 PACKED
+                    return (
+                      <tr
+                        key={item.id}
+                        className={`hover:bg-slate-50/60 transition-colors ${
+                          isItemSoldOut ? 'bg-slate-50/40 text-slate-400' : 'text-slate-700'
+                        }`}
+                      >
+                        <td className="py-3.5 px-4 font-bold text-slate-900">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`w-2 h-2 rounded-full shrink-0 ${
+                                isVeg ? 'bg-emerald-500 ring-2 ring-emerald-200' : 'bg-rose-500 ring-2 ring-rose-200'
+                              }`}
+                            />
+                            <span className="capitalize">{item.name}</span>
+                          </div>
+                        </td>
+                        <td className="py-3.5 px-3">
+                          <span
+                            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
+                              isVeg ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/60' : 'bg-rose-50 text-rose-700 border border-rose-200/60'
+                            }`}
+                          >
+                            {isVeg ? 'Veg' : 'Non-Veg'}
                           </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-black bg-amber-50 text-amber-700 border border-amber-200">
-                            🍳 FRESH • {prepMinutes}m prep
+                        </td>
+                        <td className="py-3.5 px-3">
+                          <span
+                            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
+                              isPacked
+                                ? 'bg-purple-50 text-purple-700 border border-purple-200/60'
+                                : 'bg-blue-50 text-blue-700 border border-blue-200/60'
+                            }`}
+                          >
+                            {isPacked ? <Package size={11} /> : <Utensils size={11} />}
+                            <span>{isPacked ? 'Packed Food' : 'Fresh Food'}</span>
                           </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-                        <span className="font-black text-emerald-700 text-sm">
-                          ₹{Number(item.price).toFixed(2)}
-                        </span>
-                        {isPacked && (
-                          <div className="inline-flex items-center gap-1.5 bg-purple-50/70 border border-purple-200/80 px-2 py-0.5 rounded-lg">
-                            <span className="text-[10px] font-bold text-purple-700">Stock:</span>
-                            <button
-                              type="button"
-                              onClick={() => handleUpdateStock(item.id, Math.max(0, (stock ?? 0) - 1))}
-                              disabled={(stock ?? 0) <= 0}
-                              className="w-5 h-5 flex items-center justify-center rounded bg-white border border-purple-200 hover:bg-purple-100 text-xs font-black text-purple-900 disabled:opacity-30 cursor-pointer shadow-2xs"
-                              title="Decrease stock by 1"
-                            >
-                              −
-                            </button>
-                            <span className={`text-xs font-black min-w-[20px] text-center ${(stock ?? 0) === 0 ? 'text-rose-600 font-extrabold' : 'text-purple-900'}`}>
-                              {stock ?? 0}
+                        </td>
+                        <td className="py-3.5 px-3 font-black text-[#1d68f2]">
+                          ₹{Number(item.price || 0).toFixed(2)}
+                        </td>
+                        <td className="py-3.5 px-3">
+                          {isPacked ? (
+                            <div className="inline-flex items-center gap-1.5 bg-slate-100 rounded-lg px-2 py-0.5">
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateStock(item.id, Math.max(0, (stock ?? 0) - 1))}
+                                className="w-5 h-5 rounded bg-white hover:bg-slate-200 text-slate-700 flex items-center justify-center font-bold text-xs"
+                              >
+                                -
+                              </button>
+                              <span className="w-6 text-center text-xs font-black text-slate-800">{stock ?? 0}</span>
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateStock(item.id, (stock ?? 0) + 1)}
+                                className="w-5 h-5 rounded bg-white hover:bg-slate-200 text-slate-700 flex items-center justify-center font-bold text-xs"
+                              >
+                                +
+                              </button>
+                              <span className="text-[10px] text-slate-400 font-bold">pcs</span>
+                            </div>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-xs text-amber-700 font-bold bg-amber-50 px-2 py-0.5 rounded-md">
+                              <Clock size={11} />
+                              {prepMinutes} mins
                             </span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-3">
+                          <span
+                            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                              isItemSoldOut
+                                ? 'bg-rose-100 text-rose-700 border border-rose-200'
+                                : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            }`}
+                          >
+                            {isItemSoldOut ? 'Sold Out' : 'Available'}
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 text-right">
+                          <div className="flex items-center justify-end gap-2">
                             <button
                               type="button"
-                              onClick={() => handleUpdateStock(item.id, (stock ?? 0) + 1)}
-                              className="w-5 h-5 flex items-center justify-center rounded bg-white border border-purple-200 hover:bg-purple-100 text-xs font-black text-purple-900 cursor-pointer shadow-2xs"
-                              title="Increase stock by 1"
+                              onClick={() => handleToggleSoldOut(item.id, isItemSoldOut)}
+                              className={`px-3 py-1 rounded-full font-bold text-xs transition cursor-pointer ${
+                                isItemSoldOut
+                                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                                  : 'bg-rose-600 hover:bg-rose-700 text-white'
+                              }`}
                             >
-                              +
+                              {isItemSoldOut ? 'Available' : 'Sold Out'}
                             </button>
-                            <span className="text-[10px] text-purple-600 font-semibold">pcs</span>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteMenuItem(item.id, item.name)}
+                              className="w-8 h-8 rounded-full border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-600 flex items-center justify-center transition cursor-pointer"
+                              title="Delete item"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : menuViewMode === 'KANBAN' ? (
+            /* Kanban Board View (Grouped by Available vs Sold Out) */
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Column 1: Available Items */}
+              <div className="bg-slate-50/80 rounded-2xl border border-slate-200/80 p-4 flex flex-col">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-200 mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <h3 className="font-extrabold text-sm text-slate-800">Available ({filteredMenuItems.filter(i => {
+                      const isPacked = getItemCategory(i) === 'Packed Food';
+                      const stock = (i as any).stock_quantity ?? null;
+                      return !i.is_sold_out && !(isPacked && stock !== null && stock <= 0);
+                    }).length})</h3>
+                  </div>
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">Active on App</span>
+                </div>
+                <div className="space-y-3 flex-1 overflow-y-auto max-h-[700px] pr-1">
+                  {filteredMenuItems.filter(i => {
+                    const isPacked = getItemCategory(i) === 'Packed Food';
+                    const stock = (i as any).stock_quantity ?? null;
+                    return !i.is_sold_out && !(isPacked && stock !== null && stock <= 0);
+                  }).map(item => {
+                    const rawCat = String((item as any).category || '').toLowerCase();
+                    const isPacked =
+                      rawCat === 'packed food' ||
+                      rawCat === 'packed' ||
+                      rawCat === 'packaged' ||
+                      rawCat === 'snacks' ||
+                      rawCat === 'snack' ||
+                      rawCat.includes('pack') ||
+                      (item as any).stock_quantity != null ||
+                      (item.name || '').toLowerCase().includes('packed') ||
+                      getItemCategory(item) === 'Packed Food';
+                    const stock = (item as any).stock_quantity ?? null;
+                    const prepMinutes = (item as any).prep_time_minutes ?? (isPacked ? 0 : 10);
+                    const isVeg = item.veg_non_veg === 'VEG';
+
+                    return (
+                      <div
+                        key={item.id}
+                        className="bg-white rounded-xl border border-slate-200 p-3.5 shadow-2xs hover:shadow-md transition flex flex-col gap-2"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <span className={`w-2 h-2 rounded-full ${isVeg ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{isVeg ? 'Veg' : 'Non-Veg'}</span>
+                              <span className="text-slate-300">•</span>
+                              <span className="text-[10px] font-bold text-slate-500">{isPacked ? 'Packed' : `${prepMinutes}m prep`}</span>
+                            </div>
+                            <h4 className="font-extrabold text-sm text-slate-900 capitalize">{item.name}</h4>
+                          </div>
+                          <span className="text-sm font-black text-[#1d68f2]">₹{Number(item.price || 0).toFixed(2)}</span>
+                        </div>
+
+                        {isPacked && (
+                          <div className="flex items-center justify-between bg-slate-50 rounded-lg px-2 py-1 text-xs">
+                            <span className="text-[10px] font-bold text-slate-500">Stock</span>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateStock(item.id, Math.max(0, (stock ?? 0) - 1))}
+                                className="w-5 h-5 rounded bg-white border border-slate-200 text-slate-700 flex items-center justify-center font-bold text-xs"
+                              >
+                                -
+                              </button>
+                              <span className="w-6 text-center text-xs font-black text-slate-800">{stock ?? 0}</span>
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateStock(item.id, (stock ?? 0) + 1)}
+                                className="w-5 h-5 rounded bg-white border border-slate-200 text-slate-700 flex items-center justify-center font-bold text-xs"
+                              >
+                                +
+                              </button>
+                            </div>
                           </div>
                         )}
+
+                        <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteMenuItem(item.id, item.name)}
+                            className="w-7 h-7 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center transition"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleSoldOut(item.id, false)}
+                            className="px-3 py-1 rounded-full bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-bold transition flex items-center gap-1"
+                          >
+                            <IconBan size={12} />
+                            <span>Mark Sold Out</span>
+                          </button>
+                        </div>
                       </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Column 2: Sold Out Items */}
+              <div className="bg-rose-50/30 rounded-2xl border border-rose-100 p-4 flex flex-col">
+                <div className="flex items-center justify-between pb-3 border-b border-rose-100 mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
+                    <h3 className="font-extrabold text-sm text-slate-800">Sold Out ({filteredMenuItems.filter(i => {
+                      const isPacked = getItemCategory(i) === 'Packed Food';
+                      const stock = (i as any).stock_quantity ?? null;
+                      return i.is_sold_out || (isPacked && stock !== null && stock <= 0);
+                    }).length})</h3>
+                  </div>
+                  <span className="text-[10px] font-bold text-rose-700 bg-rose-100 px-2 py-0.5 rounded-full">Hidden / Disabled</span>
+                </div>
+                <div className="space-y-3 flex-1 overflow-y-auto max-h-[700px] pr-1">
+                  {filteredMenuItems.filter(i => {
+                    const isPacked = getItemCategory(i) === 'Packed Food';
+                    const stock = (i as any).stock_quantity ?? null;
+                    return i.is_sold_out || (isPacked && stock !== null && stock <= 0);
+                  }).map(item => {
+                    const rawCat = String((item as any).category || '').toLowerCase();
+                    const isPacked =
+                      rawCat === 'packed food' ||
+                      rawCat === 'packed' ||
+                      rawCat === 'packaged' ||
+                      rawCat === 'snacks' ||
+                      rawCat === 'snack' ||
+                      rawCat.includes('pack') ||
+                      (item as any).stock_quantity != null ||
+                      (item.name || '').toLowerCase().includes('packed') ||
+                      getItemCategory(item) === 'Packed Food';
+                    const isVeg = item.veg_non_veg === 'VEG';
+
+                    return (
+                      <div
+                        key={item.id}
+                        className="bg-white/90 rounded-xl border border-slate-200/80 p-3.5 shadow-2xs hover:shadow-md transition flex flex-col gap-2 opacity-85"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <span className={`w-2 h-2 rounded-full ${isVeg ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{isVeg ? 'Veg' : 'Non-Veg'}</span>
+                              <span className="text-slate-300">•</span>
+                              <span className="text-[10px] font-bold text-rose-600 font-bold">Sold Out</span>
+                            </div>
+                            <h4 className="font-extrabold text-sm text-slate-800 capitalize line-through">{item.name}</h4>
+                          </div>
+                          <span className="text-sm font-bold text-slate-400">₹{Number(item.price || 0).toFixed(2)}</span>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteMenuItem(item.id, item.name)}
+                            className="w-7 h-7 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center transition"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleSoldOut(item.id, true)}
+                            className="px-3 py-1 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center gap-1 shadow-xs"
+                          >
+                            <CheckCircle2 size={12} />
+                            <span>Mark Available</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* Grid / Card Layout (Default) */
+            <div className="space-y-3">
+              {filteredMenuItems.map((item, idx) => {
+                const rawCat = String((item as any).category || '').toLowerCase();
+                const isPacked =
+                  rawCat === 'packed food' ||
+                  rawCat === 'packed' ||
+                  rawCat === 'packaged' ||
+                  rawCat === 'snacks' ||
+                  rawCat === 'snack' ||
+                  rawCat.includes('pack') ||
+                  (item as any).stock_quantity != null ||
+                  (item.name || '').toLowerCase().includes('packed') ||
+                  getItemCategory(item) === 'Packed Food';
+                const stock = (item as any).stock_quantity ?? null;
+                const prepMinutes = (item as any).prep_time_minutes ?? (isPacked ? 0 : 10);
+                const isItemSoldOut = item.is_sold_out || (isPacked && stock !== null && stock <= 0);
+                const isVeg = item.veg_non_veg === 'VEG';
+
+                // Determine theme accent matching user reference image
+                let themeBorder = 'border-l-[6px] border-t-2 border-emerald-500 hover:border-emerald-600';
+                let themeBg = 'bg-gradient-to-br from-emerald-50/40 via-white to-emerald-50/10';
+                if (isPacked) {
+                  themeBorder = 'border-l-[6px] border-t-2 border-amber-400 hover:border-amber-500';
+                  themeBg = 'bg-gradient-to-br from-amber-50/40 via-white to-amber-50/10';
+                } else if (!isVeg) {
+                  themeBorder = 'border-l-[6px] border-t-2 border-rose-500 hover:border-rose-600';
+                  themeBg = 'bg-gradient-to-br from-rose-50/40 via-white to-rose-50/10';
+                }
+
+                const itemNameLower = (item.name || '').toLowerCase();
+                let itemDesc = (item as any).description;
+                if (!itemDesc) {
+                  if (itemNameLower.includes('idly') || itemNameLower.includes('idli')) {
+                    itemDesc = 'Soft and fluffy idlies, perfect for a healthy start.';
+                  } else if (itemNameLower.includes('dosa')) {
+                    itemDesc = 'Crispy dosa with chutney and sambar.';
+                  } else if (itemNameLower.includes('lays') || itemNameLower.includes('chip')) {
+                    itemDesc = 'Crispy and crunchy potato chips (original).';
+                  } else if (isPacked) {
+                    itemDesc = `Packaged sealed snack • Stock: ${stock ?? 0} pcs.`;
+                  } else {
+                    itemDesc = `Freshly cooked delicious ${item.name.toLowerCase()}.`;
+                  }
+                }
+
+                return (
+                  <div
+                    key={item.id}
+                    className={`relative rounded-[1.75rem] border border-slate-200/80 p-5 sm:p-6 flex flex-col justify-between shadow-sm transition-all duration-200 hover:shadow-lg ${themeBorder} ${themeBg} ${
+                      isItemSoldOut ? 'opacity-70 bg-slate-50 grayscale-20' : ''
+                    }`}
+                  >
+                    <div>
+                      {/* Top Row: Badges matching user reference */}
+                      <div className="flex items-center justify-between gap-1.5 mb-3 flex-wrap">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {/* Veg / Non-Veg Badge */}
+                          <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black shadow-2xs ${
+                            isVeg ? 'bg-emerald-100/90 text-emerald-800' : 'bg-rose-100/90 text-rose-800'
+                          }`}>
+                            {isVeg ? (
+                              <Leaf size={12} className="text-emerald-700" />
+                            ) : (
+                              <span className="w-2 h-2 rounded-full bg-rose-600 ring-2 ring-rose-300" />
+                            )}
+                            <span>{isVeg ? 'Veg' : 'Non-Veg'}</span>
+                          </div>
+
+                          {/* Category / Prep Badge */}
+                          {isPacked ? (
+                            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-800 border border-blue-200/60">
+                              <Package size={12} className="text-blue-600" />
+                              <span>Packed Food</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-100/80 text-amber-900">
+                              <Clock size={12} className="text-amber-800" />
+                              <span>{prepMinutes}m prep</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Right Tag */}
+                        {isItemSoldOut ? (
+                          <span className="px-2.5 py-1 rounded-full bg-rose-100 text-rose-700 text-[10px] font-black uppercase tracking-wider">
+                            Sold Out
+                          </span>
+                        ) : isPacked ? (
+                          <span className="px-2.5 py-1 rounded-full bg-pink-100/80 text-pink-700 text-[10px] font-extrabold flex items-center gap-1">
+                            ★ Popular
+                          </span>
+                        ) : (
+                          <span className="px-2.5 py-1 rounded-full bg-emerald-100/70 text-emerald-700 text-[10px] font-extrabold flex items-center gap-1">
+                            💚 Healthy Choice
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Food Title */}
+                      <h3 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight leading-snug mt-2 capitalize">
+                        {item.name}
+                      </h3>
+
+                      {/* Food Description */}
+                      <p className="text-xs sm:text-sm text-slate-500 font-medium leading-relaxed mt-1.5 min-h-[38px] line-clamp-2">
+                        {itemDesc}
+                      </p>
                     </div>
 
-                    <button
-                      onClick={() => handleDeleteMenuItem(item.id, item.name)}
-                      className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 transition-colors"
-                      title="Delete item"
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
+                    {/* Stock counter if packed */}
+                    {isPacked && (
+                      <div className="flex items-center justify-between bg-white/80 border border-slate-200/70 rounded-xl px-3 py-1.5 my-2">
+                        <span className="text-[11px] font-bold text-slate-600 uppercase">Inventory Stock</span>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateStock(item.id, Math.max(0, (stock ?? 0) - 1))}
+                            className="w-6 h-6 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center font-bold text-xs"
+                          >
+                            -
+                          </button>
+                          <span className="w-8 text-center text-xs font-black text-slate-900">{stock ?? 0}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateStock(item.id, (stock ?? 0) + 1)}
+                            className="w-6 h-6 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center font-bold text-xs"
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
+                    )}
 
-                  <div className="flex justify-between items-center pt-2 border-t border-slate-100">
-                    <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold ${item.is_sold_out ? 'text-rose-600' : 'text-emerald-600'}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${item.is_sold_out ? 'bg-rose-500' : 'bg-emerald-500'}`} />
-                      <span>{item.is_sold_out ? 'Sold Out' : 'Available'}</span>
-                    </span>
-                    <button
-                      onClick={() => handleToggleSoldOut(item.id, item.is_sold_out)}
-                      className={`px-3 py-1 rounded-xl text-xs font-bold transition-all border ${item.is_sold_out
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                          : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
-                        }`}
-                    >
-                      {item.is_sold_out ? 'Mark Available' : 'Mark Sold Out'}
-                    </button>
+                    {/* Footer: Price on Left, Action Buttons on Right */}
+                    <div className="pt-4 border-t border-slate-200/70 flex items-center justify-between gap-3 mt-3">
+                      <div>
+                        <span className="text-[10px] tracking-wider font-extrabold text-slate-400 block uppercase">
+                          PRICE
+                        </span>
+                        <div className="text-2xl font-black text-[#1d68f2] tracking-tight">
+                          ₹{Number(item.price || 0).toFixed(2)}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteMenuItem(item.id, item.name)}
+                          className="w-9 h-9 rounded-full border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-600 flex items-center justify-center transition cursor-pointer"
+                          title="Delete item"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleToggleSoldOut(item.id, isItemSoldOut)}
+                          className={`px-4 py-2 rounded-full font-extrabold text-xs transition-all shadow-md flex items-center gap-1.5 cursor-pointer ${
+                            isItemSoldOut
+                              ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-500/25'
+                              : 'bg-rose-600 hover:bg-rose-700 text-white shadow-rose-500/25'
+                          }`}
+                        >
+                          <IconBan size={13} />
+                          <span>{isItemSoldOut ? 'Available' : 'Sold Out'}</span>
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* 6. Footer Brand Pill Bar */}
+      <div className="flex items-center justify-center sm:justify-between flex-wrap gap-3 py-2 text-slate-400 text-xs font-semibold px-2">
+        <div className="flex items-center gap-4 flex-wrap">
+          <span className="inline-flex items-center gap-1 text-slate-500">
+            <Leaf size={14} className="text-emerald-500" />
+            <span>Fresh Ingredients</span>
+          </span>
+          <span>|</span>
+          <span className="inline-flex items-center gap-1 text-slate-500">
+            <Star size={14} className="text-amber-500" />
+            <span>Hygienic Food</span>
+          </span>
+          <span>|</span>
+          <span className="inline-flex items-center gap-1 text-slate-500">
+            <Sparkles size={14} className="text-blue-500" />
+            <span>Happy Customers</span>
+          </span>
+        </div>
+
+        <div className="font-serif italic font-bold text-blue-600 text-sm flex items-center gap-1">
+          <span>Better Food, Better Day.</span>
+          <span>♡</span>
+        </div>
+      </div>
+
+      {/* 7. Modal for "Add New Item" */}
+      {isAddItemModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-7 max-w-lg w-full shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-xs">
+                  <ChefHat size={18} />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900">Add New Menu Item</h3>
+                  <p className="text-xs text-slate-400">Add a dish to your live canteen menu</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAddItemModalOpen(false)}
+                className="w-8 h-8 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 flex items-center justify-center"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddItem} className="space-y-4">
+              {/* Category */}
+              <div>
+                <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase tracking-wider">Category</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNewItemCategory('FRESH')}
+                    className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition ${
+                      newItemCategory === 'FRESH'
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <Leaf size={14} />
+                    <span>Fresh Food (Cooked)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewItemCategory('PACKED')}
+                    className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition ${
+                      newItemCategory === 'PACKED'
+                        ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <Package size={14} />
+                    <span>Packed Food (Stock)</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Item Name */}
+              <div>
+                <label className="block text-xs font-bold text-slate-600 mb-1">Item Name</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Masala Dosa, Paneer Rice, Veg Biryani"
+                  value={newItemName}
+                  onChange={(e) => setNewItemName(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+              </div>
+
+              {/* Price and Type Grid */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Price (₹)</label>
+                  <input
+                    type="number"
+                    placeholder="40"
+                    value={newItemPrice}
+                    onChange={(e) => {
+                      setNewItemPrice(e.target.value);
+                      if (priceError) setPriceError(null);
+                    }}
+                    min="0.01"
+                    step="any"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Food Type</label>
+                  <select
+                    value={newItemType}
+                    onChange={(e) => setNewItemType(e.target.value as FoodType)}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="VEG">🟢 Veg</option>
+                    <option value="NON_VEG">🔴 Non-Veg</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Prep time or Quantity */}
+              {newItemCategory === 'FRESH' ? (
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Kitchen Prep Duration (Minutes)</label>
+                  <input
+                    type="number"
+                    placeholder="10"
+                    value={newItemPrepTime}
+                    onChange={(e) => setNewItemPrepTime(e.target.value)}
+                    min="1"
+                    max="60"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Available Quantity in Stock</label>
+                  <input
+                    type="number"
+                    placeholder="20"
+                    value={newItemQuantity}
+                    onChange={(e) => setNewItemQuantity(e.target.value)}
+                    min="0"
+                    max="1000"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              )}
+
+              {priceError && (
+                <p className="text-xs text-rose-600 font-semibold">{priceError}</p>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsAddItemModalOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl text-xs font-bold bg-[#1d68f2] hover:bg-blue-600 text-white shadow-md shadow-blue-500/25 transition"
+                >
+                  Save Item
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   ) : isAnalyticsView ? (
     /* Dedicated View 3: Weekly Analytics */
@@ -2899,7 +3674,7 @@ export default function CanteenAdminDashboard() {
                   )}
 
                   <div className="text-[10px] text-slate-400">
-                    Reviewed on: {new Date(review.created_at).toLocaleString()}
+                    Reviewed on: {new Date(review.created_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short', hour12: true })}
                   </div>
                 </div>
 
@@ -2953,165 +3728,645 @@ export default function CanteenAdminDashboard() {
       </div>
     </div>
   ) : (
-    /* Executive Canteen Operations Hub (Shown on main /canteen-admin) */
-    <>
-      {/* Welcome Banner */}
-      <div className="bg-emerald-600 rounded-[2rem] p-6 sm:p-8 text-white shadow-sm relative overflow-hidden">
-        <span className="px-3 py-1 bg-emerald-500 text-xs font-bold uppercase tracking-wider rounded-full border border-emerald-400">
-          Canteen Admin
-        </span>
-        <h1 className="text-2xl sm:text-3xl font-extrabold mt-4 leading-tight">Welcome, {profile?.name || 'Admin'}</h1>
-        <p className="mt-2 text-emerald-100 max-w-2xl text-xs sm:text-sm leading-relaxed">
-          Executive canteen operations hub. Select any module from the navigation sidebar or quick cards below to manage orders, menu items, kitchen staff, and customer reviews.
-        </p>
-      </div>
-
-      {/* Today's Summary */}
-      <div className="bg-white border border-slate-200 rounded-[2rem] p-5 sm:p-7 shadow-xs">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold text-slate-800">Today's Summary</h2>
-          <span className="text-xs font-semibold text-slate-500">Live Shifts</span>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
-          <div className="p-5 bg-blue-50/80 border border-blue-100/80 rounded-2xl flex flex-col items-center">
-            <span className="text-3xl font-black text-blue-700">{stats.placed}</span>
-            <span className="text-xs font-bold text-blue-600 uppercase tracking-wide mt-1">Total Orders</span>
-          </div>
-          <div className="p-5 bg-emerald-50/80 border border-emerald-100/80 rounded-2xl flex flex-col items-center">
-            <span className="text-3xl font-black text-emerald-700">{stats.collected}</span>
-            <span className="text-xs font-bold text-emerald-600 uppercase tracking-wide mt-1">Collected</span>
-          </div>
-          <div className="p-5 bg-rose-50/80 border border-rose-100/80 rounded-2xl flex flex-col items-center">
-            <span className="text-3xl font-black text-rose-700">{stats.rejected}</span>
-            <span className="text-xs font-bold text-rose-600 uppercase tracking-wide mt-1">Rejected / Cancelled</span>
-          </div>
-        </div>
-      </div>
-
-      {/* 5 Interactive Hub Cards (Matching University Admin Pattern) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {/* Card 1: Order List */}
-        <div className="bg-white border border-slate-200 rounded-[2rem] p-6 shadow-xs flex flex-col justify-between hover:shadow-md transition">
-          <div>
-            <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-700 flex items-center justify-center mb-4 border border-blue-200/60">
-              <ClipboardList size={24} />
-            </div>
-            <div className="flex items-baseline justify-between mb-1">
-              <h3 className="font-extrabold text-slate-800 text-lg">Order List</h3>
-              <span className="text-2xl font-black text-slate-900">{allOrders.length}</span>
-            </div>
-            <p className="text-slate-500 text-xs mb-4">
-              Real-time order statuses, pickup time verification, and fulfillment stages.
-            </p>
-          </div>
-          <Link
-            to="/canteen-admin/orders"
-            className="w-full py-2.5 px-4 bg-slate-50 hover:bg-emerald-50 text-emerald-600 font-bold text-xs rounded-xl flex items-center justify-between border border-slate-200/80 hover:border-emerald-200 transition"
-          >
-            <span>Inspect Orders</span>
-            <ArrowRight size={14} />
-          </Link>
-        </div>
-
-        {/* Card 2: Manage Menu */}
-        <div className="bg-white border border-slate-200 rounded-[2rem] p-6 shadow-xs flex flex-col justify-between hover:shadow-md transition">
-          <div>
-            <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-700 flex items-center justify-center mb-4 border border-amber-200/60">
-              <Utensils size={24} />
-            </div>
-            <div className="flex items-baseline justify-between mb-1">
-              <h3 className="font-extrabold text-slate-800 text-lg">Manage Menu</h3>
-              <span className="text-2xl font-black text-slate-900">{menuItems.length}</span>
-            </div>
-            <p className="text-slate-500 text-xs mb-4">
-              {menuItems.filter(i => !i.is_sold_out).length} active items currently in stock and available for ordering.
-            </p>
-          </div>
-          <Link
-            to="/canteen-admin/menu"
-            className="w-full py-2.5 px-4 bg-slate-50 hover:bg-emerald-50 text-emerald-600 font-bold text-xs rounded-xl flex items-center justify-between border border-slate-200/80 hover:border-emerald-200 transition"
-          >
-            <span>Configure Menu</span>
-            <ArrowRight size={14} />
-          </Link>
-        </div>
-
-        {/* Card 3: Weekly Analytics */}
-        <div className="bg-white border border-slate-200 rounded-[2rem] p-6 shadow-xs flex flex-col justify-between hover:shadow-md transition">
-          <div>
-            <div className="w-12 h-12 rounded-2xl bg-purple-50 text-purple-700 flex items-center justify-center mb-4 border border-purple-200/60">
-              <BarChart3 size={24} />
-            </div>
-            <div className="flex items-baseline justify-between mb-1">
-              <h3 className="font-extrabold text-slate-800 text-lg">Weekly Analytics</h3>
-              <span className="text-2xl font-black text-slate-900">
-                {analytics.mostSold.reduce((acc, i) => acc + i.count, 0)}
+    /* Executive CANTEEN OS Dashboard (Shown on main /canteen-admin) */
+    <div className="h-full w-full flex flex-col justify-between gap-3 text-slate-900 select-none overflow-hidden">
+      {/* Top Row: Welcome Banner (Left) + Date & Time Card (Right) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-stretch shrink-0">
+        {/* Welcome Banner Card */}
+        <div className="lg:col-span-9 relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#060b14] via-[#0d1624] to-[#141e30] text-white p-4 sm:p-5 shadow-lg border border-slate-800/80 flex flex-col justify-between min-h-[125px]">
+          {/* Subtle dish background on the right */}
+          <div className="absolute right-0 top-0 bottom-0 w-2/5 sm:w-1/2 pointer-events-none overflow-hidden hidden sm:block">
+            <img
+              src="https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80"
+              alt="Fresh Dish"
+              className="w-full h-full object-cover object-center opacity-85 mask-radial"
+              style={{
+                maskImage: 'linear-gradient(to left, rgba(0,0,0,1) 40%, rgba(0,0,0,0) 100%)',
+                WebkitMaskImage: 'linear-gradient(to left, rgba(0,0,0,1) 40%, rgba(0,0,0,0) 100%)'
+              }}
+            />
+            {/* "Fresh Tasty Always" decorative text floating on dish */}
+            <div className="absolute top-4 right-6 text-right drop-shadow-lg select-none hidden md:block">
+              <span className="font-serif italic font-extrabold text-sm tracking-wide text-white drop-shadow-md block">
+                Fresh
+              </span>
+              <span className="font-serif italic font-extrabold text-sm tracking-wide text-white drop-shadow-md block -mt-1">
+                Tasty ·
+              </span>
+              <span className="font-serif italic font-extrabold text-sm tracking-wide text-white drop-shadow-md block -mt-1">
+                Always
               </span>
             </div>
-            <p className="text-slate-500 text-xs mb-4">
-              {analytics.mostSold.length > 0
-                ? `Top seller: "${analytics.mostSold[0]?.name}" (${analytics.mostSold[0]?.count} sold)`
-                : 'Track kitchen demand velocity and sales performance.'}
-            </p>
           </div>
-          <Link
-            to="/canteen-admin/analytics"
-            className="w-full py-2.5 px-4 bg-slate-50 hover:bg-emerald-50 text-emerald-600 font-bold text-xs rounded-xl flex items-center justify-between border border-slate-200/80 hover:border-emerald-200 transition"
-          >
-            <span>View Analytics</span>
-            <ArrowRight size={14} />
-          </Link>
+
+          <div className="relative z-10 max-w-lg">
+            <span className="text-xs sm:text-sm font-medium text-slate-300 block">
+              Welcome back,
+            </span>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl sm:text-2xl font-black tracking-tight text-white">
+                {profile?.name || 'Madeshwar'}
+              </h1>
+              <span className="text-xl sm:text-2xl animate-bounce">👋</span>
+            </div>
+            <p className="mt-0.5 text-xs text-slate-300 font-medium">
+              Good evening! Here's what's happening in your canteen today.
+            </p>
+
+            {/* Feature Pills */}
+            <div className="mt-2.5 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900/80 border border-slate-700/60 backdrop-blur-sm text-[10px] font-semibold text-slate-300">
+              <Utensils size={12} className="text-blue-400" />
+              <span>Fresh Food</span>
+              <span className="text-slate-500">•</span>
+              <span>Happy People</span>
+              <span className="text-slate-500">•</span>
+              <span>Better Days</span>
+            </div>
+          </div>
         </div>
 
-        {/* Card 4: Manage Staff & Penalties */}
-        <div className="bg-white border border-slate-200 rounded-[2rem] p-6 shadow-xs flex flex-col justify-between hover:shadow-md transition">
-          <div>
-            <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-700 flex items-center justify-center mb-4 border border-indigo-200/60">
-              <Users size={24} />
+        {/* Date & Time Widgets (Matched exactly to Staff Dashboard aesthetic) */}
+        <div className="lg:col-span-3 flex flex-col justify-between gap-2.5">
+          {/* Card 1: DATE */}
+          <div className="relative overflow-hidden bg-gradient-to-r from-[#ffffff] via-[#f8fbff] to-[#f0f6ff] rounded-2xl sm:rounded-3xl border border-white p-3 sm:p-3.5 shadow-[0_8px_20px_rgba(180,205,240,0.35)] flex items-center justify-between min-h-[66px]">
+            {/* Right side Calendar Illustration with Leaf */}
+            <div className="absolute right-1 -bottom-1 pointer-events-none w-28 h-20 opacity-90 select-none">
+              <svg viewBox="0 0 140 100" fill="none" className="w-full h-full">
+                {/* Background Soft Glow */}
+                <ellipse cx="95" cy="65" rx="42" ry="28" fill="#dbeafe" opacity="0.6" />
+                {/* Botanical Leaf */}
+                <g transform="translate(112, 42) rotate(18)">
+                  <path d="M0 32 C6 20, 18 10, 24 0 C22 14, 18 24, 0 32 Z" fill="#60a5fa" opacity="0.8" />
+                  <path d="M-4 28 C-12 18, -14 8, -10 2 C-4 12, 0 20, -4 28 Z" fill="#93c5fd" opacity="0.7" />
+                </g>
+                {/* 3D Angled Calendar */}
+                <g transform="translate(42, 14)">
+                  {/* Back page stand */}
+                  <path d="M12 28 L56 12 L72 68 L28 82 Z" fill="#2563eb" opacity="0.9" />
+                  {/* White Front Sheet with perspective */}
+                  <path d="M6 22 L62 10 L70 66 L14 76 Z" fill="#ffffff" filter="drop-shadow(0 4px 6px rgba(37,99,235,0.2))" />
+                  {/* Top Ring Binders */}
+                  <rect x="18" y="14" width="4" height="10" rx="2" fill="#93c5fd" />
+                  <rect x="34" y="11" width="4" height="10" rx="2" fill="#93c5fd" />
+                  <rect x="50" y="8" width="4" height="10" rx="2" fill="#93c5fd" />
+                  {/* Mini Month Grid Boxes */}
+                  <rect x="16" y="32" width="6" height="5" rx="1" fill="#e2e8f0" />
+                  <rect x="26" y="30" width="6" height="5" rx="1" fill="#e2e8f0" />
+                  <rect x="36" y="28" width="6" height="5" rx="1" fill="#e2e8f0" />
+                  <rect x="46" y="26" width="6" height="5" rx="1" fill="#e2e8f0" />
+                  {/* Active Day Blue Square */}
+                  <rect x="36" y="38" width="8" height="7" rx="1.5" fill="#1d68f2" />
+                  <rect x="16" y="42" width="6" height="5" rx="1" fill="#e2e8f0" />
+                  <rect x="26" y="40" width="6" height="5" rx="1" fill="#cbd5e1" />
+                  <rect x="48" y="36" width="6" height="5" rx="1" fill="#e2e8f0" />
+                  <rect x="16" y="52" width="6" height="5" rx="1" fill="#e2e8f0" />
+                  <rect x="26" y="50" width="6" height="5" rx="1" fill="#cbd5e1" />
+                  <rect x="36" y="48" width="6" height="5" rx="1" fill="#e2e8f0" />
+                  <rect x="48" y="46" width="6" height="5" rx="1" fill="#cbd5e1" />
+                </g>
+                {/* Floating burst accents */}
+                <line x1="38" y1="28" x2="32" y2="22" stroke="#60a5fa" strokeWidth="2.5" strokeLinecap="round" />
+                <line x1="32" y1="36" x2="26" y2="36" stroke="#60a5fa" strokeWidth="2" strokeLinecap="round" />
+              </svg>
             </div>
-            <div className="flex items-baseline justify-between mb-1">
-              <h3 className="font-extrabold text-slate-800 text-lg">Staff &amp; Penalties</h3>
-              <span className="text-2xl font-black text-slate-900">{staffList.length}</span>
-            </div>
-            <p className="text-slate-500 text-xs mb-4">
-              {penalizedStudents.length > 0
-                ? `${penalizedStudents.length} student(s) currently flagged with no-show strikes.`
-                : 'Kitchen staff credentials and student no-show rules.'}
-            </p>
-          </div>
-          <Link
-            to="/canteen-admin/staff"
-            className="w-full py-2.5 px-4 bg-slate-50 hover:bg-emerald-50 text-emerald-600 font-bold text-xs rounded-xl flex items-center justify-between border border-slate-200/80 hover:border-emerald-200 transition"
-          >
-            <span>Staff & Strike Controls</span>
-            <ArrowRight size={14} />
-          </Link>
-        </div>
 
-        {/* Card 5: Student Feedback & Reviews */}
-        <div className="bg-white border border-slate-200 rounded-[2rem] p-6 shadow-xs flex flex-col justify-between hover:shadow-md transition sm:col-span-2">
-          <div>
-            <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-700 flex items-center justify-center mb-4 border border-rose-200/60">
-              <MessageSquare size={24} />
+            {/* Left Content */}
+            <div className="relative z-10 flex items-center gap-3 min-w-0">
+              {/* 3D Blue Squircle Icon */}
+              <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-gradient-to-b from-[#3b82f6] to-[#1d4ed8] p-[1.5px] shadow-[0_6px_14px_rgba(37,99,235,0.4)] flex items-center justify-center shrink-0">
+                <div className="w-full h-full rounded-[14px] bg-gradient-to-b from-[#60a5fa] to-[#1e40af] flex items-center justify-center text-white relative overflow-hidden">
+                  {/* Top inner glossy specular reflection */}
+                  <div className="absolute top-0 inset-x-0 h-1/2 bg-white/30 rounded-t-[14px]" />
+                  <CalendarDays size={20} className="relative z-10 drop-shadow-sm text-white" strokeWidth={2.4} />
+                </div>
+              </div>
+
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[9px] font-black tracking-widest uppercase text-slate-400">
+                    Date
+                  </span>
+                  <span className="w-4 h-[1.5px] bg-slate-200 rounded-full" />
+                </div>
+                <div className="text-sm sm:text-base font-black text-slate-900 tracking-tight leading-snug">
+                  {currentDashboardTime.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                </div>
+                <div className="mt-0.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 border border-blue-200/80 text-[10px] font-extrabold text-[#1d68f2] shadow-2xs">
+                  <CalendarDays size={10} strokeWidth={2.6} />
+                  <span>{currentDashboardTime.toLocaleDateString('en-US', { weekday: 'long' })}</span>
+                </div>
+              </div>
             </div>
-            <div className="flex items-baseline justify-between mb-1">
-              <h3 className="font-extrabold text-slate-800 text-lg">Student Feedback &amp; Reviews</h3>
-              <span className="text-2xl font-black text-slate-900">{reviews.length}</span>
-            </div>
-            <p className="text-slate-500 text-xs mb-4">
-              Read student dish reviews, quality feedback, and publish kitchen responses.
-            </p>
           </div>
-          <Link
-            to="/canteen-admin/reviews"
-            className="w-full py-2.5 px-4 bg-slate-50 hover:bg-emerald-50 text-emerald-600 font-bold text-xs rounded-xl flex items-center justify-between border border-slate-200/80 hover:border-emerald-200 transition"
-          >
-            <span>Inspect Feedback</span>
-            <ArrowRight size={14} />
-          </Link>
+
+          {/* Card 2: TIME */}
+          <div className="relative overflow-hidden bg-gradient-to-r from-[#ffffff] via-[#f9faff] to-[#eef4ff] rounded-2xl sm:rounded-3xl border border-white p-3 sm:p-3.5 shadow-[0_8px_20px_rgba(180,205,240,0.35)] flex items-center justify-between min-h-[66px]">
+            {/* Right side Clock & Moon Illustration */}
+            <div className="absolute right-1 -bottom-1 pointer-events-none w-28 h-20 opacity-90 select-none">
+              <svg viewBox="0 0 140 100" fill="none" className="w-full h-full">
+                {/* Background Soft Glow */}
+                <ellipse cx="95" cy="65" rx="42" ry="28" fill="#dbeafe" opacity="0.5" />
+                {/* Crescent Moon */}
+                <path
+                  d="M118 20 A10 10 0 1 0 128 32 A8 8 0 0 1 118 20 Z"
+                  fill="#3b82f6"
+                  opacity="0.8"
+                />
+                {/* Botanical Leaf accent */}
+                <g transform="translate(114, 52) rotate(22)">
+                  <path d="M0 26 C5 16, 14 8, 20 0 C18 12, 14 20, 0 26 Z" fill="#60a5fa" opacity="0.8" />
+                  <path d="M-3 22 C-9 14, -11 6, -8 2 C-3 10, 0 16, -3 22 Z" fill="#93c5fd" opacity="0.7" />
+                </g>
+                {/* 3D Modern Analog Clock */}
+                <g transform="translate(74, 28)">
+                  {/* Outer Rim Shadow */}
+                  <circle cx="28" cy="28" r="26" fill="#bfdbfe" opacity="0.6" />
+                  {/* Clock Bezel */}
+                  <circle cx="28" cy="28" r="24" fill="#ffffff" stroke="#93c5fd" strokeWidth="2.5" filter="drop-shadow(0 4px 6px rgba(59,130,246,0.18))" />
+                  {/* Inner Face */}
+                  <circle cx="28" cy="28" r="20" fill="#f8fafc" />
+                  {/* Hour dots */}
+                  <circle cx="28" cy="12" r="1.2" fill="#64748b" />
+                  <circle cx="44" cy="28" r="1.2" fill="#64748b" />
+                  <circle cx="28" cy="44" r="1.2" fill="#64748b" />
+                  <circle cx="12" cy="28" r="1.2" fill="#64748b" />
+                  {/* Clock Hands indicating ~10:10 / current time */}
+                  <line x1="28" y1="28" x2="28" y2="17" stroke="#1d4ed8" strokeWidth="2.2" strokeLinecap="round" />
+                  <line x1="28" y1="28" x2="38" y2="23" stroke="#1d4ed8" strokeWidth="2.2" strokeLinecap="round" />
+                  {/* Center Pin */}
+                  <circle cx="28" cy="28" r="2" fill="#1e40af" />
+                </g>
+                {/* Sparkle burst star */}
+                <path d="M52 46 Q54 41 59 39 Q54 37 52 32 Q50 37 45 39 Q50 41 52 46 Z" fill="#60a5fa" opacity="0.8" />
+                <circle cx="58" cy="56" r="1.5" fill="#93c5fd" />
+              </svg>
+            </div>
+
+            {/* Left Content */}
+            <div className="relative z-10 flex items-center gap-3 min-w-0">
+              {/* 3D Purple/Indigo Squircle Icon */}
+              <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-gradient-to-b from-[#6366f1] to-[#4338ca] p-[1.5px] shadow-[0_6px_14px_rgba(99,102,241,0.4)] flex items-center justify-center shrink-0">
+                <div className="w-full h-full rounded-[14px] bg-gradient-to-b from-[#818cf8] to-[#3730a3] flex items-center justify-center text-white relative overflow-hidden">
+                  {/* Top inner glossy specular reflection */}
+                  <div className="absolute top-0 inset-x-0 h-1/2 bg-white/30 rounded-t-[14px]" />
+                  <Clock size={20} className="relative z-10 drop-shadow-sm text-white" strokeWidth={2.4} />
+                </div>
+              </div>
+
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[9px] font-black tracking-widest uppercase text-slate-400">
+                    Time
+                  </span>
+                  <span className="w-4 h-[1.5px] bg-slate-200 rounded-full" />
+                </div>
+                <div className="text-sm sm:text-base font-black text-slate-900 tracking-tight leading-snug">
+                  {currentDashboardTime.getHours() < 12 ? 'Morning' : currentDashboardTime.getHours() < 17 ? 'Afternoon' : 'Evening'}
+                </div>
+                <div className="mt-0.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-50 border border-indigo-200/80 text-[10px] font-extrabold text-[#4f46e5] font-mono shadow-2xs">
+                  <Clock size={10} strokeWidth={2.6} />
+                  <span>{currentDashboardTime.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })}</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
-    </>
+
+      {/* 4 KPI Metric Cards - Exact Match to Design */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 shrink-0">
+        {/* Card 1: Today's Orders */}
+        <div className="relative overflow-hidden bg-gradient-to-br from-[#f8faff] via-[#f1f6ff] to-[#e4efff] p-3.5 sm:p-4 rounded-2xl border border-[#d8e7ff] shadow-xs flex flex-col justify-between min-h-[110px]">
+          {/* Blue mountain wave graphic from reference */}
+          <div className="absolute right-0 bottom-0 pointer-events-none w-32 h-20 overflow-hidden">
+            <svg viewBox="0 0 140 90" fill="none" className="w-full h-full opacity-80" preserveAspectRatio="none">
+              <path
+                d="M0 65 C 30 65, 50 35, 80 55 C 105 70, 115 15, 140 25 L 140 90 L 0 90 Z"
+                fill="#cadffd"
+              />
+              <path
+                d="M30 75 C 60 75, 80 50, 110 65 C 125 75, 130 45, 140 50 L 140 90 L 30 90 Z"
+                fill="#b8d4fc"
+                opacity="0.6"
+              />
+            </svg>
+          </div>
+          {/* Small flying paper plane / accent icon in top right */}
+          <div className="absolute top-3.5 right-3.5 text-[#93c5fd] opacity-60">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M2 21l21-9L2 3v7l15 2-15 2v7z"/>
+            </svg>
+          </div>
+
+          <div>
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-b from-[#1e69ff] to-[#0051e8] text-white flex items-center justify-center shadow-md shadow-blue-500/25 shrink-0">
+                <ChefHat size={17} strokeWidth={2.2} />
+              </div>
+              <span className="text-xs font-extrabold text-[#1e293b] tracking-tight">Today's Orders</span>
+            </div>
+            <div className="text-2xl font-black text-[#0f172a] mt-2 tracking-tight">
+              {stats?.placed ?? todayOrdersCount}
+            </div>
+          </div>
+          <div className="mt-1.5 text-[10px] font-bold text-[#16a34a] flex items-center gap-1.5 z-10">
+            <span className="font-extrabold text-[11px]">↗ 100%</span>
+            <span className="text-[#64748b] font-medium text-[10px]">vs yesterday</span>
+          </div>
+        </div>
+
+        {/* Card 2: Revenue */}
+        <div className="relative overflow-hidden bg-gradient-to-br from-[#f6fcf8] via-[#effaf2] to-[#e1f7e7] p-3.5 sm:p-4 rounded-2xl border border-[#cbf0d5] shadow-xs flex flex-col justify-between min-h-[110px]">
+          {/* Green smooth rolling hill wave graphic */}
+          <div className="absolute right-0 bottom-0 pointer-events-none w-32 h-20 overflow-hidden">
+            <svg viewBox="0 0 140 90" fill="none" className="w-full h-full opacity-80" preserveAspectRatio="none">
+              <path
+                d="M0 75 C 35 75, 55 45, 85 60 C 110 72, 120 20, 140 22 L 140 90 L 0 90 Z"
+                fill="#bbf0cb"
+              />
+              <path
+                d="M40 80 C 70 80, 85 55, 115 65 C 128 72, 132 40, 140 42 L 140 90 L 40 90 Z"
+                fill="#a3e9b7"
+                opacity="0.6"
+              />
+            </svg>
+          </div>
+
+          <div>
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-b from-[#00aa63] to-[#00894f] text-white flex items-center justify-center shadow-md shadow-emerald-500/25 shrink-0">
+                <span className="font-black text-lg leading-none">₹</span>
+              </div>
+              <span className="text-xs font-extrabold text-[#00874e] tracking-tight">Revenue</span>
+            </div>
+            <div className="text-2xl font-black text-[#0f172a] mt-2 tracking-tight flex items-baseline gap-1">
+              <span className="text-xl font-black">₹</span>
+              <span>{(todayRevenue || 0).toLocaleString('en-IN')}</span>
+            </div>
+          </div>
+          <div className="mt-1.5 text-[10px] font-bold text-[#16a34a] flex items-center gap-1.5 z-10">
+            <span className="font-extrabold text-[11px]">↗ 100%</span>
+            <span className="text-[#64748b] font-medium text-[10px]">today collected</span>
+          </div>
+        </div>
+
+        {/* Card 3: Avg. Prep Time */}
+        <div className="relative overflow-hidden bg-gradient-to-br from-[#fffdf7] via-[#fff8eb] to-[#ffeed0] p-3.5 sm:p-4 rounded-2xl border border-[#fde4b8] shadow-xs flex flex-col justify-between min-h-[110px]">
+          {/* Subtle amber watermarked clock dial illustration */}
+          <div className="absolute -right-2 -bottom-2 pointer-events-none opacity-25 text-[#f59e0b]">
+            <svg width="85" height="85" viewBox="0 0 100 100" fill="none" stroke="currentColor" strokeWidth="6">
+              <circle cx="50" cy="50" r="42" />
+              <path d="M50 22v30l20 10" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+
+          <div>
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-b from-[#f29400] to-[#d97c00] text-white flex items-center justify-center shadow-md shadow-amber-500/25 shrink-0">
+                <Clock size={17} strokeWidth={2.4} />
+              </div>
+              <span className="text-xs font-extrabold text-[#1e293b] tracking-tight">Avg. Prep Time</span>
+            </div>
+            <div className="text-2xl font-black text-[#0f172a] mt-2 tracking-tight flex items-baseline gap-1">
+              <span>{avgPrepTimeMinutes}</span>
+              <span className="text-base font-bold text-[#334155]">min</span>
+            </div>
+          </div>
+          <div className="mt-1.5 text-[10px] font-bold text-[#1e293b] flex items-center gap-1.5 z-10">
+            <span className="text-[11px]">🎯</span>
+            <span className="text-[#475569] font-medium text-[10px]">Standard kitchen target</span>
+          </div>
+        </div>
+
+        {/* Card 4: Active Orders */}
+        <div className="relative overflow-hidden bg-gradient-to-br from-[#faf7ff] via-[#f4edff] to-[#e8dafe] p-3.5 sm:p-4 rounded-2xl border border-[#e2d0fd] shadow-xs flex flex-col justify-between min-h-[110px]">
+          {/* Subtle document page icon watermark in top/bottom right */}
+          <div className="absolute right-2 bottom-2 pointer-events-none opacity-25 text-[#9333ea]">
+            <svg width="45" height="55" viewBox="0 0 24 28" fill="currentColor">
+              <path d="M4 0h10l6 6v22H4V0zm10 1.5V7h5.5L14 1.5zM6 11v2h12v-2H6zm0 4v2h12v-2H6zm0 4v2h8v-2H6z"/>
+            </svg>
+          </div>
+          {/* Subtle purple cloud wave at the very bottom right */}
+          <div className="absolute right-0 bottom-0 pointer-events-none w-24 h-12 overflow-hidden">
+            <svg viewBox="0 0 100 50" fill="none" className="w-full h-full opacity-60">
+              <path d="M0 35 C 30 20, 60 40, 100 15 L 100 50 L 0 50 Z" fill="#d8b4fe"/>
+            </svg>
+          </div>
+
+          <div>
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-b from-[#8739f9] to-[#6d20e3] text-white flex items-center justify-center shadow-md shadow-purple-500/25 shrink-0">
+                <ClipboardList size={17} strokeWidth={2.2} />
+              </div>
+              <span className="text-xs font-extrabold text-[#1e293b] tracking-tight">Active Orders</span>
+            </div>
+            <div className="text-2xl font-black text-[#0f172a] mt-2 tracking-tight">
+              {liveActiveOrders.length}
+            </div>
+          </div>
+          <div className="mt-1.5 text-[10px] font-medium text-[#64748b] z-10">
+            {liveActiveOrders.length > 0 ? `${liveActiveOrders.length} active orders right now` : 'No active orders right now'}
+          </div>
+        </div>
+      </div>
+
+      {/* Main 2-Column Split: Left (Live Orders + Quick Actions + Order List) & Right (Popular Items + Promo Card) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-stretch flex-1 min-h-0">
+        {/* Left Column (8 cols on lg) */}
+        <div className="lg:col-span-8 flex flex-col justify-between gap-3 min-h-0">
+          {/* 1. Order List Table Card (Moved to the Top) */}
+          <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-xs flex flex-col justify-between flex-1">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-lg bg-blue-50 text-[#1d68f2] flex items-center justify-center">
+                  <ClipboardList size={14} />
+                </div>
+                <h2 className="text-xs sm:text-sm font-extrabold text-slate-800">Order List</h2>
+              </div>
+              <Link
+                to="/canteen-admin/orders"
+                className="text-[11px] font-bold text-[#1d68f2] hover:underline flex items-center gap-1"
+              >
+                <span>View All</span>
+                <span>→</span>
+              </Link>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-[11px]">
+                <thead>
+                  <tr className="bg-slate-50/70 border-y border-slate-100 text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+                    <th className="py-1 px-2.5">#</th>
+                    <th className="py-1 px-2.5">Customer</th>
+                    <th className="py-1 px-2.5">Items</th>
+                    <th className="py-1 px-2.5">Amount</th>
+                    <th className="py-1 px-2.5">Status</th>
+                    <th className="py-1 px-2.5 text-right">Time</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {allOrders.slice(0, 4).map((ord) => {
+                    const custName = (ord.profiles as any)?.name || 'Guest User';
+                    const itemsSummary = ord.order_items?.map((i: any) => `${i.menu_items?.name || 'Item'} (${i.quantity})`).join(', ') || '1 Item';
+                    const amount = calculateOrderTotal(ord).totalAmount;
+                    const timeStr = new Date(ord.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+                    
+                    const isReadyOrDone = ord.status === 'READY' || ord.status === 'COLLECTED';
+                    const isPrep = ord.status === 'PREPARING';
+
+                    return (
+                      <tr key={ord.id} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="py-1.5 px-2.5 font-mono font-semibold text-slate-400 text-[10px]">
+                          #{String(ord.order_number || ord.id.slice(0, 4)).padStart(4, '0')}
+                        </td>
+                        <td className="py-1.5 px-2.5 font-bold text-slate-800 whitespace-nowrap">
+                          {custName}
+                        </td>
+                        <td className="py-1.5 px-2.5 text-slate-600 font-medium max-w-[160px] truncate" title={itemsSummary}>
+                          {itemsSummary}
+                        </td>
+                        <td className="py-1.5 px-2.5 font-extrabold text-slate-900">
+                          ₹{amount}
+                        </td>
+                        <td className="py-1.5 px-2.5">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                            isReadyOrDone
+                              ? 'bg-emerald-50 text-emerald-700'
+                              : isPrep
+                              ? 'bg-amber-50 text-amber-700'
+                              : 'bg-blue-50 text-blue-700'
+                          }`}>
+                            <span className={`w-1 h-1 rounded-full ${
+                              isReadyOrDone ? 'bg-emerald-500' : isPrep ? 'bg-amber-500' : 'bg-blue-500'
+                            }`} />
+                            {ord.status === 'COLLECTED' ? 'Completed' : ord.status}
+                          </span>
+                        </td>
+                        <td className="py-1.5 px-2.5 text-right font-medium text-slate-400 text-[10px] whitespace-nowrap">
+                          {timeStr}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* 2. Live Orders Card (Moved Down) */}
+          <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-xs flex flex-col justify-between flex-1">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <h2 className="text-xs sm:text-sm font-extrabold text-slate-800">Live Orders</h2>
+                <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[10px] font-bold">
+                  {liveActiveOrders.length} active
+                </span>
+              </div>
+              <Link
+                to="/canteen-admin/orders"
+                className="text-[11px] font-bold text-[#1d68f2] hover:underline flex items-center gap-1"
+              >
+                <span>View All Orders</span>
+                <span>→</span>
+              </Link>
+            </div>
+
+            {liveActiveOrders.length === 0 ? (
+              /* Cloche Empty State matching screenshot */
+              <div className="py-2.5 flex flex-col items-center justify-center text-center my-auto">
+                <div className="w-12 h-12 rounded-full bg-blue-50/70 border border-blue-100/60 flex items-center justify-center text-blue-400 mb-1.5">
+                  <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                    <path d="M4 18h16" />
+                    <path d="M4 18a8 8 0 0 1 16 0" />
+                    <path d="M12 6a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z" />
+                  </svg>
+                </div>
+                <div className="text-xs font-extrabold text-slate-800">
+                  No live active orders right now.
+                </div>
+                <p className="text-[10px] text-slate-400 mt-0.5">
+                  New customer orders will show here in real time.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto my-auto">
+                <table className="w-full text-left text-[11px]">
+                  <thead>
+                    <tr className="border-b border-slate-100 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      <th className="pb-1.5">Order ID</th>
+                      <th className="pb-1.5">Items</th>
+                      <th className="pb-1.5">Time</th>
+                      <th className="pb-1.5 text-right">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {liveActiveOrders.slice(0, 3).map((ord) => {
+                      const summaryText = ord.order_items?.map((i: any) => `${i.quantity}x ${i.menu_items?.name || 'Item'}`).join(', ') || 'No items';
+                      const timeStr = new Date(ord.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+                      const statusBadgeClass =
+                        ord.status === 'READY' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                        ord.status === 'PREPARING' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                        ord.status === 'ACCEPTED' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                        'bg-slate-100 text-slate-700 border-slate-200';
+
+                      return (
+                        <tr key={ord.id} className="hover:bg-slate-50/70">
+                          <td className="py-1.5 font-bold text-[#1d68f2] font-mono">#{ord.order_number}</td>
+                          <td className="py-1.5 font-semibold text-slate-800 max-w-[200px] truncate" title={summaryText}>
+                            {summaryText}
+                          </td>
+                          <td className="py-1.5 text-slate-500 font-medium">{timeStr}</td>
+                          <td className="py-1.5 text-right">
+                            <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${statusBadgeClass}`}>
+                              {ord.status}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Quick Actions Footer */}
+            <div className="mt-2 pt-2 border-t border-slate-100">
+              <div className="text-[10px] font-bold text-slate-500 mb-1.5">
+                Quick Actions
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Link
+                  to="/canteen-admin/menu"
+                  className="px-3 py-1 bg-[#fff8f2] hover:bg-[#ffeedd] text-[#c25e1a] border border-[#fbd3b6] rounded-xl text-[11px] font-bold transition flex items-center gap-1.5 shadow-2xs"
+                >
+                  <Utensils size={12} className="text-[#c25e1a]" />
+                  <span>Mark Sold Out</span>
+                </Link>
+                <Link
+                  to="/canteen-admin/menu"
+                  className="px-3 py-1 bg-[#f0f6ff] hover:bg-[#e0edff] text-[#1d68f2] border border-[#bfdbfe] rounded-xl text-[11px] font-bold transition flex items-center gap-1.5 shadow-2xs"
+                >
+                  <Clock size={12} className="text-[#1d68f2]" />
+                  <span>Toggle Slot</span>
+                </Link>
+                <Link
+                  to="/canteen-admin/analytics"
+                  className="px-3 py-1 bg-[#f0fdf4] hover:bg-[#dcfce7] text-emerald-700 border border-[#bbf7d0] rounded-xl text-[11px] font-bold transition flex items-center gap-1.5 shadow-2xs"
+                >
+                  <BarChart3 size={12} className="text-emerald-700" />
+                  <span>View Reports</span>
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Column (4 cols on lg): Popular Items + Promo Card */}
+        <div className="lg:col-span-4 flex flex-col justify-between gap-3 min-h-0">
+          {/* Popular Items Card */}
+          <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-xs flex flex-col justify-between flex-1">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5">
+                <span className="text-orange-500 text-sm">🔥</span>
+                <h2 className="text-xs sm:text-sm font-extrabold text-slate-800">Popular Items</h2>
+              </div>
+              <Link
+                to="/canteen-admin/menu"
+                className="text-[11px] font-bold text-[#1d68f2] hover:underline flex items-center gap-1"
+              >
+                <span>View All</span>
+                <span>→</span>
+              </Link>
+            </div>
+
+            {/* List of items matching image with thumbnails & Available badges */}
+            <div className="space-y-2">
+              {(menuItems.slice(0, 4).length > 0 ? menuItems.slice(0, 4) : [
+                { id: '1', name: 'Masala Dosa', price: 40, is_sold_out: false },
+                { id: '2', name: 'Idli (2 pcs)', price: 20, is_sold_out: false },
+                { id: '3', name: 'Plain Rice', price: 15, is_sold_out: false },
+                { id: '4', name: 'Tea', price: 10, is_sold_out: false }
+              ]).map((item, idx) => {
+                const foodPics = [
+                  'https://images.unsplash.com/photo-1668236543090-82eba5ee5976?auto=format&fit=crop&w=120&q=80',
+                  'https://images.unsplash.com/photo-1589301760014-d929f3979dbc?auto=format&fit=crop&w=120&q=80',
+                  'https://images.unsplash.com/photo-1516684732162-798a0062be99?auto=format&fit=crop&w=120&q=80',
+                  'https://images.unsplash.com/photo-1544787219-7f47ccb76574?auto=format&fit=crop&w=120&q=80'
+                ];
+                const picUrl = (item as any).image_url || foodPics[idx % foodPics.length];
+
+                return (
+                  <div key={item.id} className="flex items-center justify-between p-1.5 rounded-xl hover:bg-slate-50 transition">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <img
+                        src={picUrl}
+                        alt={item.name}
+                        className="w-9 h-9 rounded-xl object-cover shrink-0 shadow-2xs border border-slate-100"
+                        onError={(e: any) => {
+                          e.target.src = foodPics[idx % foodPics.length];
+                        }}
+                      />
+                      <div className="min-w-0">
+                        <div className="text-xs font-extrabold text-slate-800 truncate">
+                          {item.name}
+                        </div>
+                        <div className="text-[11px] font-bold text-slate-500">
+                          ₹ {item.price}
+                        </div>
+                      </div>
+                    </div>
+
+                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold flex items-center gap-1 shrink-0 ${
+                      !item.is_sold_out
+                        ? 'bg-emerald-50 text-emerald-700'
+                        : 'bg-rose-50 text-rose-700'
+                    }`}>
+                      <span className={`w-1 h-1 rounded-full ${
+                        !item.is_sold_out ? 'bg-emerald-500' : 'bg-rose-500'
+                      }`} />
+                      {!item.is_sold_out ? 'Available' : 'Sold Out'}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Delicious Food Promo Card (Bottom Right) */}
+          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#0d131f] via-[#111a2c] to-[#18233c] text-white p-3.5 shadow-md border border-slate-800 shrink-0">
+            {/* Food Platter Right Half */}
+            <div className="absolute right-0 top-0 bottom-0 w-1/2 pointer-events-none overflow-hidden">
+              <img
+                src="https://images.unsplash.com/photo-1610057099443-fde8c4d50f91?auto=format&fit=crop&w=500&q=80"
+                alt="Delicious Food"
+                className="w-full h-full object-cover object-center opacity-85"
+                style={{
+                  maskImage: 'linear-gradient(to left, rgba(0,0,0,1) 50%, rgba(0,0,0,0) 100%)',
+                  WebkitMaskImage: 'linear-gradient(to left, rgba(0,0,0,1) 50%, rgba(0,0,0,0) 100%)'
+                }}
+              />
+            </div>
+
+            <div className="relative z-10 max-w-[55%]">
+              <h3 className="font-serif italic font-extrabold text-base text-white leading-tight">
+                Delicious<br />Food
+              </h3>
+              <p className="text-[10px] text-slate-300 font-medium mt-0.5 leading-tight">
+                Made with care<br />for you 💕
+              </p>
+              <Link
+                to="/canteen-admin/menu"
+                className="mt-2.5 inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white text-[10px] font-bold shadow-md shadow-emerald-500/25 transition active:scale-95"
+              >
+                <span>Good Food</span>
+                <span>→</span>
+              </Link>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   )}
 </div>
 );

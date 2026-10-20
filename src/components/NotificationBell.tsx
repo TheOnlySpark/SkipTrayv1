@@ -15,7 +15,7 @@ import {
 // Format helper for timestamps (both relative and exact time)
 function formatNotificationTime(timestamp: number): { exact: string; relative: string } {
   const date = new Date(timestamp);
-  const exact = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const exact = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
 
   const diffSec = Math.floor((Date.now() - timestamp) / 1000);
   let relative = 'Just now';
