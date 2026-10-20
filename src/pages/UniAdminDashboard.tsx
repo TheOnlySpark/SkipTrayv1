@@ -33,7 +33,8 @@ import {
   Tag,
   Store,
   ClipboardList,
-  Utensils
+  Utensils,
+  Trash2
 } from 'lucide-react';
 
 type Canteen = Database['public']['Tables']['canteens']['Row'];
@@ -169,6 +170,61 @@ export default function UniAdminDashboard() {
     await queryClient.invalidateQueries({ queryKey: ['adminCanteens', currentTenantId] });
   };
 
+  const [deletingCanteenId, setDeletingCanteenId] = useState<string | null>(null);
+
+  const handleDeleteCanteen = async (canteen: Canteen) => {
+    const confirmed = await showConfirm({
+      title: `Delete Canteen: ${canteen.name}?`,
+      message: `Are you sure you want to permanently delete "${canteen.name}"? This will remove all associated menu items, slot configurations, and records from Supabase. This action cannot be undone.`,
+      confirmText: 'Delete Permanently',
+      cancelText: 'Cancel',
+      isDangerous: true,
+    });
+    if (!confirmed) return;
+
+    setDeletingCanteenId(canteen.id);
+    try {
+      // First attempt using secure RPC function
+      const { data: rpcData, error: rpcError } = await supabase.rpc('delete_canteen', {
+        p_canteen_id: canteen.id
+      });
+
+      if (rpcError) {
+        // Fallback to direct DELETE query in case migration is still pending application
+        const { error: directError } = await supabase
+          .from('canteens')
+          .delete()
+          .eq('id', canteen.id);
+
+        if (directError) {
+          throw new Error(rpcError.message || directError.message);
+        }
+      }
+
+      showAlert({
+        title: 'Canteen Deleted',
+        message: `"${canteen.name}" has been permanently deleted from Supabase.`,
+        type: 'success'
+      });
+
+      // Clear selected canteen if it was the deleted one
+      if (selectedCanteenId === canteen.id) {
+        setSelectedCanteenId('');
+      }
+
+      await queryClient.invalidateQueries({ queryKey: ['adminCanteens', currentTenantId] });
+      await queryClient.invalidateQueries({ queryKey: ['canteenAdmins', currentTenantId] });
+    } catch (err: any) {
+      showAlert({
+        title: 'Deletion Failed',
+        message: formatErrorMessage(err, 'Could not delete canteen. Please ensure database migration 0048 is applied.'),
+        type: 'error'
+      });
+    } finally {
+      setDeletingCanteenId(null);
+    }
+  };
+
   const handleCreateCanteenAdmin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (creatingAdmin) return;
@@ -234,6 +290,56 @@ export default function UniAdminDashboard() {
       showAlert({ title: 'Error', message: formatErrorMessage(err, 'Failed to create canteen admin.'), type: 'error' });
     } finally {
       setCreatingAdmin(false);
+    }
+  };
+
+  const [deletingAdminId, setDeletingAdminId] = useState<string | null>(null);
+
+  const handleDeleteCanteenAdmin = async (admin: any) => {
+    const adminName = admin.name || admin.email || 'this admin';
+    const confirmed = await showConfirm({
+      title: `Delete Admin: ${adminName}?`,
+      message: `Are you sure you want to permanently delete "${adminName}"? They will immediately lose access to their canteen dashboard and records. This action cannot be undone.`,
+      confirmText: 'Delete Permanently',
+      cancelText: 'Cancel',
+      isDangerous: true,
+    });
+    if (!confirmed) return;
+
+    setDeletingAdminId(admin.id);
+    try {
+      // 1. Try secure RPC function
+      const { data: rpcData, error: rpcError } = await (supabase.rpc as any)('uni_admin_delete_canteen_admin', {
+        p_admin_id: admin.id
+      });
+
+      if (rpcError) {
+        // Fallback: direct profile delete
+        const { error: directError } = await supabase
+          .from('profiles')
+          .delete()
+          .eq('id', admin.id);
+
+        if (directError) {
+          throw new Error(rpcError.message || directError.message);
+        }
+      }
+
+      showAlert({
+        title: 'Admin Deleted',
+        message: `Admin account "${adminName}" has been removed.`,
+        type: 'success'
+      });
+
+      await queryClient.invalidateQueries({ queryKey: ['canteenAdmins', currentTenantId] });
+    } catch (err: any) {
+      showAlert({
+        title: 'Deletion Failed',
+        message: formatErrorMessage(err, 'Could not delete canteen admin. Please ensure migration 0049 is applied.'),
+        type: 'error'
+      });
+    } finally {
+      setDeletingAdminId(null);
     }
   };
 
@@ -687,12 +793,22 @@ export default function UniAdminDashboard() {
                         onClick={() => handleToggleCanteen(canteen)}
                         className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer active:scale-95 ${
                           canteen.is_active
-                            ? 'bg-rose-50 text-rose-700 hover:bg-rose-100 hover:text-rose-800 border border-rose-200/80'
+                            ? 'bg-amber-50 text-amber-700 hover:bg-amber-100 hover:text-amber-800 border border-amber-200/80'
                             : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800 border border-emerald-200/80'
                         }`}
                       >
                         <Power size={12} strokeWidth={2.2} />
                         <span>{canteen.is_active ? 'Deactivate' : 'Activate'}</span>
+                      </button>
+
+                      <button
+                        onClick={() => handleDeleteCanteen(canteen)}
+                        disabled={deletingCanteenId === canteen.id}
+                        title="Delete Canteen"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer active:scale-95 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:text-rose-800 border border-rose-200/80 disabled:opacity-50"
+                      >
+                        <Trash2 size={12} strokeWidth={2.2} />
+                        <span>{deletingCanteenId === canteen.id ? 'Deleting...' : 'Delete'}</span>
                       </button>
                     </div>
                   </div>
@@ -891,9 +1007,21 @@ export default function UniAdminDashboard() {
                       </div>
                     </div>
 
-                    <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/70 flex items-center gap-1 shrink-0">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Active
-                    </span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/70 flex items-center gap-1 shrink-0">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Active
+                      </span>
+
+                      <button
+                        onClick={() => handleDeleteCanteenAdmin(admin)}
+                        disabled={deletingAdminId === admin.id}
+                        title="Delete Canteen Admin"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer active:scale-95 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:text-rose-800 border border-rose-200/80 disabled:opacity-50"
+                      >
+                        <Trash2 size={12} strokeWidth={2.2} />
+                        <span>{deletingAdminId === admin.id ? 'Deleting...' : 'Delete'}</span>
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
