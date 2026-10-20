@@ -2524,21 +2524,7 @@ export default function CanteenAdminDashboard() {
                   themeBg = 'bg-gradient-to-br from-rose-50/40 via-white to-rose-50/10';
                 }
 
-                const itemNameLower = (item.name || '').toLowerCase();
-                let itemDesc = (item as any).description;
-                if (!itemDesc) {
-                  if (itemNameLower.includes('idly') || itemNameLower.includes('idli')) {
-                    itemDesc = 'Soft and fluffy idlies, perfect for a healthy start.';
-                  } else if (itemNameLower.includes('dosa')) {
-                    itemDesc = 'Crispy dosa with chutney and sambar.';
-                  } else if (itemNameLower.includes('lays') || itemNameLower.includes('chip')) {
-                    itemDesc = 'Crispy and crunchy potato chips (original).';
-                  } else if (isPacked) {
-                    itemDesc = `Packaged sealed snack • Stock: ${stock ?? 0} pcs.`;
-                  } else {
-                    itemDesc = `Freshly cooked delicious ${item.name.toLowerCase()}.`;
-                  }
-                }
+
 
                 return (
                   <div
@@ -2598,10 +2584,7 @@ export default function CanteenAdminDashboard() {
                         {item.name}
                       </h3>
 
-                      {/* Food Description */}
-                      <p className="text-xs sm:text-sm text-slate-500 font-medium leading-relaxed mt-1.5 min-h-[38px] line-clamp-2">
-                        {itemDesc}
-                      </p>
+
                     </div>
 
                     {/* Stock counter if packed */}
