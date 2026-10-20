@@ -25,6 +25,7 @@ interface NotificationContextType {
   setIsDrawerOpen: (open: boolean | ((prev: boolean) => boolean)) => void;
   markAsRead: (id: string) => void;
   markAllAsRead: () => void;
+  deleteNotification: (id: string) => void;
   clearAll: () => void;
   dismissToast: () => void;
   browserPermission: NotificationPermission | 'unsupported';
@@ -318,8 +319,11 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       title = `Kitchen Preparing Order #${orderNumber}`;
       message = 'Your meal is now being freshly prepared.';
     } else if (status === 'READY') {
-      title = `Order #${orderNumber} is Ready! 🍽️`;
+      title = `Order #${orderNumber} is Ready!`;
       message = 'Your food is ready for pickup! Show your QR pass at the counter.';
+    } else if (status === 'COLLECTED') {
+      title = `Order #${orderNumber} Collected Successfully! 🎉`;
+      message = 'Your OTP was verified and your order has been handed over. Enjoy your meal!';
     }
 
     const newNotification: OrderNotification = {
@@ -407,11 +411,12 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
           if (!initialFetchDoneRef.current && !prevStatus) return;
           if (prevStatus === currentStatus) return;
 
-          // Only alert when advancing to ACCEPTED, PREPARING, or READY
+          // Only alert when advancing to ACCEPTED, PREPARING, READY, or COLLECTED
           if (
             currentStatus === 'ACCEPTED' ||
             currentStatus === 'PREPARING' ||
-            currentStatus === 'READY'
+            currentStatus === 'READY' ||
+            currentStatus === 'COLLECTED'
           ) {
             dispatchNotification(
               currentStatus as OrderNotificationStatus,
@@ -486,6 +491,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         .then(() => {});
     }
   }, [user?.id]);
+
   // Clear all notifications
   const clearAll = useCallback(() => {
     if (user?.id) {
@@ -521,6 +527,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         setIsDrawerOpen,
         markAsRead,
         markAllAsRead,
+        deleteNotification,
         clearAll,
         dismissToast,
         browserPermission,

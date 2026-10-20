@@ -43,35 +43,171 @@ export interface Database {
           }
         ]
       }
+      canteen_tax_configs: {
+        Row: {
+          id: string
+          canteen_id: string
+          tenant_id: string
+          gstin: string | null
+          legal_business_name: string | null
+          state_code: string
+          state_name: string
+          price_mode: 'TAX_INCLUSIVE' | 'TAX_EXCLUSIVE'
+          default_food_gst_rate: number
+          service_fee_gst_rate: number
+          is_gst_registered: boolean
+          is_composition_scheme: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          canteen_id: string
+          tenant_id: string
+          gstin?: string | null
+          legal_business_name?: string | null
+          state_code?: string
+          state_name?: string
+          price_mode?: 'TAX_INCLUSIVE' | 'TAX_EXCLUSIVE'
+          default_food_gst_rate?: number
+          service_fee_gst_rate?: number
+          is_gst_registered?: boolean
+          is_composition_scheme?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          canteen_id?: string
+          tenant_id?: string
+          gstin?: string | null
+          legal_business_name?: string | null
+          state_code?: string
+          state_name?: string
+          price_mode?: 'TAX_INCLUSIVE' | 'TAX_EXCLUSIVE'
+          default_food_gst_rate?: number
+          service_fee_gst_rate?: number
+          is_gst_registered?: boolean
+          is_composition_scheme?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      lunch_slot_configs: {
+        Row: {
+          id: string
+          canteen_id: string | null
+          tenant_id: string | null
+          service_start_time: string
+          service_end_time: string
+          slot_duration_minutes: number
+          min_notice_minutes: number
+          is_lunch_enabled: boolean
+          disabled_slots: Json
+          slot_capacities: Json
+          custom_slots: Json
+          max_concurrent_orders: number | null
+          default_prep_time_minutes: number | null
+          order_cutoff_minutes: number | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          canteen_id?: string | null
+          tenant_id?: string | null
+          service_start_time?: string
+          service_end_time?: string
+          slot_duration_minutes?: number
+          min_notice_minutes?: number
+          is_lunch_enabled?: boolean
+          disabled_slots?: Json
+          slot_capacities?: Json
+          custom_slots?: Json
+          max_concurrent_orders?: number | null
+          default_prep_time_minutes?: number | null
+          order_cutoff_minutes?: number | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          canteen_id?: string | null
+          tenant_id?: string | null
+          service_start_time?: string
+          service_end_time?: string
+          slot_duration_minutes?: number
+          min_notice_minutes?: number
+          is_lunch_enabled?: boolean
+          disabled_slots?: Json
+          slot_capacities?: Json
+          custom_slots?: Json
+          max_concurrent_orders?: number | null
+          default_prep_time_minutes?: number | null
+          order_cutoff_minutes?: number | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lunch_slot_configs_canteen_id_fkey"
+            columns: ["canteen_id"]
+            referencedRelation: "canteens"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lunch_slot_configs_tenant_id_fkey"
+            columns: ["tenant_id"]
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
       menu_items: {
         Row: {
+          category: string | null
           created_at: string
           id: string
           is_sold_out: boolean
           name: string
           price: number
+          prep_time_minutes: number | null
+          stock_quantity: number | null
+          gst_rate_percent: number | null
+          hsn_code: string | null
           updated_at: string
           veg_non_veg: Database["public"]["Enums"]["food_type"]
           tenant_id: string
           canteen_id: string
         }
         Insert: {
+          category?: string | null
           created_at?: string
           id?: string
           is_sold_out?: boolean
           name: string
           price?: number
+          prep_time_minutes?: number | null
+          stock_quantity?: number | null
+          gst_rate_percent?: number | null
+          hsn_code?: string | null
           updated_at?: string
           veg_non_veg: Database["public"]["Enums"]["food_type"]
           tenant_id: string
           canteen_id: string
         }
         Update: {
+          category?: string | null
           created_at?: string
           id?: string
           is_sold_out?: boolean
           name?: string
           price?: number
+          prep_time_minutes?: number | null
+          stock_quantity?: number | null
+          gst_rate_percent?: number | null
+          hsn_code?: string | null
           updated_at?: string
           veg_non_veg?: Database["public"]["Enums"]["food_type"]
           tenant_id?: string
@@ -178,6 +314,140 @@ export interface Database {
             columns: ["order_id"]
             referencedRelation: "orders"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "order_items_staff_order_id_fkey"
+            columns: ["order_id"]
+            referencedRelation: "staff_orders"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      admin_provisioning_audit_log: {
+        Row: {
+          id: string
+          created_at: string
+          action: string
+          actor_id: string | null
+          target_user_id: string | null
+          target_email_masked: string | null
+          ip_address: string | null
+          details: Json | null
+        }
+        Insert: {
+          id?: string
+          created_at?: string
+          action: string
+          actor_id?: string | null
+          target_user_id?: string | null
+          target_email_masked?: string | null
+          ip_address?: string | null
+          details?: Json | null
+        }
+        Update: {
+          id?: string
+          created_at?: string
+          action?: string
+          actor_id?: string | null
+          target_user_id?: string | null
+          target_email_masked?: string | null
+          ip_address?: string | null
+          details?: Json | null
+        }
+        Relationships: []
+      }
+      order_otp_challenges: {
+        Row: {
+          id: string
+          order_id: string
+          user_id: string
+          tenant_id: string
+          canteen_id: string
+          created_at: string
+          expires_at: string
+          attempts: number
+          max_attempts: number
+          resend_available_at: string
+          status: string
+          verified_at: string | null
+        }
+        Insert: {
+          id?: string
+          order_id: string
+          user_id: string
+          tenant_id: string
+          canteen_id: string
+          created_at?: string
+          expires_at: string
+          attempts?: number
+          max_attempts?: number
+          resend_available_at: string
+          status?: string
+          verified_at?: string | null
+        }
+        Update: {
+          id?: string
+          order_id?: string
+          user_id?: string
+          tenant_id?: string
+          canteen_id?: string
+          created_at?: string
+          expires_at?: string
+          attempts?: number
+          max_attempts?: number
+          resend_available_at?: string
+          status?: string
+          verified_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "order_otp_challenges_order_id_fkey"
+            columns: ["order_id"]
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      order_security_audit_log: {
+        Row: {
+          id: string
+          order_id: string | null
+          actor_id: string | null
+          actor_role: string | null
+          event_type: string
+          previous_status: string | null
+          new_status: string | null
+          details: Json | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          order_id?: string | null
+          actor_id?: string | null
+          actor_role?: string | null
+          event_type: string
+          previous_status?: string | null
+          new_status?: string | null
+          details?: Json | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          order_id?: string | null
+          actor_id?: string | null
+          actor_role?: string | null
+          event_type?: string
+          previous_status?: string | null
+          new_status?: string | null
+          details?: Json | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "order_security_audit_log_order_id_fkey"
+            columns: ["order_id"]
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
           }
         ]
       }
@@ -189,14 +459,20 @@ export interface Database {
           id: string
           order_number: number
           otp_attempts: number
-          otp_code: string
           pickup_time: string
+          requested_pickup_time: string | null
+          estimated_prep_duration_minutes: number | null
+          planned_prep_start_time: string | null
+          target_ready_by_time: string | null
+          preparation_started_at: string | null
           is_takeaway: boolean
           ready_at: string | null
           status: Database["public"]["Enums"]["order_status"]
           user_id: string
           tenant_id: string
           canteen_id: string
+          total_tax_amount: number | null
+          tax_snapshot: Json | null
         }
         Insert: {
           accepted_at?: string | null
@@ -205,14 +481,20 @@ export interface Database {
           id?: string
           order_number?: number
           otp_attempts?: number
-          otp_code: string
           pickup_time: string
+          requested_pickup_time?: string | null
+          estimated_prep_duration_minutes?: number | null
+          planned_prep_start_time?: string | null
+          target_ready_by_time?: string | null
+          preparation_started_at?: string | null
           is_takeaway?: boolean
           ready_at?: string | null
           status?: Database["public"]["Enums"]["order_status"]
           user_id: string
           tenant_id: string
           canteen_id: string
+          total_tax_amount?: number | null
+          tax_snapshot?: Json | null
         }
         Update: {
           accepted_at?: string | null
@@ -221,14 +503,20 @@ export interface Database {
           id?: string
           order_number?: number
           otp_attempts?: number
-          otp_code?: string
           pickup_time?: string
+          requested_pickup_time?: string | null
+          estimated_prep_duration_minutes?: number | null
+          planned_prep_start_time?: string | null
+          target_ready_by_time?: string | null
+          preparation_started_at?: string | null
           is_takeaway?: boolean
           ready_at?: string | null
           status?: Database["public"]["Enums"]["order_status"]
           user_id?: string
           tenant_id?: string
           canteen_id?: string
+          total_tax_amount?: number | null
+          tax_snapshot?: Json | null
         }
         Relationships: [
           {
@@ -256,6 +544,8 @@ export interface Database {
           suspended_until: string | null
           tenant_id: string
           canteen_id: string | null
+          must_change_password: boolean
+          password_last_changed_at: string | null
         }
         Insert: {
           created_at?: string
@@ -267,6 +557,8 @@ export interface Database {
           suspended_until?: string | null
           tenant_id: string
           canteen_id?: string | null
+          must_change_password?: boolean
+          password_last_changed_at?: string | null
         }
         Update: {
           created_at?: string
@@ -278,6 +570,8 @@ export interface Database {
           suspended_until?: string | null
           tenant_id?: string
           canteen_id?: string | null
+          must_change_password?: boolean
+          password_last_changed_at?: string | null
         }
         Relationships: [
           {
@@ -315,6 +609,108 @@ export interface Database {
           name?: string
           is_active?: boolean
           created_at?: string
+        }
+        Relationships: []
+      }
+      order_ledger: {
+        Row: {
+          id: string
+          order_id: string
+          student_id: string
+          canteen_id: string
+          tenant_id: string
+          payment_status: string
+          food_subtotal: number
+          commission_fee: number
+          target_net: number
+          gross_payable: number
+          gateway_fee: number
+          gw_deduction: number
+          net_settled: number
+          canteen_payable: number
+          platform_net: number
+          tax_mode: string | null
+          supply_type: string | null
+          taxable_food_amount: number | null
+          food_gst_rate: number | null
+          food_gst_amount: number | null
+          cgst_rate: number | null
+          cgst_amount: number | null
+          sgst_rate: number | null
+          sgst_amount: number | null
+          igst_rate: number | null
+          igst_amount: number | null
+          fee_gst_amount: number | null
+          total_tax_amount: number | null
+          tax_snapshot: Json | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          order_id: string
+          student_id: string
+          canteen_id: string
+          tenant_id?: string
+          payment_status?: string
+          food_subtotal: number
+          commission_fee: number
+          target_net: number
+          gross_payable: number
+          gateway_fee: number
+          gw_deduction: number
+          net_settled: number
+          canteen_payable: number
+          platform_net: number
+          tax_mode?: string | null
+          supply_type?: string | null
+          taxable_food_amount?: number | null
+          food_gst_rate?: number | null
+          food_gst_amount?: number | null
+          cgst_rate?: number | null
+          cgst_amount?: number | null
+          sgst_rate?: number | null
+          sgst_amount?: number | null
+          igst_rate?: number | null
+          igst_amount?: number | null
+          fee_gst_amount?: number | null
+          total_tax_amount?: number | null
+          tax_snapshot?: Json | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          order_id?: string
+          student_id?: string
+          canteen_id?: string
+          tenant_id?: string
+          payment_status?: string
+          food_subtotal?: number
+          commission_fee?: number
+          target_net?: number
+          gross_payable?: number
+          gateway_fee?: number
+          gw_deduction?: number
+          net_settled?: number
+          canteen_payable?: number
+          platform_net?: number
+          tax_mode?: string | null
+          supply_type?: string | null
+          taxable_food_amount?: number | null
+          food_gst_rate?: number | null
+          food_gst_amount?: number | null
+          cgst_rate?: number | null
+          cgst_amount?: number | null
+          sgst_rate?: number | null
+          sgst_amount?: number | null
+          igst_rate?: number | null
+          igst_amount?: number | null
+          fee_gst_amount?: number | null
+          total_tax_amount?: number | null
+          tax_snapshot?: Json | null
+          created_at?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -458,7 +854,50 @@ export interface Database {
       }
     }
     Views: {
-      [_ in never]: never
+      staff_orders: {
+        Row: {
+          id: string
+          user_id: string
+          tenant_id: string
+          canteen_id: string | null
+          order_number: number
+          status: Database["public"]["Enums"]["order_status"]
+          created_at: string
+          pickup_time: string
+          is_takeaway: boolean
+          total_tax_amount: number | null
+          collected_at: string | null
+          requested_pickup_time: string | null
+          planned_prep_start_time: string | null
+          target_ready_by_time: string | null
+          estimated_prep_duration_minutes: number | null
+          idempotency_key: string | null
+          payment_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "orders_canteen_id_fkey"
+            columns: ["canteen_id"]
+            isOneToOne: false
+            referencedRelation: "canteens"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "orders_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "orders_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
     }
     Functions: {
       toggle_sold_out: {
@@ -482,21 +921,33 @@ export interface Database {
           p_order_id: string
           p_status: Database["public"]["Enums"]["order_status"]
         }
-        Returns: undefined
+        Returns: Json
       }
       verify_pickup_otp: {
         Args: {
+          p_order_id?: string | null
+          p_otp?: string | null
+        }
+        Returns: Json
+      }
+      request_collection_otp: {
+        Args: {
           p_order_id: string
-          p_otp: string
-          p_is_override?: boolean
+        }
+        Returns: Json
+      }
+      reset_order_otp_attempts: {
+        Args: {
+          p_order_id: string
         }
         Returns: Json
       }
       cancel_order: {
         Args: {
           p_order_id: string
+          p_reason?: string
         }
-        Returns: undefined
+        Returns: Json
       }
       mark_order_no_show: {
         Args: {
@@ -546,9 +997,23 @@ export interface Database {
         }
         Returns: boolean
       }
+      complete_first_login_password_setup: {
+        Args: Record<string, never>
+        Returns: Json
+      }
+      provision_super_admin: {
+        Args: {
+          p_user_id: string
+          p_email: string
+          p_name?: string
+        }
+        Returns: Json
+      }
     }
     Enums: {
       food_type: "VEG" | "NON_VEG"
+      inventory_product_type: "FRESH_FOOD" | "PACKAGED" | "SOFT_DRINK"
+      inventory_transaction_type: "STOCK_IN" | "SALE" | "WASTAGE" | "ADJUSTMENT"
       order_status:
         | "PLACED"
         | "ACCEPTED"

@@ -10,12 +10,9 @@ coverage/
 !.env.example
 *.pem
 *.key
-.env.*
-.env.local*
 .local
-.env.Local
-.env*
-.env.local
+supabase/.temp/
+.vscode/
 
 # Agent and Local Tooling Metadata
 .agents/

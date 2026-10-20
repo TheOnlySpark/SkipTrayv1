@@ -97,12 +97,16 @@ export function ModalDialogProvider({ children }: { children: React.ReactNode })
       if (event.key === 'Escape') {
         event.preventDefault();
         handleCancel();
+      } else if (event.key === 'Enter' && !isConfirm) {
+        // In simple alerts, Enter acts as confirmation
+        event.preventDefault();
+        handleConfirm();
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen]);
+  }, [isOpen, isConfirm]);
 
   function getDefaultTitle(t: DialogType): string {
     switch (t) {
