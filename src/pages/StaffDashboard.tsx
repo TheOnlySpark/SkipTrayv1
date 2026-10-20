@@ -2183,24 +2183,6 @@ export default function StaffDashboard() {
                       themeBg = 'bg-gradient-to-br from-rose-50/40 via-white to-rose-50/10';
                     }
 
-                    // Dynamic fallback description
-                    const itemNameLower = (item.name || '').toLowerCase();
-                    let itemDesc = (item as any).description;
-                    if (!itemDesc) {
-                      if (itemNameLower.includes('idly') || itemNameLower.includes('idli')) {
-                        itemDesc = 'Soft and fluffy idlies, perfect for a healthy start.';
-                      } else if (itemNameLower.includes('dosa')) {
-                        itemDesc = 'Crispy dosa with chutney and sambar.';
-                      } else if (itemNameLower.includes('lays') || itemNameLower.includes('chip')) {
-                        itemDesc = 'Crispy and crunchy potato chips (original).';
-                      } else if (itemNameLower.includes('tea') || itemNameLower.includes('coffee')) {
-                        itemDesc = 'Freshly brewed and hot beverage.';
-                      } else if (isPacked) {
-                        itemDesc = `Packaged sealed snack • Quick takeaway.`;
-                      } else {
-                        itemDesc = `Freshly cooked delicious ${item.name.toLowerCase()}.`;
-                      }
-                    }
 
                     return (
                       <div
@@ -2260,10 +2242,7 @@ export default function StaffDashboard() {
                             {item.name}
                           </h3>
 
-                          {/* Food Description */}
-                          <p className="text-xs sm:text-sm text-slate-500 font-medium leading-relaxed mt-1.5 min-h-[38px] line-clamp-2">
-                            {itemDesc}
-                          </p>
+
                         </div>
 
                         {/* Footer: Price on Left, Mark Available / Sold Out Pill on Right */}

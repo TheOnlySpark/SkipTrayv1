@@ -21,7 +21,7 @@ import {
 import { QRCodeSVG } from '../components/QRCode';
 import { calculateOrderLedger } from '../lib/ledger';
 import { formatErrorMessage } from '../utils/validation';
-import { Lock, Radio, CheckCircle2, Sparkles, ShieldCheck, Star, X as LucideX, ArrowLeft, ShoppingCart, Flame, UtensilsCrossed, Trash2, ArrowRight, Heart, Coffee, Check, LayoutGrid, Leaf, Package } from 'lucide-react';
+import { Lock, Radio, CheckCircle2, Sparkles, ShieldCheck, Star, X as LucideX, ArrowLeft, ShoppingCart, Flame, UtensilsCrossed, Trash2, ArrowRight, Heart, Check, LayoutGrid, Leaf, Package } from 'lucide-react';
 import { playStatusChime, triggerHapticFeedback } from '../utils/notificationSound';
 import { useSearchParams, Link } from 'react-router-dom';
 
@@ -79,7 +79,6 @@ export default function StudentDashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get('tab');
   const showHistory = activeTab === 'history';
-  const showMenuExplicit = activeTab === 'menu';
 
   const setShowHistory = (show: boolean) => {
     const next = new URLSearchParams(searchParams);
@@ -90,16 +89,6 @@ export default function StudentDashboard() {
     }
     setSearchParams(next, { replace: false });
   };
-
-  // Scroll to menu items section when tab=menu is visited
-  useEffect(() => {
-    if (showMenuExplicit) {
-      const el = document.getElementById('menu-items-section');
-      if (el) {
-        setTimeout(() => el.scrollIntoView({ behavior: 'smooth' }), 100);
-      }
-    }
-  }, [showMenuExplicit]);
 
   // Food Search & Filter States
   const [foodSearchQuery, setFoodSearchQuery] = useState('');
@@ -142,6 +131,24 @@ export default function StudentDashboard() {
   const [cart, setCart] = useState<{ item: MenuItem, quantity: number }[]>([]);
   const [showCartBuilder, setShowCartBuilder] = useState(false);
   const [pickupTime, setPickupTime] = useState(getInitialPickupTime);
+
+  // Helper to convert 24h string ("16:31") to 12h parts and vice versa
+  const parse12hParts = (timeStr?: string | null) => {
+    const min = parseTimeToMinutes(timeStr);
+    if (isNaN(min)) return { hour: 12, minute: 0, period: 'PM' as const };
+    const h = Math.floor(min / 60) % 24;
+    const m = min % 60;
+    const period: 'AM' | 'PM' = h >= 12 ? 'PM' : 'AM';
+    const hour = h > 12 ? h - 12 : h === 0 ? 12 : h;
+    return { hour, minute: m, period };
+  };
+
+  const compose24hString = (hour: number, minute: number, period: 'AM' | 'PM') => {
+    let h = hour % 12;
+    if (period === 'PM') h += 12;
+    return `${String(h).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+  };
+
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [cartOpen, setCartOpen] = useState(false);
@@ -360,6 +367,19 @@ export default function StudentDashboard() {
   const [enteredOtp, setEnteredOtp] = useState('');
   const [otpSentMessage, setOtpSentMessage] = useState<string | null>(null);
 
+  // Authoritative active OTP with sessionStorage cache fallback
+  const currentOtp = useMemo(() => {
+    if (!activeOrder) return '';
+    const cached = (() => {
+      try {
+        return sessionStorage.getItem(`order_otp_${activeOrder.id}`) || '';
+      } catch {
+        return '';
+      }
+    })();
+    return ((activeOrder as any).otp_code || enteredOtp || (activeOrder as any).otp || cached || '').trim();
+  }, [activeOrder, enteredOtp]);
+
   const fetchActive = useCallback(async () => {
     if (!profile?.id) return;
     const { data } = await supabase
@@ -488,6 +508,9 @@ export default function StudentDashboard() {
         console.warn('request_collection_otp RPC returned error, generating dynamic pickup OTP in memory:', error.message);
         const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
         setEnteredOtp(generatedOtp);
+        try {
+          sessionStorage.setItem(`order_otp_${activeOrder.id}`, generatedOtp);
+        } catch {}
         setChallengeData({
           expiresAt: Date.now() + 5 * 60 * 1000,
           resendAvailableAt: Date.now() + 60 * 1000,
@@ -505,6 +528,9 @@ export default function StudentDashboard() {
           // If RPC returned an OTP (for ephemeral testing or display), adopt it, else generate dynamic OTP
           const dynamicOtp = res.otp || Math.floor(100000 + Math.random() * 900000).toString();
           setEnteredOtp(dynamicOtp);
+          try {
+            sessionStorage.setItem(`order_otp_${activeOrder.id}`, dynamicOtp);
+          } catch {}
           setOtpSentMessage(res.message);
           setChallengeData({
             expiresAt: new Date(res.expires_at || Date.now() + 5 * 60 * 1000).getTime(),
@@ -526,6 +552,13 @@ export default function StudentDashboard() {
       setRequestingOtp(false);
     }
   };
+
+  // Automatically fetch / generate OTP as soon as order reaches READY status
+  useEffect(() => {
+    if (activeOrder?.status === 'READY' && !currentOtp && !requestingOtp) {
+      handleRequestOtp();
+    }
+  }, [activeOrder?.status, activeOrder?.id, currentOtp, requestingOtp]);
 
   useEffect(() => {
     fetchActive();
@@ -759,10 +792,8 @@ export default function StudentDashboard() {
       return true;
     });
 
-    // On the main Dashboard view ("Popular Sold Foods"):
-    // Strictly show ONLY items that have been sold this week (soldCount > 0), ranked by highest sold.
-    // In full Menu view (?tab=menu): Show ALL foods in the canteen catalogue.
-    if (!showMenuExplicit) {
+    // Sort items by popularity (highest sold first), then alphabetical, showing ALL foods directly on dashboard
+    return list.sort((a, b) => {
       const getCount = (item: any) => {
         const cleanName = (item.name || '').replace(/^\[(?:DELETED|ARCHIVED)\]\s*/i, '').toLowerCase().trim();
         return (
@@ -772,14 +803,12 @@ export default function StudentDashboard() {
           0
         );
       };
-
-      const soldItems = list.filter(item => getCount(item) > 0);
-
-      return soldItems.sort((a, b) => getCount(b) - getCount(a));
-    }
-
-    return list;
-  }, [menuItems, foodSearchQuery, foodTypeFilter, categoryFilter, salesCountMap, showMenuExplicit]);
+      const countA = getCount(a);
+      const countB = getCount(b);
+      if (countB !== countA) return countB - countA;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+  }, [menuItems, foodSearchQuery, foodTypeFilter, categoryFilter, salesCountMap]);
 
   const { data: pastOrdersData = [], isLoading: pastOrdersLoading } = useQuery({
     queryKey: ['pastOrders', profile?.id],
@@ -1572,7 +1601,7 @@ export default function StudentDashboard() {
             {/* Left Column (8 cols): Compact Hero Promo + Combined Menu Header & Food Grid */}
             <div className="lg:col-span-8 space-y-4">
               {/* Compact Hero Banner */}
-              <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#002b66] via-[#023e8a] to-[#001845] text-white p-4 sm:p-5 shadow-md">
+              <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#002b66] via-[#023e8a] to-[#001845] text-white p-3.5 sm:p-5 shadow-md">
                 <div className="relative z-10 flex items-center justify-between gap-4">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
@@ -1598,54 +1627,37 @@ export default function StudentDashboard() {
               </div>
 
               {/* Combined Menu Card (Filter & Search Header + Grid in single cohesive section) */}
-              <div id="menu-items-section" className="bg-white/95 backdrop-blur-md border border-slate-200/90 rounded-3xl p-4 sm:p-5 shadow-sm space-y-4">
+              <div id="menu-items-section" className="bg-white/95 backdrop-blur-md border border-slate-200/90 rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 shadow-sm space-y-3 sm:space-y-4">
                 {/* Top Row: Menu Title + Subtitle on Left, Search Input on Right */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-[#1d68f2] shadow-xs shrink-0">
-                      {showMenuExplicit ? <UtensilsCrossed size={20} /> : <Flame size={20} className="text-amber-500" />}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3">
+                  <div className="flex items-center gap-2 sm:gap-2.5">
+                    <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-[#1d68f2] shadow-xs shrink-0">
+                      <UtensilsCrossed size={18} />
                     </div>
                     <div>
-                      <div className="flex items-center gap-2">
-                        <h2 className="text-xl font-black text-slate-900 tracking-tight leading-none">
-                          {showMenuExplicit ? 'All Menu Items' : 'Popular Sold Foods'}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h2 className="text-base sm:text-xl font-black text-slate-900 tracking-tight leading-none">
+                          All Menu Items
                         </h2>
-                        <span className="text-[11px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+                        <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
                           {filteredMenuItems.length} dishes
                         </span>
-                        {!showMenuExplicit ? (
-                          <Link
-                            to="/student?tab=menu"
-                            className="text-xs font-bold text-[#1d68f2] hover:underline ml-1"
-                          >
-                            View Full Menu →
-                          </Link>
-                        ) : (
-                          <Link
-                            to="/student"
-                            className="text-xs font-bold text-[#1d68f2] hover:underline ml-1"
-                          >
-                            ← Back to Popular
-                          </Link>
-                        )}
                       </div>
-                      <p className="text-xs text-slate-500 font-medium mt-0.5">
-                        {showMenuExplicit
-                          ? 'Browse all available canteen foods, meals & packed items'
-                          : 'Foods sold most this week — fresh, top-rated and popular!'}
+                      <p className="hidden sm:block text-xs text-slate-500 font-medium mt-0.5">
+                        Browse all available canteen foods, meals & packed items
                       </p>
                     </div>
                   </div>
 
                   {/* Search food items input with blue search icon */}
                   <div className="relative w-full sm:w-72">
-                    <IconSearch size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#1d68f2] pointer-events-none" />
+                    <IconSearch size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#1d68f2] pointer-events-none" />
                     <input
                       type="text"
                       placeholder="Search food items..."
                       value={foodSearchQuery}
                       onChange={e => setFoodSearchQuery(e.target.value)}
-                      className="w-full bg-slate-50/80 border border-slate-200 focus:bg-white focus:border-[#1d68f2] focus:ring-2 focus:ring-blue-100 rounded-full text-xs text-slate-800 placeholder:text-slate-400 pl-10 pr-8 py-2 outline-none transition-all"
+                      className="w-full bg-slate-50/80 border border-slate-200 focus:bg-white focus:border-[#1d68f2] focus:ring-2 focus:ring-blue-100 rounded-full text-xs text-slate-800 placeholder:text-slate-400 pl-9 pr-8 py-2 outline-none transition-all"
                     />
                     {foodSearchQuery && (
                       <button
@@ -1659,8 +1671,8 @@ export default function StudentDashboard() {
                   </div>
                 </div>
 
-                {/* Filter Pills Row */}
-                <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-slate-100">
+                {/* Filter Pills Row - Single horizontal scrollable bar on mobile, flex-wrap on desktop */}
+                <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar scrollbar-none pb-0.5 -mx-1 px-1 sm:mx-0 sm:px-0 sm:flex-wrap pt-2 border-t border-slate-100">
                   {/* All button */}
                   <button
                     type="button"
@@ -1668,7 +1680,7 @@ export default function StudentDashboard() {
                       setFoodTypeFilter('ALL');
                       setCategoryFilter('ALL');
                     }}
-                    className={`px-3.5 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
+                    className={`px-3 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all shrink-0 cursor-pointer ${
                       foodTypeFilter === 'ALL' && categoryFilter === 'ALL'
                         ? 'bg-[#1d68f2] text-white shadow-sm shadow-blue-500/25 ring-2 ring-blue-400/30'
                         : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
@@ -1681,8 +1693,8 @@ export default function StudentDashboard() {
                   {/* Veg button */}
                   <button
                     type="button"
-                    onClick={() => setFoodTypeFilter('VEG')}
-                    className={`px-3.5 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all border cursor-pointer ${
+                    onClick={() => setFoodTypeFilter(foodTypeFilter === 'VEG' ? 'ALL' : 'VEG')}
+                    className={`px-3 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all border shrink-0 cursor-pointer ${
                       foodTypeFilter === 'VEG'
                         ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm shadow-emerald-500/20'
                         : 'bg-emerald-50/80 text-emerald-700 border-emerald-200/80 hover:bg-emerald-100/60'
@@ -1695,8 +1707,8 @@ export default function StudentDashboard() {
                   {/* Non-Veg button */}
                   <button
                     type="button"
-                    onClick={() => setFoodTypeFilter('NON_VEG')}
-                    className={`px-3.5 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all border cursor-pointer ${
+                    onClick={() => setFoodTypeFilter(foodTypeFilter === 'NON_VEG' ? 'ALL' : 'NON_VEG')}
+                    className={`px-3 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all border shrink-0 cursor-pointer ${
                       foodTypeFilter === 'NON_VEG'
                         ? 'bg-rose-600 text-white border-rose-600 shadow-sm shadow-rose-500/20'
                         : 'bg-rose-50/80 text-rose-700 border-rose-200/80 hover:bg-rose-100/60'
@@ -1706,27 +1718,13 @@ export default function StudentDashboard() {
                     <span>Non-Veg</span>
                   </button>
 
-                  <div className="h-5 w-px bg-slate-200 mx-1 hidden sm:block" />
-
-                  {/* All Categories Dropdown / Pill */}
-                  <button
-                    type="button"
-                    onClick={() => setCategoryFilter('ALL')}
-                    className={`px-3.5 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
-                      categoryFilter === 'ALL'
-                        ? 'bg-[#0f172a] text-white shadow-sm'
-                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                    }`}
-                  >
-                    <LayoutGrid size={13} />
-                    <span>All Categories</span>
-                  </button>
+                  <div className="h-4 w-px bg-slate-200 shrink-0 mx-0.5" />
 
                   {/* Packed Food */}
                   <button
                     type="button"
                     onClick={() => setCategoryFilter(categoryFilter === 'SNACKS' ? 'ALL' : 'SNACKS')}
-                    className={`px-3.5 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all border cursor-pointer ${
+                    className={`px-3 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all border shrink-0 cursor-pointer ${
                       categoryFilter === 'SNACKS'
                         ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
                         : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
@@ -1735,34 +1733,6 @@ export default function StudentDashboard() {
                     <Package size={13} className="text-slate-500" />
                     <span>Packed Food</span>
                   </button>
-
-                  {/* Meals */}
-                  <button
-                    type="button"
-                    onClick={() => setCategoryFilter(categoryFilter === 'RICE_MEALS' ? 'ALL' : 'RICE_MEALS')}
-                    className={`px-3.5 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all border cursor-pointer ${
-                      categoryFilter === 'RICE_MEALS'
-                        ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    <UtensilsCrossed size={13} className="text-slate-500" />
-                    <span>Meals</span>
-                  </button>
-
-                  {/* Drinks */}
-                  <button
-                    type="button"
-                    onClick={() => setCategoryFilter(categoryFilter === 'BEVERAGES' ? 'ALL' : 'BEVERAGES')}
-                    className={`px-3.5 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all border cursor-pointer ${
-                      categoryFilter === 'BEVERAGES'
-                        ? 'bg-cyan-600 text-white border-cyan-600 shadow-sm'
-                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    <Coffee size={13} className="text-slate-500" />
-                    <span>Drinks</span>
-                  </button>
                 </div>
 
                 {/* Empty State */}
@@ -1770,12 +1740,10 @@ export default function StudentDashboard() {
                   <div className="py-8 px-4 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
                     <IconPackage size={32} className="text-slate-300 mx-auto mb-2" />
                     <h4 className="text-sm font-bold text-slate-700">
-                      {!showMenuExplicit ? 'No Popular Orders This Week' : 'No Food Items Found'}
+                      No Food Items Found
                     </h4>
                     <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1">
-                      {!showMenuExplicit
-                        ? 'Items appear here once orders are placed this week. You can browse the full menu to place an order!'
-                        : 'No items matched your search or category filter.'}
+                      No items matched your search or category filter.
                     </p>
                     <div className="flex items-center justify-center gap-2 mt-3 flex-wrap">
                       <button
@@ -1785,23 +1753,15 @@ export default function StudentDashboard() {
                           setFoodTypeFilter('ALL');
                           setCategoryFilter('ALL');
                         }}
-                        className="px-3.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold transition-all shadow-xs"
+                        className="px-3.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
                       >
                         Reset Filters
                       </button>
-                      {!showMenuExplicit && (
-                        <Link
-                          to="/student?tab=menu"
-                          className="px-3.5 py-1.5 bg-[#1d68f2] hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm"
-                        >
-                          Browse All Menu Items →
-                        </Link>
-                      )}
                     </div>
                   </div>
                 ) : (
-                  /* Food Grid Cards without Images */
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 pt-1">
+                  /* Food Grid Cards without Images - 2 in a row on mobile */
+                  <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3.5 pt-1">
                     {filteredMenuItems.map(item => {
                       const rawCat = String((item as any).category || '').toLowerCase();
                       const isPacked =
@@ -1823,161 +1783,94 @@ export default function StudentDashboard() {
                       const quantity = cartEntry?.quantity || 0;
                       const isMaxStockReached = stock !== null && quantity >= stock;
 
-                      // Determine theme accent matching user reference image
-                      // Green for Veg, Amber/Yellow for Packed Food/Snacks, Pink/Rose for Non-Veg or Meals
+                      // Clean border accent
                       const isVeg = item.veg_non_veg === 'VEG';
-                      let themeBorder = 'border-l-[6px] border-t-2 border-emerald-500 hover:border-emerald-600';
-                      let themeBg = 'bg-gradient-to-br from-emerald-50/40 via-white to-emerald-50/10';
-                      let themeTag = 'bg-emerald-100/90 text-emerald-800';
+                      let themeBorder = 'border-l-4 border-emerald-500';
+                      let themeBg = 'bg-white hover:bg-emerald-50/20';
 
                       if (isPacked) {
-                        themeBorder = 'border-l-[6px] border-t-2 border-amber-400 hover:border-amber-500';
-                        themeBg = 'bg-gradient-to-br from-amber-50/40 via-white to-amber-50/10';
-                        themeTag = 'bg-amber-100/90 text-amber-800';
+                        themeBorder = 'border-l-4 border-amber-400';
+                        themeBg = 'bg-white hover:bg-amber-50/20';
                       } else if (!isVeg) {
-                        themeBorder = 'border-l-[6px] border-t-2 border-rose-500 hover:border-rose-600';
-                        themeBg = 'bg-gradient-to-br from-rose-50/40 via-white to-rose-50/10';
-                        themeTag = 'bg-rose-100/90 text-rose-800';
+                        themeBorder = 'border-l-4 border-rose-500';
+                        themeBg = 'bg-white hover:bg-rose-50/20';
                       }
 
-                      // Dynamic appetizing descriptions matching screenshot style
-                      const itemNameLower = (item.name || '').toLowerCase();
-                      let itemDesc = (item as any).description;
-                      if (!itemDesc) {
-                        if (itemNameLower.includes('idly') || itemNameLower.includes('idli')) {
-                          itemDesc = 'Soft and fluffy idlies, perfect for a healthy start.';
-                        } else if (itemNameLower.includes('dosa')) {
-                          itemDesc = 'Crispy dosa with chutney and sambar.';
-                        } else if (itemNameLower.includes('lays') || itemNameLower.includes('chip')) {
-                          itemDesc = 'Crispy and crunchy potato chips (original).';
-                        } else if (itemNameLower.includes('biscuit') || itemNameLower.includes('cookie')) {
-                          itemDesc = 'Crispy oven baked treats, ready to snack.';
-                        } else if (itemNameLower.includes('poori') || itemNameLower.includes('puri')) {
-                          itemDesc = 'Fluffy golden fried pooris served with potato masala.';
-                        } else if (itemNameLower.includes('pongal')) {
-                          itemDesc = 'Ghee-rich ven pongal tempered with cashews & pepper.';
-                        } else if (itemNameLower.includes('vada')) {
-                          itemDesc = 'Crunchy golden medu vada with hot sambar.';
-                        } else if (itemNameLower.includes('rice') || itemNameLower.includes('meal')) {
-                          itemDesc = 'Wholesome hot meals prepared with authentic spices.';
-                        } else if (itemNameLower.includes('tea') || itemNameLower.includes('chai')) {
-                          itemDesc = 'Freshly brewed aromatic hot tea.';
-                        } else if (itemNameLower.includes('coffee')) {
-                          itemDesc = 'Traditional South Indian filter coffee.';
-                        } else if (isPacked) {
-                          itemDesc = `Ready to eat sealed pack of fresh ${item.name}.`;
-                        } else {
-                          itemDesc = `Freshly cooked delicious ${item.name.toLowerCase()} prepared on order.`;
-                        }
-                      }
+                      const soldCount = salesCountMap[item.id] || salesCountMap[`name:${(item.name || '').toLowerCase()}`] || 0;
 
                       return (
                         <div
                           key={item.id}
-                          className={`relative rounded-2xl border border-slate-200/80 p-4 flex flex-col justify-between shadow-2xs transition-all duration-200 hover:shadow-md ${themeBorder} ${themeBg} ${
+                          className={`relative rounded-xl sm:rounded-2xl border border-slate-200/90 p-2.5 sm:p-4 flex flex-col justify-between shadow-2xs transition-all duration-200 hover:shadow-sm ${themeBorder} ${themeBg} ${
                             isSoldOut ? 'opacity-60 bg-slate-50 grayscale-25' : ''
                           }`}
                         >
                           <div>
-                            {/* Badges Row */}
-                            <div className="flex items-center justify-between gap-1.5 mb-2 flex-wrap">
-                              <div className="flex items-center gap-1.5 flex-wrap">
+                            {/* Badges Row - Clean & Compact for 2-column view */}
+                            <div className="flex items-center justify-between gap-1 mb-1.5 flex-wrap">
+                              <div className="flex items-center gap-1 flex-wrap">
                                 {/* Veg/Non-Veg Badge */}
-                                <div className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-black shadow-2xs ${
+                                <div className={`flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-[11px] font-black ${
                                   isVeg ? 'bg-emerald-100/90 text-emerald-800' : 'bg-rose-100/90 text-rose-800'
                                 }`}>
                                   {isVeg ? (
-                                    <Leaf size={11} className="text-emerald-700" />
+                                    <Leaf size={9} className="text-emerald-700" />
                                   ) : (
-                                    <span className="w-1.5 h-1.5 rounded-full bg-rose-600 ring-2 ring-rose-300" />
+                                    <span className="w-1.5 h-1.5 rounded-full bg-rose-600 ring-1 ring-rose-200" />
                                   )}
                                   <span>{isVeg ? 'Veg' : 'Non-Veg'}</span>
                                 </div>
 
                                 {/* Prep Time or Category Badge */}
                                 {isPacked ? (
-                                  <div className="flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-50 text-blue-800 border border-blue-200/60">
-                                    <Package size={11} className="text-blue-600" />
+                                  <div className="flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-[11px] font-bold bg-blue-50 text-blue-800 border border-blue-200/60">
+                                    <Package size={9} className="text-blue-600" />
                                     <span>Packed</span>
                                   </div>
                                 ) : (
-                                  <div className="flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100/80 text-amber-900">
-                                    <IconClock size={11} className="text-amber-800" />
-                                    <span>{prepMinutes}m prep</span>
+                                  <div className="flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-[11px] font-bold bg-amber-100/80 text-amber-900">
+                                    <IconClock size={9} className="text-amber-800" />
+                                    <span>{prepMinutes}m</span>
                                   </div>
                                 )}
                               </div>
 
                               {/* Highlight Tag on Right */}
                               {isSoldOut ? (
-                                <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 text-[9px] font-black uppercase tracking-wider">
+                                <span className="px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700 text-[8px] sm:text-[9px] font-black uppercase tracking-wider">
                                   Sold Out
                                 </span>
-                              ) : (() => {
-                                const soldCount = salesCountMap[item.id] || salesCountMap[`name:${(item.name || '').toLowerCase()}`] || 0;
-                                if (soldCount > 0) {
-                                  return (
-                                    <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-300 text-[9px] font-black flex items-center gap-1 shadow-2xs">
-                                      🔥 {soldCount} sold today
-                                    </span>
-                                  );
-                                }
-                                if (isPacked) {
-                                  return (
-                                    <span className="px-2 py-0.5 rounded-full bg-pink-100/80 text-pink-700 text-[9px] font-extrabold flex items-center gap-1">
-                                      ★ Popular
-                                    </span>
-                                  );
-                                }
-                                if (isVeg) {
-                                  return (
-                                    <span className="px-2 py-0.5 rounded-full bg-emerald-100/70 text-emerald-700 text-[9px] font-extrabold flex items-center gap-1">
-                                      💚 Healthy
-                                    </span>
-                                  );
-                                }
-                                return (
-                                  <span className="px-2 py-0.5 rounded-full bg-blue-100/70 text-blue-700 text-[9px] font-extrabold flex items-center gap-1">
-                                    🍲 Meals
-                                  </span>
-                                );
-                              })()}
+                              ) : soldCount > 0 ? (
+                                <span className="px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-300 text-[8px] sm:text-[9px] font-black flex items-center gap-0.5 shadow-2xs">
+                                  🔥 {soldCount}
+                                </span>
+                              ) : null}
                             </div>
 
                             {/* Food Title */}
-                            <h3 className="text-lg font-black text-slate-900 tracking-tight leading-snug mt-1 truncate">
+                            <h3 className="text-xs sm:text-base font-black text-slate-900 tracking-tight leading-snug line-clamp-2">
                               {item.name}
                             </h3>
-
-                            {/* Food Description */}
-                            <p className="text-xs text-slate-500 font-medium leading-snug mt-1 line-clamp-2 min-h-[32px]">
-                              {itemDesc}
-                            </p>
                           </div>
 
                           {/* Footer: Price on Left, Pill Button on Right */}
-                          <div className="pt-2.5 border-t border-slate-200/70 flex items-center justify-between gap-2 mt-3">
-                            <div>
-                              <span className="text-[9px] tracking-wider font-extrabold text-slate-400 block uppercase">
-                                PRICE
-                              </span>
-                              <div className="text-xl font-black text-[#1d68f2] tracking-tight leading-tight">
-                                ₹{Number(item.price || 0).toFixed(2)}
-                              </div>
+                          <div className="pt-2 sm:pt-2.5 border-t border-slate-100 flex items-center justify-between gap-1 mt-2 sm:mt-3">
+                            <div className="text-sm sm:text-xl font-black text-[#1d68f2] tracking-tight leading-tight">
+                              ₹{Number(item.price || 0).toFixed(2)}
                             </div>
 
                             {!isSoldOut ? (
                               quantity > 0 ? (
-                                <div className="flex items-center bg-[#1d68f2] text-white rounded-full p-0.5 shadow-xs">
+                                <div className="flex items-center bg-[#1d68f2] text-white rounded-full p-0.5 shadow-xs shrink-0">
                                   <button
                                     type="button"
                                     onClick={() => removeFromCart(item.id)}
                                     aria-label={`Decrease quantity of ${item.name}`}
-                                    className="w-7 h-7 flex items-center justify-center hover:bg-white/20 rounded-full font-black text-sm transition-colors active:scale-90 cursor-pointer"
+                                    className="w-5 h-5 sm:w-7 sm:h-7 flex items-center justify-center hover:bg-white/20 rounded-full font-black text-xs sm:text-sm transition-colors active:scale-90 cursor-pointer"
                                   >
                                     −
                                   </button>
-                                  <span className="w-6 text-center font-black text-xs text-white tabular-nums">
+                                  <span className="w-4 sm:w-6 text-center font-black text-[10px] sm:text-xs text-white tabular-nums">
                                     {quantity}
                                   </span>
                                   <button
@@ -1985,26 +1878,26 @@ export default function StudentDashboard() {
                                     onClick={() => addToCart(item)}
                                     disabled={isSuspended || isLunchClosedForToday || cartTotalItems >= 5 || isMaxStockReached}
                                     aria-label={`Increase quantity of ${item.name}`}
-                                    className="w-7 h-7 flex items-center justify-center hover:bg-white/20 rounded-full font-black text-sm transition-colors disabled:opacity-40 active:scale-90 cursor-pointer"
+                                    className="w-5 h-5 sm:w-7 sm:h-7 flex items-center justify-center hover:bg-white/20 rounded-full font-black text-xs sm:text-sm transition-colors disabled:opacity-40 active:scale-90 cursor-pointer"
                                   >
                                     +
                                   </button>
                                 </div>
                               ) : (
-                                <div className="relative">
+                                <div className="relative shrink-0">
                                   <button
                                     type="button"
                                     onClick={() => addToCart(item)}
                                     disabled={isSuspended || isLunchClosedForToday || cartTotalItems >= 5 || isMaxStockReached}
-                                    className="px-4 py-1.5 rounded-full bg-[#1d68f2] hover:bg-blue-600 text-white font-extrabold text-xs transition-all shadow-sm shadow-blue-500/25 flex items-center gap-1 active:scale-95 disabled:opacity-40 cursor-pointer"
+                                    className="px-2.5 sm:px-4 py-1 sm:py-1.5 rounded-full bg-[#1d68f2] hover:bg-blue-600 text-white font-extrabold text-[11px] sm:text-xs transition-all shadow-sm shadow-blue-500/25 flex items-center gap-0.5 sm:gap-1 active:scale-95 disabled:opacity-40 cursor-pointer"
                                   >
-                                    <span className="text-base leading-none font-black">+</span>
+                                    <span className="text-xs sm:text-base leading-none font-black">+</span>
                                     <span>Add</span>
                                   </button>
                                 </div>
                               )
                             ) : (
-                              <span className="px-3 py-1 rounded-full bg-slate-200/70 text-slate-500 text-[11px] font-bold">
+                              <span className="px-2 py-0.5 rounded-full bg-slate-200/70 text-slate-500 text-[9px] sm:text-[10px] font-bold shrink-0">
                                 Unavailable
                               </span>
                             )}
@@ -2016,36 +1909,6 @@ export default function StudentDashboard() {
                 )}
               </div>
 
-              {/* Today's Special Bottom Strip (No food image, clean modern banner) */}
-              <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#1d68f2] to-[#0ea5e9] text-white p-4 sm:p-5 shadow-md flex flex-col sm:flex-row items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-xl bg-white/20 border border-white/30 flex items-center justify-center shrink-0 shadow-inner text-xl">
-                    <span>✨</span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] font-extrabold uppercase tracking-wider bg-white/20 px-2 py-0.5 rounded-md inline-block mb-1">
-                      Today's Special Combo
-                    </span>
-                    <h4 className="text-base font-black text-white leading-tight">
-                      Fresh Idly + Sambar & Chutney
-                    </h4>
-                    <p className="text-xs text-blue-100 font-medium">Hot South Indian breakfast combo • ₹30.00</p>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    const idlyItem = menuItems.find(m => (m.name || '').toLowerCase().includes('idly') || (m.name || '').toLowerCase().includes('idli'));
-                    if (idlyItem && !idlyItem.is_sold_out) {
-                      addToCart(idlyItem);
-                    }
-                  }}
-                  className="px-4 py-2 rounded-xl bg-white text-[#1d68f2] hover:bg-blue-50 font-black text-xs shadow-md transition-all shrink-0 active:scale-95 cursor-pointer"
-                >
-                  Quick Add ₹30 →
-                </button>
-              </div>
             </div>
 
             {/* Right Column (4 cols): Sticky Desktop Panel (Active Order Status or Cart Builder) */}
@@ -2259,7 +2122,7 @@ export default function StudentDashboard() {
                           title="Click to Enlarge QR Code"
                         >
                           <QRCodeSVG
-                            value={`SKIPTRAY:${displayOrder.id}:${((displayOrder as any).otp_code || (displayOrder as any).otp || enteredOtp || '').trim()}`}
+                            value={`SKIPTRAY:${displayOrder.id}:${currentOtp}`}
                             size={140}
                             className="rounded-lg mx-auto"
                           />
@@ -2274,26 +2137,20 @@ export default function StudentDashboard() {
                           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
                             Pickup Verification OTP
                           </p>
-                          {(() => {
-                            const displayOtp = (displayOrder as any).otp_code || enteredOtp || (displayOrder as any).otp;
-                            if (displayOtp) {
-                              return (
-                                <p className="text-2xl font-mono font-black tracking-[0.2em] text-emerald-700 my-0.5">
-                                  {displayOtp}
-                                </p>
-                              );
-                            }
-                            return (
-                              <button
-                                type="button"
-                                onClick={handleRequestOtp}
-                                disabled={requestingOtp}
-                                className="mt-1 px-3 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-lg shadow-xs hover:bg-emerald-700 disabled:opacity-50 cursor-pointer"
-                              >
-                                {requestingOtp ? 'Generating...' : 'Get OTP Code'}
-                              </button>
-                            );
-                          })()}
+                          {currentOtp ? (
+                            <p className="text-2xl font-mono font-black tracking-[0.25em] text-emerald-700 my-0.5">
+                              {currentOtp}
+                            </p>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={handleRequestOtp}
+                              disabled={requestingOtp}
+                              className="mt-1 px-3 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-lg shadow-xs hover:bg-emerald-700 disabled:opacity-50 cursor-pointer"
+                            >
+                              {requestingOtp ? 'Generating...' : 'Get OTP Code'}
+                            </button>
+                          )}
                           <p className="text-[10px] text-slate-500 mt-0.5">
                             Show OTP or scan QR at counter
                           </p>
@@ -2529,17 +2386,84 @@ export default function StudentDashboard() {
                         </span>
                       </div>
 
-                      <input
-                        type="time"
-                        step="60"
-                        value={normalizeTimeTo24h(pickupTime) || pickupTime}
-                        onChange={e => {
-                          setPickupTime(e.target.value);
-                          if (error) setError('');
-                        }}
-                        disabled={isSuspended}
-                        className="w-full bg-white border border-slate-200 text-slate-900 rounded-xl px-3 py-2 text-xs font-bold shadow-xs focus:border-[#1d68f2] focus:ring-1 focus:ring-blue-100 outline-none"
-                      />
+                      {/* 12-Hour AM/PM Selector */}
+                      <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl p-1.5 shadow-xs">
+                        {/* Hour selector */}
+                        <div className="flex-1 min-w-0">
+                          <select
+                            value={parse12hParts(pickupTime).hour}
+                            onChange={e => {
+                              const { minute, period } = parse12hParts(pickupTime);
+                              setPickupTime(compose24hString(Number(e.target.value), minute, period));
+                              if (error) setError('');
+                            }}
+                            disabled={isSuspended}
+                            aria-label="Select Pickup Hour"
+                            className="w-full bg-slate-50 hover:bg-slate-100 text-slate-800 font-black text-xs rounded-lg px-2 py-1.5 outline-none cursor-pointer border border-slate-100 text-center"
+                          >
+                            {[12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(h => (
+                              <option key={h} value={h}>{String(h).padStart(2, '0')}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <span className="font-black text-slate-400 text-sm">:</span>
+
+                        {/* Minute selector */}
+                        <div className="flex-1 min-w-0">
+                          <select
+                            value={String(parse12hParts(pickupTime).minute).padStart(2, '0')}
+                            onChange={e => {
+                              const { hour, period } = parse12hParts(pickupTime);
+                              setPickupTime(compose24hString(hour, Number(e.target.value), period));
+                              if (error) setError('');
+                            }}
+                            disabled={isSuspended}
+                            aria-label="Select Pickup Minute"
+                            className="w-full bg-slate-50 hover:bg-slate-100 text-slate-800 font-black text-xs rounded-lg px-2 py-1.5 outline-none cursor-pointer border border-slate-100 text-center"
+                          >
+                            {Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0')).map(m => (
+                              <option key={m} value={m}>{m}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* AM / PM Toggle */}
+                        <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200/60 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const { hour, minute } = parse12hParts(pickupTime);
+                              setPickupTime(compose24hString(hour, minute, 'AM'));
+                              if (error) setError('');
+                            }}
+                            disabled={isSuspended}
+                            className={`px-2.5 py-1 rounded-md text-[10px] font-black transition-all cursor-pointer ${
+                              parse12hParts(pickupTime).period === 'AM'
+                                ? 'bg-[#1d68f2] text-white shadow-xs'
+                                : 'text-slate-600 hover:text-slate-900'
+                            }`}
+                          >
+                            AM
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const { hour, minute } = parse12hParts(pickupTime);
+                              setPickupTime(compose24hString(hour, minute, 'PM'));
+                              if (error) setError('');
+                            }}
+                            disabled={isSuspended}
+                            className={`px-2.5 py-1 rounded-md text-[10px] font-black transition-all cursor-pointer ${
+                              parse12hParts(pickupTime).period === 'PM'
+                                ? 'bg-[#1d68f2] text-white shadow-xs'
+                                : 'text-slate-600 hover:text-slate-900'
+                            }`}
+                          >
+                            PM
+                          </button>
+                        </div>
+                      </div>
 
                       {/* Quick suggestion slots */}
                       <div className="mt-2 flex items-center gap-1.5 flex-wrap">
@@ -2851,15 +2775,36 @@ export default function StudentDashboard() {
                           className="bg-white p-3 rounded-2xl border-2 border-emerald-400 shadow-sm inline-block mx-auto cursor-pointer"
                         >
                           <QRCodeSVG
-                            value={`SKIPTRAY:${displayOrder.id}:${((displayOrder as any).otp_code || (displayOrder as any).otp || enteredOtp || '').trim()}`}
+                            value={`SKIPTRAY:${displayOrder.id}:${currentOtp}`}
                             size={160}
                           />
                         </div>
-                        <div className="bg-white py-2 rounded-xl border border-emerald-200">
-                          <span className="text-[10px] uppercase font-bold text-slate-400 block">Pickup OTP</span>
-                          <span className="text-2xl font-mono font-black text-emerald-700 tracking-[0.2em]">
-                            {(displayOrder as any).otp_code || enteredOtp || (displayOrder as any).otp || 'PENDING'}
-                          </span>
+                        <div className="bg-white py-2.5 px-3 rounded-xl border border-emerald-200">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Pickup Verification OTP</span>
+                          {currentOtp ? (
+                            <span className="text-2xl font-mono font-black text-emerald-700 tracking-[0.25em] block">
+                              {currentOtp}
+                            </span>
+                          ) : (
+                            <div className="flex flex-col items-center gap-1.5 py-1">
+                              <button
+                                type="button"
+                                onClick={handleRequestOtp}
+                                disabled={requestingOtp}
+                                className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-lg shadow-xs disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+                              >
+                                {requestingOtp ? (
+                                  <>
+                                    <IconHourglass size={12} className="animate-spin" />
+                                    <span>Generating OTP...</span>
+                                  </>
+                                ) : (
+                                  <span>Get Pickup OTP</span>
+                                )}
+                              </button>
+                              <span className="text-[10px] text-slate-400 font-medium">Tap to reveal 6-digit pickup code</span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     ) : (
@@ -2922,15 +2867,122 @@ export default function StudentDashboard() {
                       ))}
                     </div>
 
-                    {/* Mobile Pickup Time Selector */}
-                    <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                      <label className="text-[11px] font-bold text-slate-700 block mb-1">Pickup Time</label>
-                      <input
-                        type="time"
-                        value={normalizeTimeTo24h(pickupTime) || pickupTime}
-                        onChange={e => setPickupTime(e.target.value)}
-                        className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-bold"
-                      />
+                    {/* Mobile Pickup Time Selector in 12h AM/PM */}
+                    <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[11px] font-bold text-slate-700">Pickup Time (12h AM/PM)</label>
+                        <span className="text-[10px] text-[#1d68f2] font-bold bg-blue-50 px-2 py-0.5 rounded">
+                          {formatSingleTime(pickupTime)}
+                        </span>
+                      </div>
+
+                      {/* 12-Hour AM/PM Selector */}
+                      <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl p-1.5 shadow-xs">
+                        <div className="flex-1 min-w-0">
+                          <select
+                            value={parse12hParts(pickupTime).hour}
+                            onChange={e => {
+                              const { minute, period } = parse12hParts(pickupTime);
+                              setPickupTime(compose24hString(Number(e.target.value), minute, period));
+                              if (error) setError('');
+                            }}
+                            disabled={isSuspended}
+                            aria-label="Select Pickup Hour"
+                            className="w-full bg-slate-50 hover:bg-slate-100 text-slate-800 font-black text-xs rounded-lg px-2 py-1.5 outline-none cursor-pointer border border-slate-100 text-center"
+                          >
+                            {[12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(h => (
+                              <option key={h} value={h}>{String(h).padStart(2, '0')}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <span className="font-black text-slate-400 text-sm">:</span>
+
+                        <div className="flex-1 min-w-0">
+                          <select
+                            value={String(parse12hParts(pickupTime).minute).padStart(2, '0')}
+                            onChange={e => {
+                              const { hour, period } = parse12hParts(pickupTime);
+                              setPickupTime(compose24hString(hour, Number(e.target.value), period));
+                              if (error) setError('');
+                            }}
+                            disabled={isSuspended}
+                            aria-label="Select Pickup Minute"
+                            className="w-full bg-slate-50 hover:bg-slate-100 text-slate-800 font-black text-xs rounded-lg px-2 py-1.5 outline-none cursor-pointer border border-slate-100 text-center"
+                          >
+                            {Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0')).map(m => (
+                              <option key={m} value={m}>{m}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* AM / PM Toggle */}
+                        <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200/60 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const { hour, minute } = parse12hParts(pickupTime);
+                              setPickupTime(compose24hString(hour, minute, 'AM'));
+                              if (error) setError('');
+                            }}
+                            disabled={isSuspended}
+                            className={`px-2.5 py-1 rounded-md text-[10px] font-black transition-all cursor-pointer ${
+                              parse12hParts(pickupTime).period === 'AM'
+                                ? 'bg-[#1d68f2] text-white shadow-xs'
+                                : 'text-slate-600 hover:text-slate-900'
+                            }`}
+                          >
+                            AM
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const { hour, minute } = parse12hParts(pickupTime);
+                              setPickupTime(compose24hString(hour, minute, 'PM'));
+                              if (error) setError('');
+                            }}
+                            disabled={isSuspended}
+                            className={`px-2.5 py-1 rounded-md text-[10px] font-black transition-all cursor-pointer ${
+                              parse12hParts(pickupTime).period === 'PM'
+                                ? 'bg-[#1d68f2] text-white shadow-xs'
+                                : 'text-slate-600 hover:text-slate-900'
+                            }`}
+                          >
+                            PM
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Quick suggestion slots */}
+                      {suggestedQuickSlots.length > 0 && (
+                        <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                          {suggestedQuickSlots.slice(0, 4).map(t => (
+                            <button
+                              key={t}
+                              type="button"
+                              onClick={() => {
+                                setPickupTime(t);
+                                if (error) setError('');
+                              }}
+                              className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition-all cursor-pointer ${
+                                normalizeTimeTo24h(pickupTime) === t
+                                  ? 'bg-[#1d68f2] text-white border-[#1d68f2] shadow-xs'
+                                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                              }`}
+                            >
+                              {formatSingleTime(t)}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Smart Kitchen schedule info */}
+                      {smartSchedule.isValid && (
+                        <div className="pt-2 border-t border-slate-200/80 flex items-center justify-between text-[10px] font-semibold text-slate-500">
+                          <span>⚡ Prep: <strong className="text-amber-600">{smartSchedule.prepStartFormatted}</strong></span>
+                          <span>Hot: <strong className="text-emerald-600">{smartSchedule.readyByFormatted}</strong></span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Mobile Place Order Button */}
@@ -2975,15 +3027,15 @@ export default function StudentDashboard() {
 
             <div className="p-3 bg-slate-50 border-2 border-slate-100 rounded-2xl shadow-inner">
               <QRCodeSVG
-                value={`SKIPTRAY:${activeOrder.id}:${((activeOrder as any).otp_code || (activeOrder as any).otp || enteredOtp || '').trim()}`}
+                value={`SKIPTRAY:${activeOrder.id}:${currentOtp}`}
                 size={230}
               />
             </div>
 
             <div className="w-full bg-slate-900 text-white py-3 rounded-2xl">
               <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Pickup OTP</div>
-              <div className="text-2xl font-mono font-extrabold tracking-[0.2em]">
-                {(activeOrder as any).otp_code || (activeOrder as any).otp || enteredOtp || 'PENDING'}
+              <div className="text-2xl font-mono font-extrabold tracking-[0.25em] text-emerald-400 mt-0.5">
+                {currentOtp || (requestingOtp ? 'GENERATING...' : 'READY')}
               </div>
             </div>
 
