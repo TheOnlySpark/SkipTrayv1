@@ -4,7 +4,7 @@ Welcome to SkipTray! This guide explains how to use the application depending on
 
 ---
 
-## 🎓 For Students & Teachers
+## For Students & Teachers
 
 ### 1. Placing an Order
 1.  Log in to your account. You will land on the **Student Dashboard**.
@@ -27,7 +27,7 @@ To ensure fair usage of the canteen, a strict penalty system is in place:
 
 ---
 
-## 🧑‍🍳 For Canteen Staff
+## For Canteen Staff
 
 ### 1. Monitoring the Dashboard
 *   Log in to access the **Staff Dashboard** (The Command Center).
@@ -50,7 +50,7 @@ If an order sits in the "Ready" state past its pickup time and the student never
 
 ---
 
-## 👑 For Administrators
+## For Administrators
 
 ### 1. Menu Management
 *   Log in to the **Admin Dashboard**.

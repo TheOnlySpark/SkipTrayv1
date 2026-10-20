@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { useNotifications, OrderNotification } from '../contexts/NotificationContext';
+import { useDialog } from '../contexts/ModalDialogContext';
 import { 
   Bell, 
   CheckCheck, 
@@ -14,7 +15,7 @@ import {
 // Format helper for timestamps (both relative and exact time)
 function formatNotificationTime(timestamp: number): { exact: string; relative: string } {
   const date = new Date(timestamp);
-  const exact = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const exact = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
 
   const diffSec = Math.floor((Date.now() - timestamp) / 1000);
   let relative = 'Just now';
@@ -33,6 +34,7 @@ function formatNotificationTime(timestamp: number): { exact: string; relative: s
 }
 
 export function NotificationBell() {
+  const { showConfirm } = useDialog();
   const {
     notifications,
     unreadCount,
@@ -40,6 +42,7 @@ export function NotificationBell() {
     setIsDrawerOpen,
     markAsRead,
     markAllAsRead,
+    deleteNotification,
     clearAll,
     browserPermission,
     requestBrowserPermission,
@@ -82,6 +85,8 @@ export function NotificationBell() {
     if (!isDrawerOpen) return;
 
     function handleClickOutside(event: MouseEvent) {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest?.('[role="dialog"]')) return;
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
         setIsDrawerOpen(false);
       }
@@ -89,6 +94,7 @@ export function NotificationBell() {
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
+        if (document.querySelector('[role="dialog"]')) return;
         setIsDrawerOpen(false);
       }
     }
@@ -101,6 +107,50 @@ export function NotificationBell() {
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [isDrawerOpen, setIsDrawerOpen]);
+
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDeleteNotification = async (id: string) => {
+    if (isDeleting) return;
+    const confirmed = await showConfirm({
+      title: 'Delete Notification',
+      message: 'Are you sure you want to delete this notification?',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      isDangerous: true,
+    });
+    if (!confirmed) return;
+
+    try {
+      setIsDeleting(true);
+      deleteNotification(id);
+    } catch (err) {
+      console.error('Failed to delete notification:', err);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleDeleteAll = async () => {
+    if (isDeleting) return;
+    const confirmed = await showConfirm({
+      title: 'Delete All Notifications',
+      message: 'Are you sure you want to delete all your notifications? This action cannot be undone.',
+      confirmText: 'Delete All',
+      cancelText: 'Cancel',
+      isDangerous: true,
+    });
+    if (!confirmed) return;
+
+    try {
+      setIsDeleting(true);
+      clearAll();
+    } catch (err) {
+      console.error('Failed to delete all notifications:', err);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const getStatusBadge = (status: OrderNotification['status']) => {
     switch (status) {
@@ -118,6 +168,11 @@ export function NotificationBell() {
         return {
           icon: <Sparkles size={16} className="text-emerald-600 shrink-0" />,
           bg: 'bg-emerald-50 text-emerald-700 border-emerald-300',
+        };
+      case 'COLLECTED':
+        return {
+          icon: <CheckCircle2 size={16} className="text-teal-600 shrink-0" />,
+          bg: 'bg-teal-50 text-teal-700 border-teal-300',
         };
       default:
         return {
@@ -189,11 +244,14 @@ export function NotificationBell() {
               {notifications.length > 0 && (
                 <button
                   type="button"
-                  onClick={clearAll}
-                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                  title="Clear all notifications"
+                  onClick={handleDeleteAll}
+                  disabled={isDeleting}
+                  className="px-2 py-1 text-[11px] font-bold text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Delete all notifications"
+                  aria-label="Delete all notifications"
                 >
-                  <Trash2 size={14} />
+                  <Trash2 size={13} />
+                  <span>Delete All</span>
                 </button>
               )}
               <button
@@ -331,6 +389,21 @@ export function NotificationBell() {
                     {isItemUnread && (
                       <span className="w-2.5 h-2.5 rounded-full bg-indigo-600 ring-2 ring-indigo-200 shrink-0 mt-1" title="Unread" />
                     )}
+
+                    {/* Delete single notification button */}
+                    <button
+                      type="button"
+                      disabled={isDeleting}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteNotification(item.id);
+                      }}
+                      className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors shrink-0 self-center disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Delete notification"
+                      aria-label="Delete notification"
+                    >
+                      <Trash2 size={13} />
+                    </button>
                   </div>
                 );
               })

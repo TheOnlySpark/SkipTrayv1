@@ -53,7 +53,6 @@ BEGIN
   IF ((NOW() AT TIME ZONE 'Asia/Kolkata')::date + p_pickup_time::time) < ((NOW() AT TIME ZONE 'Asia/Kolkata') + INTERVAL '29 minutes') THEN
     RAISE EXCEPTION 'Orders must be placed at least 30 minutes in advance of the pickup slot.';
   END IF;
-
   -- Validate items array is not empty
   IF p_items IS NULL OR json_array_length(p_items) = 0 THEN
     RAISE EXCEPTION 'Order must contain at least one item';
