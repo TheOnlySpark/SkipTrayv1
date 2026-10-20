@@ -222,6 +222,7 @@ serve(async (req) => {
       .insert({
         user_id: user.id,
         tenant_id,
+        canteen_id,
         amount: total_amount,
         provider_order_id: idempotency_key, // We used idempotency_key as reference_id
         provider_payment_id: payment_id,
@@ -302,6 +303,7 @@ serve(async (req) => {
             order_id: newOrder.id,
             student_id: user.id,
             canteen_id,
+            tenant_id,
             food_subtotal: ledger.food_subtotal,
             commission_fee: ledger.commission_fee,
             target_net: ledger.target_net,

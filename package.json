@@ -9,7 +9,11 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "provision:super-admin": "tsx scripts/provision_super_admin.ts"
+    "provision:super-admin": "tsx scripts/provision_super_admin.ts",
+    "test:high05": "tsx src/test_high05_staff_assignment_security.ts",
+    "test:high07": "tsx src/test_high07_staff_otp_security.ts",
+    "test:medium01": "tsx src/test_medium01_tenant_signup_security.ts",
+    "test:security": "tsx src/test_cross_canteen_security.ts && tsx src/test_high05_staff_assignment_security.ts && tsx src/test_medium01_tenant_signup_security.ts && tsx src/test_high07_staff_otp_security.ts"
   },
   "dependencies": {
     "@cashfreepayments/cashfree-js": "^1.0.7",

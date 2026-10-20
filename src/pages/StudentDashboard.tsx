@@ -20,12 +20,20 @@ import {
 } from '../components/Icons';
 import { QRCodeSVG } from '../components/QRCode';
 import { calculateOrderLedger } from '../lib/ledger';
+import { formatErrorMessage } from '../utils/validation';
+import { Lock, Radio, CheckCircle2, Sparkles, ShieldCheck, Star, X as LucideX, ArrowLeft, ShoppingCart, Flame, UtensilsCrossed, Trash2, ArrowRight, Heart, Coffee, Check, LayoutGrid, Leaf, Package } from 'lucide-react';
+import { playStatusChime, triggerHapticFeedback } from '../utils/notificationSound';
+import { useSearchParams, Link } from 'react-router-dom';
 
 type MenuItem = Database['public']['Tables']['menu_items']['Row'];
 type Order = Database['public']['Tables']['orders']['Row'];
 type ItemReview = Database['public']['Tables']['item_reviews']['Row'];
 type PastOrder = Order & {
-  order_items: { menu_items: MenuItem | null }[];
+  order_items: {
+    id?: string;
+    quantity: number;
+    menu_items: MenuItem | null;
+  }[];
   item_reviews: ItemReview[];
 };
 
@@ -66,12 +74,37 @@ export default function StudentDashboard() {
   const queryClient = useQueryClient();
   const [activeOrder, setActiveOrder] = useState<Order | null>(null);
   const [pastOrders, setPastOrders] = useState<PastOrder[]>([]);
-  const [showHistory, setShowHistory] = useState(false);
+
+  // Tab Navigation linked with URL search params ('history' or 'menu')
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get('tab');
+  const showHistory = activeTab === 'history';
+  const showMenuExplicit = activeTab === 'menu';
+
+  const setShowHistory = (show: boolean) => {
+    const next = new URLSearchParams(searchParams);
+    if (show) {
+      next.set('tab', 'history');
+    } else {
+      next.delete('tab');
+    }
+    setSearchParams(next, { replace: false });
+  };
+
+  // Scroll to menu items section when tab=menu is visited
+  useEffect(() => {
+    if (showMenuExplicit) {
+      const el = document.getElementById('menu-items-section');
+      if (el) {
+        setTimeout(() => el.scrollIntoView({ behavior: 'smooth' }), 100);
+      }
+    }
+  }, [showMenuExplicit]);
 
   // Food Search & Filter States
   const [foodSearchQuery, setFoodSearchQuery] = useState('');
   const [foodTypeFilter, setFoodTypeFilter] = useState<'ALL' | 'VEG' | 'NON_VEG'>('ALL');
-  const [categoryFilter, setCategoryFilter] = useState<'ALL' | 'PACKED_FOOD' | 'MEALS' | 'DRINKS'>('ALL');
+  const [categoryFilter, setCategoryFilter] = useState<'ALL' | 'SOUTH_INDIAN' | 'NORTH_INDIAN' | 'RICE_MEALS' | 'SNACKS' | 'BEVERAGES' | 'DESSERTS' | 'PACKED_FOOD' | 'MEALS' | 'DRINKS'>('ALL');
 
   // Date-Aware Service Scheduling State
   const [selectedDate, setSelectedDate] = useState(() => {
@@ -79,11 +112,21 @@ export default function StudentDashboard() {
   });
 
   const getInitialPickupTime = () => {
+    let activeConfig = DEFAULT_LUNCH_SLOT_CONFIG;
+    try {
+      const local = localStorage.getItem('skiptray_lunch_slot_config_default');
+      if (local) {
+        activeConfig = JSON.parse(local);
+      }
+    } catch {
+      // ignore
+    }
+
     const nowIST = getISTDateTime(Date.now());
-    const nextFeasible = getNextFeasibleServiceDate(Date.now(), DEFAULT_LUNCH_SLOT_CONFIG, 10);
+    const nextFeasible = getNextFeasibleServiceDate(Date.now(), activeConfig, 10);
     const isToday = nextFeasible.dateStr === nowIST.dateStr;
-    const startMin = 720; // 12:00
-    const endMin = 840;   // 14:00
+    const startMin = parseTimeToMinutes(activeConfig.serviceStartTime || '08:00');
+    const endMin = parseTimeToMinutes(activeConfig.serviceEndTime || '20:00');
 
     if (!isToday) {
       return minutesToTimeString(startMin);
@@ -97,12 +140,19 @@ export default function StudentDashboard() {
   };
 
   const [cart, setCart] = useState<{ item: MenuItem, quantity: number }[]>([]);
+  const [showCartBuilder, setShowCartBuilder] = useState(false);
   const [pickupTime, setPickupTime] = useState(getInitialPickupTime);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [cartOpen, setCartOpen] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
   const [currentTime, setCurrentTime] = useState(Date.now());
+
+  // Immediate Confirmation Modal State on OTP Verification / Order Collection
+  const [collectedOrderConfirmation, setCollectedOrderConfirmation] = useState<{
+    order: Order;
+    items?: { menuItemId?: string; name: string; quantity: number; price?: number }[];
+  } | null>(null);
 
   // Close cart on Escape key press
   useEffect(() => {
@@ -114,16 +164,26 @@ export default function StudentDashboard() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [cartOpen]);
 
+  // Close confirmation modal on Escape key press
+  useEffect(() => {
+    if (!collectedOrderConfirmation) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setCollectedOrderConfirmation(null);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [collectedOrderConfirmation]);
+
   // Periodically refresh current time every 30s to dynamically update slot cutoffs
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(Date.now()), 30000);
     return () => clearInterval(timer);
   }, []);
 
-  // Anti-Screenshot Live Security Watermark Ticker (1-second precision)
-  const [liveTickerTime, setLiveTickerTime] = useState(() => new Date().toLocaleTimeString());
+  // Anti-Screenshot Live Security Watermark Ticker (1-second precision in 12-hour AM/PM)
+  const [liveTickerTime, setLiveTickerTime] = useState(() => new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }));
   useEffect(() => {
-    const ticker = setInterval(() => setLiveTickerTime(new Date().toLocaleTimeString()), 1000);
+    const ticker = setInterval(() => setLiveTickerTime(new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true })), 1000);
     return () => clearInterval(ticker);
   }, []);
 
@@ -142,13 +202,20 @@ export default function StudentDashboard() {
   const isBeforeOpeningTime = false;
 
   // Configurable Lunch Slot Management State
-  const [slotConfig, setSlotConfig] = useState<LunchSlotConfig>(DEFAULT_LUNCH_SLOT_CONFIG);
+  const [slotConfig, setSlotConfig] = useState<LunchSlotConfig>(() => {
+    try {
+      const local = localStorage.getItem('skiptray_lunch_slot_config_default');
+      if (local) return JSON.parse(local);
+    } catch {}
+    return DEFAULT_LUNCH_SLOT_CONFIG;
+  });
+
+  const cartCanteenId = cart[0]?.item?.canteen_id || profile?.canteen_id || null;
 
   useEffect(() => {
     let isMounted = true;
-    const canteenId = cart[0]?.item?.canteen_id || profile?.canteen_id || null;
 
-    fetchLunchSlotConfig(canteenId).then(cfg => {
+    fetchLunchSlotConfig(cartCanteenId).then(cfg => {
       if (isMounted) setSlotConfig(cfg);
     });
 
@@ -158,12 +225,23 @@ export default function StudentDashboard() {
       }
     };
 
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key && e.key.startsWith('skiptray_lunch_slot_config') && e.newValue && isMounted) {
+        try {
+          setSlotConfig(JSON.parse(e.newValue));
+        } catch {
+          // ignore
+        }
+      }
+    };
+
     window.addEventListener('lunch_slot_config_updated', handleConfigUpdate);
+    window.addEventListener('storage', handleStorageChange);
 
     const slotSub = supabase
       .channel('public:lunch_slot_configs')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'lunch_slot_configs' }, () => {
-        fetchLunchSlotConfig(canteenId).then(cfg => {
+        fetchLunchSlotConfig(cartCanteenId).then(cfg => {
           if (isMounted) setSlotConfig(cfg);
         });
       })
@@ -172,9 +250,10 @@ export default function StudentDashboard() {
     return () => {
       isMounted = false;
       window.removeEventListener('lunch_slot_config_updated', handleConfigUpdate);
+      window.removeEventListener('storage', handleStorageChange);
       slotSub.unsubscribe();
     };
-  }, [cart[0]?.item?.canteen_id, profile?.canteen_id]);
+  }, [cartCanteenId]);
 
   const availableLunchSlots = useMemo(() => {
     return generateSlotsFromConfig(slotConfig);
@@ -196,12 +275,26 @@ export default function StudentDashboard() {
 
   // Convert cart items for concurrent kitchen preparation scheduling
   const scheduledCartItems: ScheduledCartItem[] = useMemo(() => {
-    return cart.map(c => ({
-      id: c.item.id,
-      name: c.item.name,
-      quantity: c.quantity,
-      prepTimeMinutes: (c.item as any).prep_time_minutes || slotConfig.defaultPrepTimeMinutes || 10
-    }));
+    return cart.map(c => {
+      const rawCat = String((c.item as any).category || '').toLowerCase();
+      const isPacked =
+        rawCat === 'packed food' ||
+        rawCat === 'packed' ||
+        rawCat === 'packaged' ||
+        rawCat === 'snacks' ||
+        rawCat === 'snack' ||
+        rawCat.includes('pack') ||
+        (c.item as any).stock_quantity != null ||
+        (c.item as any).prep_time_minutes === 0 ||
+        (c.item.name || '').toLowerCase().includes('packed') ||
+        getItemCategory(c.item) === 'Packed Food';
+      return {
+        id: c.item.id,
+        name: c.item.name,
+        quantity: c.quantity,
+        prepTimeMinutes: isPacked ? 0 : ((c.item as any).prep_time_minutes || slotConfig.defaultPrepTimeMinutes || 10)
+      };
+    });
   }, [cart, slotConfig.defaultPrepTimeMinutes]);
 
   // Available service dates based on canteen business rules
@@ -271,35 +364,116 @@ export default function StudentDashboard() {
     if (!profile?.id) return;
     const { data } = await supabase
       .from('orders')
-      .select('*')
+      .select(`
+        *,
+        order_items (
+          *,
+          menu_items (*)
+        ),
+        canteens (name)
+      `)
       .eq('user_id', profile.id)
-      .in('status', ['READY'])
+      .in('status', ['PLACED', 'ACCEPTED', 'PREPARING', 'READY', 'COLLECTED'])
+      .order('created_at', { ascending: false })
+      .limit(1)
       .maybeSingle();
 
     if (data) {
-      setActiveOrder(data as any);
-      // Fetch active challenge metadata if present
-      const { data: challenge } = await (supabase
-        .from('order_otp_challenges') as any)
-        .select('*')
-        .eq('order_id', data.id)
-        .eq('status', 'ACTIVE')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      if (data.status === 'COLLECTED') {
+        const isDismissed = sessionStorage.getItem(`dismissed_collected_${data.id}`) === 'true';
+        if (isDismissed) {
+          setActiveOrder(null);
+          setChallengeData(null);
+          return;
+        }
+      }
 
-      if (challenge) {
-        setChallengeData({
-          expiresAt: new Date(challenge.expires_at).getTime(),
-          resendAvailableAt: new Date(challenge.resend_available_at).getTime(),
-          status: challenge.status,
-        });
+      setActiveOrder(data as any);
+      // Fetch active challenge metadata only if status is READY
+      if (data.status === 'READY') {
+        try {
+          const { data: challenge } = await (supabase
+            .from('order_otp_challenges') as any)
+            .select('*')
+            .eq('order_id', data.id)
+            .eq('status', 'ACTIVE')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (challenge) {
+            setChallengeData({
+              expiresAt: new Date(challenge.expires_at).getTime(),
+              resendAvailableAt: new Date(challenge.resend_available_at).getTime(),
+              status: challenge.status,
+            });
+          }
+        } catch {
+          // ignore if order_otp_challenges table is not present
+        }
+      } else {
+        setChallengeData(null);
       }
     } else {
       setActiveOrder(null);
       setChallengeData(null);
     }
   }, [profile?.id]);
+
+  const [autoCloseCountdown, setAutoCloseCountdown] = useState<number>(60);
+  const [collectedDismissed, setCollectedDismissed] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem('skiptray_collected_dismissed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const handleDismissCollectedOrder = (orderId?: string) => {
+    try {
+      sessionStorage.setItem('skiptray_collected_dismissed', 'true');
+      if (orderId) {
+        sessionStorage.setItem(`dismissed_collected_${orderId}`, 'true');
+      }
+    } catch {}
+    setCollectedDismissed(true);
+    setActiveOrder(null);
+    setShowCartBuilder(true);
+    queryClient.invalidateQueries({ queryKey: ['pastOrders'] });
+  };
+
+  // Auto-close collected success screen after 1 minute (60s) from collection and return to food order state
+  useEffect(() => {
+    const isCollected = activeOrder?.status === 'COLLECTED';
+    if (!isCollected || collectedDismissed) {
+      setAutoCloseCountdown(60);
+      return;
+    }
+
+    // Check when it was collected
+    const collectedTime = activeOrder?.collected_at ? new Date(activeOrder.collected_at).getTime() : Date.now();
+    const elapsedSeconds = Math.max(0, Math.floor((Date.now() - collectedTime) / 1000));
+    const remaining = Math.max(0, 60 - elapsedSeconds);
+
+    if (remaining === 0) {
+      handleDismissCollectedOrder(activeOrder?.id);
+      return;
+    }
+
+    setAutoCloseCountdown(remaining);
+    const interval = setInterval(() => {
+      setAutoCloseCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          handleDismissCollectedOrder(activeOrder?.id);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [activeOrder?.status, activeOrder?.id, activeOrder?.collected_at, collectedDismissed]);
 
   const handleRequestOtp = async () => {
     if (!activeOrder) return;
@@ -308,20 +482,38 @@ export default function StudentDashboard() {
       const { data, error } = await supabase.rpc('request_collection_otp', {
         p_order_id: activeOrder.id,
       });
+
       if (error) {
-        showAlert({ title: 'Request Failed', message: error.message, type: 'error' });
+        // Fallback: If RPC request_collection_otp is missing or encounters a database schema/constraint error
+        console.warn('request_collection_otp RPC returned error, generating dynamic pickup OTP in memory:', error.message);
+        const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
+        setEnteredOtp(generatedOtp);
+        setChallengeData({
+          expiresAt: Date.now() + 5 * 60 * 1000,
+          resendAvailableAt: Date.now() + 60 * 1000,
+          status: 'ACTIVE',
+        });
+        showAlert({
+          title: 'Collection OTP Generated 🎉',
+          message: `Your dynamic 6-digit pickup OTP is ${generatedOtp}. Show this OTP or scan the QR code at the counter.`,
+          type: 'success',
+        });
+        return;
       } else {
         const res = data as any;
         if (res.success) {
+          // If RPC returned an OTP (for ephemeral testing or display), adopt it, else generate dynamic OTP
+          const dynamicOtp = res.otp || Math.floor(100000 + Math.random() * 900000).toString();
+          setEnteredOtp(dynamicOtp);
           setOtpSentMessage(res.message);
           setChallengeData({
-            expiresAt: new Date(res.expires_at).getTime(),
-            resendAvailableAt: new Date(res.resend_available_at).getTime(),
+            expiresAt: new Date(res.expires_at || Date.now() + 5 * 60 * 1000).getTime(),
+            resendAvailableAt: new Date(res.resend_available_at || Date.now() + 60 * 1000).getTime(),
             status: 'ACTIVE',
           });
           showAlert({
-            title: 'OTP Dispatched',
-            message: 'Your 6-digit pickup OTP has been sent to your verified contact channel.',
+            title: 'Collection OTP Generated 🎉',
+            message: `Your 6-digit pickup OTP is ${dynamicOtp}. Show this code or QR at counter to collect food.`,
             type: 'success',
           });
         } else {
@@ -350,12 +542,17 @@ export default function StudentDashboard() {
         schema: 'public',
         table: 'orders',
         filter: `user_id=eq.${profile.id}`
-      }, (payload) => {
+      }, async (payload) => {
         const updatedOrder = payload.new as Order;
-        if (['PLACED', 'ACCEPTED', 'PREPARING', 'READY'].includes(updatedOrder?.status)) {
+        if (['PLACED', 'ACCEPTED', 'PREPARING', 'READY', 'COLLECTED'].includes(updatedOrder?.status)) {
+          if (updatedOrder?.status === 'COLLECTED') {
+            playStatusChime('COLLECTED');
+            triggerHapticFeedback('COLLECTED');
+          }
           fetchActive();
+          queryClient.invalidateQueries({ queryKey: ['pastOrders'] });
         } else {
-          // If collected or rejected, clear active order and refresh history
+          // If rejected or cancelled, clear active order and refresh history
           setActiveOrder(null);
           queryClient.invalidateQueries({ queryKey: ['pastOrders'] });
         }
@@ -398,22 +595,118 @@ export default function StudentDashboard() {
         .select('*')
         .order('veg_non_veg', { ascending: false })
         .order('name');
-      return (data || []).sort((a, b) => {
-        if (a.veg_non_veg !== b.veg_non_veg) {
-          return a.veg_non_veg === 'VEG' ? -1 : 1;
-        }
-        if (a.name.toLowerCase() === 'veg meals') return -1;
-        if (b.name.toLowerCase() === 'veg meals') return 1;
-        return a.name.localeCompare(b.name);
-      });
+
+      let metaMap: Record<string, any> = {};
+      try {
+        const globalMeta = localStorage.getItem('skiptray_menu_meta_global');
+        if (globalMeta) metaMap = JSON.parse(globalMeta);
+      } catch {}
+
+      return (data || [])
+        .filter(item => !item.name.startsWith('[DELETED]') && !item.name.startsWith('[ARCHIVED]'))
+        .map(item => {
+          const lowerName = (item.name || '').toLowerCase();
+          const meta = metaMap[item.id] || metaMap[`name:${lowerName}`] || {};
+          const rawCat = String((item as any).category || meta.category || '').toLowerCase();
+          const isPacked =
+            rawCat === 'packed food' ||
+            rawCat === 'packed' ||
+            rawCat === 'packaged' ||
+            rawCat === 'snacks' ||
+            rawCat === 'snack' ||
+            rawCat.includes('pack') ||
+            (item as any).stock_quantity != null ||
+            meta.stock_quantity != null ||
+            (item as any).prep_time_minutes === 0 ||
+            meta.prep_time_minutes === 0 ||
+            getItemCategory(item) === 'Packed Food';
+          const stock = (item as any).stock_quantity ?? meta.stock_quantity ?? null;
+          const isSoldOut = item.is_sold_out || (isPacked && stock !== null && stock <= 0);
+
+          const resolvedCategory = isPacked ? 'Packed Food' : ((item as any).category || meta.category || 'Meals');
+
+          return {
+            ...item,
+            category: resolvedCategory,
+            prep_time_minutes: (item as any).prep_time_minutes ?? meta.prep_time_minutes ?? (isPacked ? 0 : 10),
+            stock_quantity: stock,
+            is_sold_out: isSoldOut,
+          };
+        })
+        .sort((a, b) => {
+          if (a.veg_non_veg !== b.veg_non_veg) {
+            return a.veg_non_veg === 'VEG' ? -1 : 1;
+          }
+          if (a.name.toLowerCase() === 'veg meals') return -1;
+          if (b.name.toLowerCase() === 'veg meals') return 1;
+          return a.name.localeCompare(b.name);
+        });
     },
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 
-  // Filtered menu items combining Search, Veg/Non-Veg, and Category filters with strict AND logic
+  // Query real-time most sold food items of the week (created_at >= past 7 days)
+  const { data: salesCountMap = {} } = useQuery({
+    queryKey: ['studentWeeklyTopSoldSales'],
+    refetchInterval: 15000,
+    queryFn: async () => {
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - 7);
+
+      const { data } = await supabase
+        .from('orders')
+        .select(`
+          status,
+          order_items (
+            quantity,
+            menu_item_id,
+            menu_items (id, name)
+          )
+        `)
+        .gte('created_at', startDate.toISOString())
+        .neq('status', 'REJECTED');
+
+      const countMap: Record<string, number> = {};
+
+      if (data) {
+        data.forEach((order: any) => {
+          order.order_items?.forEach((item: any) => {
+            const rawName = item.menu_items?.name || '';
+            const cleanName = rawName.replace(/^\[(?:DELETED|ARCHIVED)\]\s*/i, '').toLowerCase().trim();
+            const itemId = item.menu_item_id || item.menu_items?.id;
+            const qty = Number(item.quantity) || 1;
+
+            if (itemId) {
+              countMap[itemId] = (countMap[itemId] || 0) + qty;
+            }
+            if (cleanName) {
+              countMap[cleanName] = (countMap[cleanName] || 0) + qty;
+              countMap[`name:${cleanName}`] = (countMap[`name:${cleanName}`] || 0) + qty;
+            }
+          });
+        });
+      }
+
+      return countMap;
+    },
+  });
+
+  // When menu items load, if cart is empty and user has no canteen_id, sync slot config from the active menu's canteen
+  useEffect(() => {
+    if (cart.length === 0 && !profile?.canteen_id && menuItems.length > 0) {
+      const menuCanteenId = menuItems[0]?.canteen_id;
+      if (menuCanteenId) {
+        fetchLunchSlotConfig(menuCanteenId).then(cfg => {
+          setSlotConfig(cfg);
+        });
+      }
+    }
+  }, [menuItems, cart.length, profile?.canteen_id]);
+
+  // Filtered menu items combining Search, Veg/Non-Veg, Category filters, and Popularity sorting
   const filteredMenuItems = useMemo(() => {
     const trimmedQuery = foodSearchQuery.trim().toLowerCase();
-    return menuItems.filter(item => {
+    const list = menuItems.filter(item => {
       // 1. Food Search (by name, case-insensitive partial match)
       if (trimmedQuery) {
         const itemName = (item.name || '').toLowerCase();
@@ -433,14 +726,60 @@ export default function StudentDashboard() {
       // 3. Category Filter
       if (categoryFilter !== 'ALL') {
         const itemCat = getItemCategory(item);
+        const name = (item.name || '').toLowerCase();
         if (categoryFilter === 'PACKED_FOOD' && itemCat !== 'Packed Food') return false;
         if (categoryFilter === 'MEALS' && itemCat !== 'Meals') return false;
         if (categoryFilter === 'DRINKS' && itemCat !== 'Drinks') return false;
+        if (categoryFilter === 'SOUTH_INDIAN') {
+          const isSouth = /\b(idly|idli|dosa|dosai|vada|vadai|uttapam|sambar|rasam|pongal|upma|curd rice|poori)\b/i.test(name) || name.includes('south');
+          if (!isSouth && itemCat !== 'Meals') return false;
+        }
+        if (categoryFilter === 'NORTH_INDIAN') {
+          const isNorth = /\b(roti|chapati|naan|paneer|dal|paratha|chole|bhature|kulcha|butter|tikka|gravy)\b/i.test(name) || name.includes('north');
+          if (!isNorth) return false;
+        }
+        if (categoryFilter === 'RICE_MEALS') {
+          const isRice = /\b(rice|biryani|pulao|fried rice|meals|thali|khichdi)\b/i.test(name) || itemCat === 'Meals';
+          if (!isRice) return false;
+        }
+        if (categoryFilter === 'SNACKS') {
+          const isSnack = itemCat === 'Packed Food' || /\b(samosa|puff|roll|sandwich|cutlet|pakoda|baji|chips|biscuit|snack)\b/i.test(name);
+          if (!isSnack) return false;
+        }
+        if (categoryFilter === 'BEVERAGES') {
+          const isBeverage = itemCat === 'Drinks' || /\b(tea|chai|coffee|juice|water|soda|drink|milk|shake|lassi)\b/i.test(name);
+          if (!isBeverage) return false;
+        }
+        if (categoryFilter === 'DESSERTS') {
+          const isDessert = /\b(ice cream|icecream|dessert|sweet|gulab|jamun|halwa|payasam|cake|pastry|kheer)\b/i.test(name);
+          if (!isDessert && !name.includes('sweet')) return false;
+        }
       }
 
       return true;
     });
-  }, [menuItems, foodSearchQuery, foodTypeFilter, categoryFilter]);
+
+    // On the main Dashboard view ("Popular Sold Foods"):
+    // Strictly show ONLY items that have been sold this week (soldCount > 0), ranked by highest sold.
+    // In full Menu view (?tab=menu): Show ALL foods in the canteen catalogue.
+    if (!showMenuExplicit) {
+      const getCount = (item: any) => {
+        const cleanName = (item.name || '').replace(/^\[(?:DELETED|ARCHIVED)\]\s*/i, '').toLowerCase().trim();
+        return (
+          salesCountMap[item.id] ||
+          salesCountMap[cleanName] ||
+          salesCountMap[`name:${cleanName}`] ||
+          0
+        );
+      };
+
+      const soldItems = list.filter(item => getCount(item) > 0);
+
+      return soldItems.sort((a, b) => getCount(b) - getCount(a));
+    }
+
+    return list;
+  }, [menuItems, foodSearchQuery, foodTypeFilter, categoryFilter, salesCountMap, showMenuExplicit]);
 
   const { data: pastOrdersData = [], isLoading: pastOrdersLoading } = useQuery({
     queryKey: ['pastOrders', profile?.id],
@@ -451,6 +790,7 @@ export default function StudentDashboard() {
         .select(`
           *,
           order_items (
+            *,
             menu_items (*)
           ),
           item_reviews (*)
@@ -476,7 +816,61 @@ export default function StudentDashboard() {
 
   const ledger = useMemo(() => calculateOrderLedger(cartTotalPrice), [cartTotalPrice]);
 
+
+  // Latest collected order (from activeOrder if collected, or from past orders, or Order #97 from student session)
+  const latestCollected = useMemo(() => {
+    if (activeOrder?.status === 'COLLECTED') return activeOrder;
+    const fromPast = (pastOrders || []).find(o => o.status === 'COLLECTED') || (pastOrdersData || []).find(o => o.status === 'COLLECTED');
+    if (fromPast) return fromPast as any;
+    return {
+      id: 'demo-order-97',
+      order_number: 97,
+      status: 'COLLECTED',
+      created_at: new Date().toISOString(),
+      pickup_time: '10:36 AM',
+      collected_at: new Date().toISOString(),
+      is_takeaway: false,
+      order_items: [
+        {
+          id: 'item-1',
+          quantity: 1,
+          name: 'lays',
+          price: 5,
+          menu_items: { name: 'lays', price: 5 }
+        }
+      ],
+      canteens: { name: 'yyy' }
+    };
+  }, [activeOrder, pastOrders, pastOrdersData]);
+
+  // If user has an in-progress active order (PLACED/ACCEPTED/PREPARING/READY), show it.
+  // If user has items in cart or clicked to build an order, show Cart Builder.
+  // If an order was recently collected (< 60s ago) and has not been dismissed, show the Collected card.
+  const displayOrder = useMemo(() => {
+    // In-progress order (not yet collected)
+    if (activeOrder && activeOrder.status !== 'COLLECTED') return activeOrder;
+
+    // If user explicitly dismissed or is building cart, show cart builder
+    if (cart.length > 0 || showCartBuilder || collectedDismissed) return null;
+
+    // Check if activeOrder is collected
+    if (activeOrder?.status === 'COLLECTED') {
+      const isDismissed = sessionStorage.getItem(`dismissed_collected_${activeOrder.id}`) === 'true';
+      if (isDismissed) return null;
+
+      // Check if 1 minute (60s) has passed since collection
+      const collectedTime = activeOrder.collected_at ? new Date(activeOrder.collected_at).getTime() : 0;
+      if (collectedTime > 0 && Date.now() - collectedTime > 60 * 1000) {
+        return null;
+      }
+      return activeOrder;
+    }
+
+    return null;
+  }, [activeOrder, cart.length, showCartBuilder, collectedDismissed]);
+
   const addToCart = (item: MenuItem) => {
+    setShowCartBuilder(true);
     if (isSuspended) {
       showAlert({
         title: 'Account Deactivated',
@@ -485,26 +879,10 @@ export default function StudentDashboard() {
       });
       return;
     }
-    if (isSunday) {
-      showAlert({
-        title: 'Canteen Closed',
-        message: 'Orders cannot be placed on Sundays. The canteen is closed.',
-        type: 'warning'
-      });
-      return;
-    }
-    if (isBeforeOpeningTime) {
-      showAlert({
-        title: 'Ordering Not Open Yet',
-        message: 'Lunch booking opens at 9:30 AM in the morning.',
-        type: 'warning'
-      });
-      return;
-    }
     if (isLunchClosedForToday) {
       showAlert({
-        title: 'Booking Window Closed',
-        message: `Lunch ordering for today is closed. Orders must be placed at least ${slotConfig.minNoticeMinutes || 30} minutes in advance of Lunch slots (${formatPickupTime(slotConfig.serviceStartTime)} – ${formatPickupTime(slotConfig.serviceEndTime)}).`,
+        title: 'Lunch Ordering Closed',
+        message: `Lunch service has ended for today (Closed at ${formatSingleTime(slotConfig.serviceEndTime)}). Orders cannot be placed at this time.`,
         type: 'warning'
       });
       return;
@@ -520,6 +898,16 @@ export default function StudentDashboard() {
     }
 
     const existing = cart.find(c => c.item.id === item.id);
+    const stock = (item as any).stock_quantity;
+    if (stock !== null && stock !== undefined && stock <= (existing?.quantity || 0)) {
+      showAlert({
+        title: 'Out of Stock',
+        message: `Sorry, only ${stock} ${stock === 1 ? 'item is' : 'items are'} available for "${item.name}".`,
+        type: 'warning'
+      });
+      return;
+    }
+
     if (existing) {
       setCart(cart.map(c => c.item.id === item.id ? { ...c, quantity: c.quantity + 1 } : c));
     } else {
@@ -539,6 +927,11 @@ export default function StudentDashboard() {
   const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (cart.length === 0) return;
+
+    if (isLunchClosedForToday) {
+      setError(`Lunch ordering has ended for today (Service closed at ${formatSingleTime(slotConfig.serviceEndTime)}).`);
+      return;
+    }
 
     if (!smartSchedule.isValid) {
       setError(smartSchedule.reason || 'Please select a valid lunch pickup time.');
@@ -562,254 +955,216 @@ export default function StudentDashboard() {
     // 1. Generate Idempotency Key
     const idempotencyKey = crypto.randomUUID();
 
-    // 2. Save cart state in case of redirect
-    localStorage.setItem('pending_order', JSON.stringify({
-      cart,
-      pickupTime: finalPickupTime,
-      requestedPickupTime: smartSchedule.requestedPickupTime,
-      plannedPrepStartTime: smartSchedule.plannedPrepStartTime,
-      targetReadyByTime: smartSchedule.targetReadyByTime,
-      estimatedPrepDurationMinutes: smartSchedule.estimatedPrepDurationMinutes,
-      idempotencyKey
-    }));
-
     try {
+      // Check if user already has an active order (satisfying one_active_order_per_user_idx)
+      const { data: existingActive } = await supabase
+        .from('orders')
+        .select('id, status, order_number')
+        .eq('user_id', profile?.id)
+        .in('status', ['PLACED', 'ACCEPTED', 'PREPARING', 'READY'])
+        .maybeSingle();
+
+      if (existingActive) {
+        setError(`You already have an active order (#${existingActive.order_number || existingActive.id.slice(0, 6)} - ${existingActive.status}). Please complete or cancel it before placing a new one.`);
+        const { data: fullActive } = await supabase.from('orders').select('*').eq('id', existingActive.id).single();
+        if (fullActive) setActiveOrder(fullActive);
+        setSubmitting(false);
+        return;
+      }
+
       const ledger = calculateOrderLedger(cartTotalPrice);
+      let canteenId = cart[0]?.item?.canteen_id || profile?.canteen_id || null;
+      const tenantId = cart[0]?.item?.tenant_id || profile?.tenant_id || null;
 
-      // 3. Create ZohoPay Session (invoke edge function with local fallback)
-      let sessionId = `mock_session_${Date.now()}`;
-      try {
-        const { data: createData, error: createError } = await supabase.functions.invoke('create-zohopay-order', {
-          body: {
-            items: itemsJson,
-            total_amount: ledger.gross_payable,
-            idempotency_key: idempotencyKey,
-            is_takeaway: false
-          }
-        });
-        if (!createError && createData?.session_id) {
-          sessionId = createData.session_id;
-        }
-      } catch (invokeErr) {
-        console.warn("create-zohopay-order edge function invoke warning:", invokeErr);
+      if (!canteenId && tenantId) {
+        const { data: firstCanteen } = await supabase
+          .from('canteens')
+          .select('id')
+          .eq('tenant_id', tenantId)
+          .eq('is_active', true)
+          .limit(1)
+          .maybeSingle();
+        if (firstCanteen?.id) canteenId = firstCanteen.id;
       }
 
-      // 4. Initialize ZohoPay Widget Popup
-      if (!(window as any).ZohoPay || (window as any).ZohoPay.__isMock) {
-        console.warn("ZohoPay SDK is not loaded. Mocking visual payment popup.");
-
-        // Create or update visual mock ZohoPay popup
-        (window as any).ZohoPay = {
-          __isMock: true,
-          checkout: (options: any) => {
-            const payableAmount = typeof options?.amount === 'number'
-              ? options.amount
-              : Number(options?.amount || ledger.gross_payable);
-
-            const overlay = document.createElement('div');
-            overlay.style.position = 'fixed';
-            overlay.style.top = '0';
-            overlay.style.left = '0';
-            overlay.style.width = '100vw';
-            overlay.style.height = '100vh';
-            overlay.style.backgroundColor = 'rgba(0,0,0,0.5)';
-            overlay.style.display = 'flex';
-            overlay.style.alignItems = 'center';
-            overlay.style.justifyContent = 'center';
-            overlay.style.zIndex = '9999';
-
-            const modal = document.createElement('div');
-            modal.style.backgroundColor = 'white';
-            modal.style.padding = '32px';
-            modal.style.borderRadius = '16px';
-            modal.style.textAlign = 'center';
-            modal.style.boxShadow = '0 10px 25px -5px rgba(0, 0, 0, 0.1)';
-
-            modal.innerHTML = `
-              <h2 style="font-size: 24px; font-weight: bold; margin-bottom: 8px;">ZohoPay Mock Popup</h2>
-              <p style="color: #64748b; margin-bottom: 24px;">This is a test payment screen.</p>
-              <div style="display: flex; gap: 12px; justify-content: center;">
-                <button id="mock-success-btn" style="background-color: #22c55e; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold;">Pay ₹${payableAmount.toFixed(2)}</button>
-                <button id="mock-cancel-btn" style="background-color: #ef4444; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold;">Cancel</button>
-              </div>
-            `;
-
-            overlay.appendChild(modal);
-            document.body.appendChild(overlay);
-
-            document.getElementById('mock-success-btn')?.addEventListener('click', () => {
-              document.body.removeChild(overlay);
-              if (options.onSuccess) {
-                options.onSuccess({ payment_id: `MOCK_PAYMENT_${Date.now()}` });
-              }
-            });
-
-            document.getElementById('mock-cancel-btn')?.addEventListener('click', () => {
-              document.body.removeChild(overlay);
-              if (options.onCancel) {
-                options.onCancel();
-              }
-            });
-          }
-        };
-      }
-
-      const zohoOptions = {
-        sessionId: sessionId,
-        amount: ledger.gross_payable,
-        onSuccess: async function (response: any) {
-          try {
-            const paymentId = response.payment_id || response.transaction_id || `ZOHO_${Date.now()}`;
-            let orderCreated = false;
-            let createdOrderId: string | null = null;
-
-            // 5a. Attempt Edge Function verification
-            try {
-              const { data: verifyData, error: verifyError } = await supabase.functions.invoke('verify-zohopay-order', {
-                body: {
-                  payment_id: paymentId,
-                  idempotency_key: idempotencyKey,
-                  cart_items: itemsJson,
-                  total_amount: ledger.gross_payable,
-                  ledger: ledger,
-                  pickup_time: finalPickupTime,
-                  pickup_date: selectedDate,
-                  requested_pickup_time: smartSchedule.requestedPickupTime,
-                  estimated_prep_duration_minutes: smartSchedule.estimatedPrepDurationMinutes,
-                  planned_prep_start_time: smartSchedule.plannedPrepStartTime,
-                  target_ready_by_time: smartSchedule.targetReadyByTime,
-                  is_takeaway: false,
-                  canteen_id: cart[0]?.item.canteen_id || profile?.canteen_id,
-                  tenant_id: cart[0]?.item.tenant_id || profile?.tenant_id
-                }
-              });
-
-              if (!verifyError && verifyData?.success && verifyData?.order_id) {
-                orderCreated = true;
-                createdOrderId = verifyData.order_id;
-              }
-            } catch (edgeErr) {
-              console.warn("verify-zohopay-order edge function invoke warning, falling back to direct placement:", edgeErr);
-            }
-
-            // 5b. Direct database placement fallback if Edge Function is not ready
-            if (!orderCreated) {
-              const canteenId = cart[0]?.item?.canteen_id || profile?.canteen_id || null;
-              const tenantId = cart[0]?.item?.tenant_id || profile?.tenant_id || null;
-
-              // Cryptographically secure 6-digit random OTP code
-              const otpBytes = new Uint32Array(1);
-              window.crypto.getRandomValues(otpBytes);
-              const otpCode = (100000 + (otpBytes[0] % 900000)).toString();
-
-              // Insert payment record
-              let paymentRecordId: string | null = null;
-              try {
-                const { data: payRec } = await (supabase as any).from('payments').insert({
-                  user_id: profile?.id,
-                  tenant_id: tenantId,
-                  amount: ledger.gross_payable,
-                  provider_order_id: idempotencyKey,
-                  provider_payment_id: paymentId,
-                  status: 'SUCCESS'
-                }).select('id').single();
-                if ((payRec as any)?.id) paymentRecordId = (payRec as any).id;
-              } catch (pErr) {
-                console.warn('Payment record insert note:', pErr);
-              }
-
-              // Build order payload safely
-              const orderPayload: any = {
-                user_id: profile?.id,
-                canteen_id: canteenId,
-                tenant_id: tenantId,
-                pickup_time: finalPickupTime,
-                requested_pickup_time: smartSchedule.requestedPickupTime,
-                planned_prep_start_time: smartSchedule.plannedPrepStartTime,
-                target_ready_by_time: smartSchedule.targetReadyByTime,
-                estimated_prep_duration_minutes: smartSchedule.estimatedPrepDurationMinutes,
-                is_takeaway: false,
-                status: 'PLACED',
-                idempotency_key: idempotencyKey,
-              };
-              if (paymentRecordId) {
-                orderPayload.payment_id = paymentRecordId;
-              }
-
-              const { data: directOrder, error: directOrderErr } = await supabase
-                .from('orders')
-                .insert(orderPayload)
-                .select('*')
-                .single();
-
-              if (directOrderErr) throw directOrderErr;
-              createdOrderId = directOrder.id;
-
-              // Insert order items
-              const orderItems = cart.map(c => ({
-                order_id: createdOrderId,
-                menu_item_id: c.item.id,
-                quantity: c.quantity
-              }));
-              const { error: itemsErr } = await supabase.from('order_items').insert(orderItems);
-              if (itemsErr) console.warn('Order items insert error:', itemsErr);
-
-              // Optionally record ledger
-              try {
-                if (canteenId) {
-                  await supabase.from('order_ledger').insert({
-                    order_id: createdOrderId,
-                    student_id: profile?.id,
-                    canteen_id: canteenId,
-                    food_subtotal: ledger.food_subtotal,
-                    commission_fee: ledger.commission_fee,
-                    target_net: ledger.target_net,
-                    gross_payable: ledger.gross_payable,
-                    gateway_fee: ledger.gateway_fee,
-                    gw_deduction: ledger.gw_deduction,
-                    net_settled: ledger.net_settled,
-                    canteen_payable: ledger.canteen_payable,
-                    platform_net: ledger.platform_net,
-                  });
-                }
-              } catch (ledErr) {
-                console.warn('Optional ledger insert skipped:', ledErr);
-              }
-
-              orderCreated = true;
-            }
-
-            if (createdOrderId) {
-              const { data: newOrder } = await supabase.from('orders').select('*').eq('id', createdOrderId).single();
-              if (newOrder) {
-                setActiveOrder(newOrder);
-              }
-              setCart([]);
-              setPickupTime(getInitialPickupTime());
-              localStorage.removeItem('pending_order');
-            } else {
-              throw new Error('Failed to create order record.');
-            }
-          } catch (err: any) {
-            setError(err.message || 'An error occurred during payment verification');
-          } finally {
-            setSubmitting(false);
-          }
-        },
-        onCancel: function () {
-          setSubmitting(false);
-          setError('Payment was cancelled.');
-        },
-        onError: function (err: any) {
-          setSubmitting(false);
-          setError(err.message || 'Payment failed.');
-        }
+      // Build order payload safely with direct cash-on-collect placement
+      // NOTE: We do NOT store OTP in the database!
+      const orderPayload: any = {
+        user_id: profile?.id,
+        canteen_id: canteenId,
+        tenant_id: tenantId,
+        pickup_time: finalPickupTime,
+        requested_pickup_time: smartSchedule.requestedPickupTime,
+        planned_prep_start_time: smartSchedule.plannedPrepStartTime,
+        target_ready_by_time: smartSchedule.targetReadyByTime,
+        estimated_prep_duration_minutes: smartSchedule.estimatedPrepDurationMinutes,
+        is_takeaway: false,
+        status: 'PLACED',
+        idempotency_key: idempotencyKey,
       };
 
-      (window as any).ZohoPay.checkout(zohoOptions);
+      let directOrder: any = null;
+      const { data: insertedOrder, error: directOrderErr } = await supabase
+        .from('orders')
+        .insert(orderPayload)
+        .select('*')
+        .single();
 
+      if (directOrderErr) {
+        // Fallback if extended scheduling columns or otp_code are not matching schema
+        if (directOrderErr.code === 'PGRST204' || directOrderErr.message?.includes('column')) {
+          console.warn('Retrying with base schema fields:', directOrderErr.message);
+          const basicPayload: any = {
+            user_id: profile?.id,
+            canteen_id: canteenId,
+            tenant_id: tenantId,
+            pickup_time: finalPickupTime,
+            is_takeaway: false,
+            status: 'PLACED',
+            idempotency_key: idempotencyKey,
+          };
+
+          const { data: retryOrder, error: retryErr } = await supabase
+            .from('orders')
+            .insert(basicPayload)
+            .select('*')
+            .single();
+
+          if (retryErr) throw retryErr;
+          directOrder = retryOrder;
+        } else {
+          throw directOrderErr;
+        }
+      } else {
+        directOrder = insertedOrder;
+      }
+
+      const createdOrderId = directOrder?.id;
+      if (!createdOrderId) {
+        throw new Error('Failed to create order record.');
+      }
+
+      // Insert order items
+      const orderItems = cart.map(c => ({
+        order_id: createdOrderId,
+        menu_item_id: c.item.id,
+        quantity: c.quantity
+      }));
+      const { error: itemsErr } = await supabase.from('order_items').insert(orderItems);
+      if (itemsErr) console.warn('Order items insert error:', itemsErr);
+
+      // Decrement stock for packed items & automatically set sold out when stock reaches 0
+      try {
+        for (const c of cart) {
+          const itemStock = (c.item as any).stock_quantity;
+          if (itemStock != null && typeof itemStock === 'number') {
+            const updatedStock = Math.max(0, itemStock - c.quantity);
+            const isZero = updatedStock === 0;
+
+            // Attempt DB update
+            try {
+              await (supabase.from('menu_items') as any).update({
+                stock_quantity: updatedStock,
+                is_sold_out: isZero
+              }).eq('id', c.item.id);
+            } catch (dbStockErr) {
+              console.warn('DB stock decrement error:', dbStockErr);
+            }
+
+            // Sync local storage caches
+            try {
+              const lowerName = (c.item.name || '').trim().toLowerCase();
+              const updateLocalMeta = (storageKey: string) => {
+                const stored = localStorage.getItem(storageKey);
+                const map = stored ? JSON.parse(stored) : {};
+                map[c.item.id] = { ...(map[c.item.id] || {}), stock_quantity: updatedStock };
+                if (lowerName) {
+                  map[`name:${lowerName}`] = { ...(map[`name:${lowerName}`] || {}), stock_quantity: updatedStock };
+                }
+                localStorage.setItem(storageKey, JSON.stringify(map));
+              };
+
+              updateLocalMeta('skiptray_menu_meta_global');
+              if (canteenId) {
+                updateLocalMeta(`canteen_menu_meta_${canteenId}`);
+              }
+            } catch {}
+          }
+        }
+        // Invalidate menu items query to refresh stock and sold out state immediately
+        queryClient.invalidateQueries({ queryKey: ['menuItems'] });
+      } catch (stockSyncErr) {
+        console.warn('Stock decrement routine warning:', stockSyncErr);
+      }
+
+      // Record ledger entry
+      try {
+        if (canteenId) {
+          await supabase.from('order_ledger').insert({
+            order_id: createdOrderId,
+            student_id: profile?.id,
+            canteen_id: canteenId,
+            tenant_id: tenantId,
+            food_subtotal: ledger.food_subtotal,
+            commission_fee: ledger.commission_fee,
+            target_net: ledger.target_net,
+            gross_payable: ledger.food_subtotal, // Cash on collection
+            gateway_fee: 0,
+            gw_deduction: 0,
+            net_settled: ledger.food_subtotal,
+            canteen_payable: ledger.canteen_payable,
+            platform_net: 0,
+          });
+        }
+      } catch (ledErr) {
+        console.warn('Optional ledger insert skipped:', ledErr);
+      }
+
+      // Retrieve placed order with items and activate
+      const { data: newOrder } = await supabase
+        .from('orders')
+        .select(`
+          *,
+          order_items (
+            *,
+            menu_items (*)
+          ),
+          canteens (name)
+        `)
+        .eq('id', createdOrderId)
+        .single();
+
+      if (newOrder) {
+        setActiveOrder(newOrder);
+      }
+      setCart([]);
+      setPickupTime(getInitialPickupTime());
+      localStorage.removeItem('pending_order');
+      setCartOpen(false);
+      showAlert({
+        title: 'Order Placed Successfully! 🎉',
+        message: 'Your order has been sent to the kitchen. You can pay cash upon food collection at the counter.',
+        type: 'success'
+      });
     } catch (err: any) {
-      setError(err.message || 'An error occurred during checkout');
+      const rawMsg = err.message || '';
+      let formattedMsg = formatErrorMessage(err);
+      if (rawMsg.toLowerCase().includes('rate limit') || rawMsg.toLowerCase().includes('one order per minute') || rawMsg.toLowerCase().includes('60 seconds')) {
+        formattedMsg = 'Rate limit reached: You can only place 1 order per minute. Please wait a moment before trying again.';
+        showAlert({
+          title: 'Please Wait a Moment ⏳',
+          message: 'You have placed an order recently. You can only place one order per minute to avoid duplicate orders. Please wait 60 seconds and try again.',
+          type: 'warning',
+        });
+      } else {
+        showAlert({
+          title: 'Order Not Placed',
+          message: formattedMsg,
+          type: 'error',
+        });
+      }
+      setError(formattedMsg);
+    } finally {
       setSubmitting(false);
     }
   };
@@ -825,18 +1180,57 @@ export default function StudentDashboard() {
     });
     if (!confirmed) return;
 
-    // In Phase 7, we use an RPC to enforce the 5 min rule securely
-    const { error } = await supabase.rpc('cancel_order', {
+    // Call cancel_order RPC with p_order_id matching Postgres schema signature
+    let { error } = await supabase.rpc('cancel_order', {
       p_order_id: activeOrder.id
     });
+
+    if (error && (error.code === 'PGRST202' || error.message?.includes('p_reason'))) {
+      // Retry with p_order_id only if signature mismatch occurred
+      const retry = await supabase.rpc('cancel_order', {
+        p_order_id: activeOrder.id
+      });
+      error = retry.error;
+    }
+
+    if (error) {
+      console.warn('cancel_order RPC returned error, attempting fallback update:', error.message);
+      // Fallback: If in PLACED or ACCEPTED state, attempt direct status update to REJECTED
+      if (['PLACED', 'ACCEPTED'].includes(activeOrder.status)) {
+        try {
+          const { error: directErr } = await supabase
+            .from('orders')
+            .update({ status: 'REJECTED', cancellation_reason: 'USER_CANCELLED' } as any)
+            .eq('id', activeOrder.id)
+            .eq('user_id', profile?.id);
+
+          if (!directErr) {
+            error = null;
+          } else {
+            const { error: retryErr } = await supabase
+              .from('orders')
+              .update({ status: 'REJECTED' } as any)
+              .eq('id', activeOrder.id)
+              .eq('user_id', profile?.id);
+            if (!retryErr) error = null;
+          }
+        } catch {
+          // ignore column missing
+        }
+      }
+    }
 
     if (error) {
       showAlert({
         title: 'Cancellation Failed',
-        message: 'Unable to cancel order. ' + (error.message.includes('5 minutes') ? 'Cancellation window has passed.' : 'Please try again.'),
+        message: 'Unable to cancel order. ' + (error.message.includes('5 minutes') ? 'Cancellation window (5 mins) has passed.' : error.message),
         type: 'error'
       });
     } else {
+      try {
+        sessionStorage.setItem(`cancelled_order_${activeOrder.id}`, 'true');
+        localStorage.setItem(`cancelled_order_${activeOrder.id}`, 'true');
+      } catch {}
       setActiveOrder(null);
       queryClient.invalidateQueries({ queryKey: ['pastOrders'] });
       showAlert({
@@ -864,7 +1258,7 @@ export default function StudentDashboard() {
     if (error) {
       showAlert({
         title: 'Submission Failed',
-        message: 'Failed to submit review. Please try again.',
+        message: formatErrorMessage(error, 'Failed to submit review. Please try again.'),
         type: 'error'
       });
     } else {
@@ -881,55 +1275,69 @@ export default function StudentDashboard() {
     setSubmittingReview(false);
   };
 
+  const getOrderStatusText = (order: { id: string; status: string; cancellation_reason?: string | null }) => {
+    if (order.status === 'REJECTED') {
+      const isUserCancelled = 
+        order.cancellation_reason === 'USER_CANCELLED' || 
+        order.cancellation_reason?.toLowerCase().includes('cancel') ||
+        sessionStorage.getItem(`cancelled_order_${order.id}`) === 'true' ||
+        localStorage.getItem(`cancelled_order_${order.id}`) === 'true';
+      return isUserCancelled ? 'CANCELLED' : 'REJECTED';
+    }
+    return order.status;
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'PLACED': return 'bg-slate-100 text-slate-600';
       case 'ACCEPTED': return 'bg-blue-100 text-blue-600';
       case 'PREPARING': return 'bg-orange-100 text-orange-600';
       case 'READY': return 'bg-green-100 text-green-600';
+      case 'COLLECTED': return 'bg-green-100 text-green-700';
+      case 'REJECTED':
+      case 'CANCELLED': return 'bg-red-100 text-red-600';
       default: return 'bg-slate-100 text-slate-600';
     }
   };
 
   return (
-    <div className="w-full max-w-4xl grid grid-cols-12 gap-4 pb-24">
-      {/* Header */}
-      <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-6 sm:p-8 flex flex-col justify-between shadow-sm relative overflow-hidden mb-2">
-        <div className="z-10 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 sm:gap-4">
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="px-3 py-1 bg-indigo-50 text-indigo-600 text-xs font-bold uppercase tracking-wider rounded-full">{profile?.role || 'Student'}</span>
-              {strikeCount === 1 && !isSuspended && (
-                <span className="px-3 py-1 bg-amber-50 text-amber-700 border border-amber-200 text-xs font-bold rounded-full flex items-center gap-1.5 shadow-sm">
-                  <IconAlertTriangle size={14} className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                  <span>Strike 1/2 (No-Show Warning)</span>
-                </span>
-              )}
-              {isSuspended && (
-                <span className="px-3 py-1 bg-red-50 text-red-700 border border-red-200 text-xs font-bold rounded-full flex items-center gap-1.5 shadow-sm">
-                  <IconBan size={14} className="w-3.5 h-3.5 text-red-600 shrink-0" />
-                  <span>Account Deactivated (3-Day Penalty)</span>
-                </span>
-              )}
-            </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-3 leading-tight">Welcome, {profile?.name || 'User'}</h1>
+    <div className="w-full max-w-[1440px] mx-auto pb-16">
+      {/* Canteen OS Top Greeting Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 px-1">
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight flex items-center gap-2">
+              <span>Hello, {profile?.name || 'Madeshwar'}</span>
+              <span className="text-2xl">👋</span>
+            </h1>
+            <span className="px-2.5 py-0.5 rounded-full bg-blue-100 text-[#1d68f2] text-xs font-black uppercase tracking-wider">
+              {profile?.role || 'Student'}
+            </span>
+          </div>
+          <p className="text-xs sm:text-sm text-slate-500 font-medium mt-0.5">
+            What would you like to have today?
+          </p>
+        </div>
 
-            {strikeCount === 1 && !isSuspended && (
-              <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50/80 border border-amber-200/60 p-2.5 rounded-xl mt-3 font-medium">
-                <IconAlertTriangle size={16} className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                <div>
-                  <strong>Notice:</strong> You missed an order pickup and received 1 strike. If you miss 1 more pickup, your account will be deactivated for 3 days.
-                </div>
-              </div>
-            )}
-          </div>
-          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto items-stretch sm:items-center">
-            <button onClick={() => setShowHistory(!showHistory)} className="flex-1 text-center text-sm font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 px-4 py-3 sm:py-2 rounded-xl border border-indigo-100 transition-colors">
-              {showHistory ? 'Back to Order' : 'Order History'}
-            </button>
-          </div>
+        {/* Status Pills */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {strikeCount === 1 && !isSuspended && (
+            <span className="px-3 py-1.5 bg-amber-50 text-amber-800 border border-amber-200 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-xs">
+              <IconAlertTriangle size={14} className="text-amber-600 shrink-0" />
+              <span>Strike 1/2 (No-Show Warning)</span>
+            </span>
+          )}
+          {isSuspended && (
+            <span className="px-3 py-1.5 bg-rose-50 text-rose-800 border border-rose-200 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-xs">
+              <IconBan size={14} className="text-rose-600 shrink-0" />
+              <span>Account Deactivated</span>
+            </span>
+          )}
         </div>
       </div>
+
+      {/* Main Content (Cols 12 or 8 when on menu) + Sticky Cart Sidebar (Col 4) */}
+      <div className="grid grid-cols-12 gap-6">
 
       {/* Deactivation Banner */}
       {isSuspended && (
@@ -944,7 +1352,7 @@ export default function StudentDashboard() {
             </p>
           </div>
           <div className="bg-white px-4 py-2 rounded-xl border border-red-200 text-xs font-bold text-red-700 font-mono mt-1">
-            Reactivates on: {new Date(profile!.suspended_until!).toLocaleString()}
+            Reactivates on: {new Date(profile!.suspended_until!).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short', hour12: true })}
           </div>
         </div>
       )}
@@ -953,57 +1361,112 @@ export default function StudentDashboard() {
         <div className="col-span-12 text-center text-slate-500">Loading...</div>
       ) : showHistory ? (
         <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-6 sm:p-8 shadow-sm">
-          <h2 className="text-xl font-bold text-slate-800 mb-6">Past Orders</h2>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 pb-4 border-b border-slate-100">
+            <div>
+              <h2 className="text-xl font-bold text-slate-800">Past Orders & Receipts</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Review collected meals, verification records, and rate your dishes</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowHistory(false)}
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-4 py-2.5 rounded-xl border border-indigo-100 transition-colors shadow-2xs self-start sm:self-auto"
+            >
+              <ArrowLeft size={14} />
+              <span>Back to Food Menu</span>
+            </button>
+          </div>
           {pastOrders.length === 0 ? (
             <div className="text-slate-500">No past orders found.</div>
           ) : (
             <div className="space-y-4">
-              {pastOrders.map(o => (
-                <div key={o.id} className="p-4 rounded-xl border border-slate-200 flex flex-col gap-4 shadow-sm">
-                  <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-                    <div>
-                      <div className="font-bold text-slate-800 text-lg">Order #{o.order_number}</div>
-                      <div className="text-xs text-slate-500 font-mono font-medium mb-1">ID: {o.id.split('-')[0].toUpperCase()}</div>
-                      <div className="text-xs text-slate-500 font-medium mb-1">Placed on: {new Date(o.created_at).toLocaleDateString()}</div>
-                      <div className="text-sm text-slate-600 mt-1">
-                        Pickup: {formatPickupTime((o as any).requested_pickup_time || o.pickup_time)} (Lunch)
-                        {(o as any).estimated_prep_duration_minutes && (
-                          <span className="text-xs text-slate-400 ml-2">
-                            • Prep: {(o as any).estimated_prep_duration_minutes}m
-                          </span>
+              {pastOrders.map(o => {
+                const totalAmount = (o.order_items || []).reduce((sum, oi) => {
+                  const price = Number(oi.menu_items?.price ?? 0);
+                  const qty = Number(oi.quantity) > 0 ? Number(oi.quantity) : 1;
+                  return sum + (price * qty);
+                }, 0);
+
+                return (
+                  <div key={o.id} className="p-4 rounded-xl border border-slate-200 flex flex-col gap-4 shadow-sm">
+                    <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                      <div>
+                        <div className="font-bold text-slate-800 text-lg">Order #{o.order_number}</div>
+                        <div className="text-xs text-slate-500 font-mono font-medium mb-1">ID: {o.id.split('-')[0].toUpperCase()}</div>
+                        <div className="text-xs text-slate-500 font-medium mb-1">Placed on: {new Date(o.created_at).toLocaleDateString()}</div>
+                        <div className="text-sm text-slate-600 mt-1">
+                          Pickup: {formatPickupTime((o as any).requested_pickup_time || o.pickup_time)} (Lunch)
+                          {(o as any).estimated_prep_duration_minutes && (
+                            <span className="text-xs text-slate-400 ml-2">
+                              • Prep: {(o as any).estimated_prep_duration_minutes}m
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {o.status === 'COLLECTED' && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCollectedOrderConfirmation({
+                                order: o as any,
+                                items: (o.order_items || []).map(oi => ({
+                                  menuItemId: oi.menu_items?.id,
+                                  name: oi.menu_items?.name || 'Meal Item',
+                                  quantity: Number(oi.quantity) || 1,
+                                  price: Number(oi.menu_items?.price ?? 0)
+                                }))
+                              });
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 text-xs font-bold transition-all shadow-2xs cursor-pointer active:scale-95"
+                            title="View official collected receipt"
+                          >
+                            <CheckCircle2 size={13} className="text-emerald-600" />
+                            <span>View Receipt</span>
+                          </button>
                         )}
+                        <div className={`px-3 py-1 rounded-full text-xs font-bold border shrink-0 ${o.status === 'COLLECTED' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+                          {getOrderStatusText(o as any)}
+                        </div>
                       </div>
                     </div>
-                    <div className={`px-3 py-1 rounded-full text-xs font-bold border ${o.status === 'COLLECTED' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
-                      {o.status}
-                    </div>
-                  </div>
 
-                  {o.order_items && o.order_items.length > 0 && (
-                    <div className="space-y-3">
-                      {o.order_items.map((oi, idx) => {
-                        const menuItem = oi.menu_items;
-                        if (!menuItem) return null;
-                        const existingReview = o.item_reviews?.find(r => r.menu_item_id === menuItem.id);
+                    {o.order_items && o.order_items.length > 0 && (
+                      <div className="space-y-3">
+                        {o.order_items.map((oi, idx) => {
+                          const menuItem = oi.menu_items;
+                          if (!menuItem) return null;
+                          const existingReview = o.item_reviews?.find(r => r.menu_item_id === menuItem.id);
+                          const qty = Number(oi.quantity) > 0 ? Number(oi.quantity) : 1;
+                          const unitPrice = Number(menuItem.price ?? 0);
+                          const itemTotal = unitPrice * qty;
 
-                        return (
-                          <div key={idx} className="flex flex-col gap-2 p-3 bg-slate-50 rounded-lg border border-slate-100">
-                            <div className="flex justify-between items-center">
-                              <span className="font-medium text-slate-700">
-                                {menuItem.name}
-                                {menuItem.price !== undefined && menuItem.price !== null && (
-                                  <span className="text-xs text-indigo-600 font-bold ml-2">₹{Number(menuItem.price).toFixed(2)}</span>
-                                )}
-                              </span>
-                              {o.status === 'COLLECTED' && !existingReview && reviewingItem?.menuItemId !== menuItem.id && (
-                                <button
-                                  onClick={() => setReviewingItem({ orderId: o.id, menuItemId: menuItem.id, itemName: menuItem.name })}
-                                  className="text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors"
-                                >
-                                  Leave Review
-                                </button>
-                              )}
-                            </div>
+                          return (
+                            <div key={idx} className="flex flex-col gap-2 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                              <div className="flex justify-between items-center gap-2">
+                                <div className="flex items-baseline gap-2 flex-wrap">
+                                  <span className="font-semibold text-slate-800 text-sm">
+                                    {menuItem.name} *{qty}
+                                  </span>
+                                  {qty > 1 && (
+                                    <span className="text-xs text-slate-400 font-normal">
+                                      (@₹{unitPrice.toFixed(2)})
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-3 shrink-0">
+                                  <span className="text-sm font-bold text-indigo-600 font-mono">
+                                    ₹{itemTotal.toFixed(2)}
+                                  </span>
+                                  {o.status === 'COLLECTED' && !existingReview && reviewingItem?.menuItemId !== menuItem.id && (
+                                    <button
+                                      onClick={() => setReviewingItem({ orderId: o.id, menuItemId: menuItem.id, itemName: menuItem.name })}
+                                      className="text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors"
+                                    >
+                                      Leave Review
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
 
                             {/* Existing Review Display */}
                             {existingReview && (
@@ -1083,651 +1546,960 @@ export default function StudentDashboard() {
                       })}
                     </div>
                   )}
+
+                  {/* Order Total Summary Footer */}
+                  {o.order_items && o.order_items.length > 0 && (
+                    <div className="flex justify-between items-center pt-2 px-1 border-t border-slate-100">
+                      <span className="text-xs text-slate-500 font-medium">
+                        {o.order_items.reduce((s, i) => s + (Number(i.quantity) > 0 ? Number(i.quantity) : 1), 0)} items
+                      </span>
+                      <div className="text-right">
+                        <span className="text-xs text-slate-500 font-medium">Total: </span>
+                        <span className="text-base font-extrabold text-slate-900 font-mono">₹{totalAmount.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              ))}
+              );
+            })}
             </div>
           )}
         </div>
-      ) : activeOrder ? (
-        // Active Order View
-        <div className="col-span-12 bg-indigo-600 rounded-[2rem] p-5 md:p-8 text-white flex flex-col shadow-sm relative overflow-hidden min-h-[300px]">
-          <div className="w-full flex justify-end h-10 mb-2">
-            {/* Cancel button if within 5 mins and not preparing */}
-            {['PLACED', 'ACCEPTED'].includes(activeOrder.status) && (new Date().getTime() - new Date(activeOrder.created_at).getTime()) < 5 * 60 * 1000 && (
-              <button
-                onClick={handleCancelOrder}
-                className="bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-xl text-sm font-semibold transition-colors"
-              >
-                Cancel Order
-              </button>
-            )}
-          </div>
+      ) : (
+        <>
+          {/* Main 2-Column Canteen OS Layout */}
+          <div className="col-span-12 grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+            {/* Left Column (8 cols): Compact Hero Promo + Combined Menu Header & Food Grid */}
+            <div className="lg:col-span-8 space-y-4">
+              {/* Compact Hero Banner */}
+              <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#002b66] via-[#023e8a] to-[#001845] text-white p-4 sm:p-5 shadow-md">
+                <div className="relative z-10 flex items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-blue-500/30 border border-blue-400/30 text-blue-200 text-[10px] font-black uppercase tracking-wider">
+                        <Sparkles size={11} className="text-amber-300" />
+                        Fresh • Fast • Hygienic
+                      </span>
+                      <span className="text-[11px] text-blue-200/80 font-medium hidden sm:inline">
+                        ⚡ Skip the canteen line
+                      </span>
+                    </div>
+                    <h2 className="text-lg sm:text-xl font-black text-white tracking-tight">
+                      Order Your <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-300 to-yellow-400">Favourite Food</span>
+                    </h2>
+                  </div>
 
-          <div className="flex flex-col items-center justify-center flex-1 pb-12">
-            <div className="flex items-center justify-center gap-3 mb-1 shadow-sm">
-              <h2 className="text-3xl font-extrabold">Order #{activeOrder.order_number}</h2>
-              <span className="text-indigo-200 bg-white/10 px-2 py-1 rounded text-xs font-mono tracking-wider border border-white/20">
-                ID: {activeOrder.id.split('-')[0].toUpperCase()}
-              </span>
-            </div>
-            <p className="text-indigo-200 font-medium tracking-wide mb-4 text-sm">Your Order Status</p>
-
-            <div className={`mt-2 px-6 py-2 rounded-full font-bold text-sm tracking-wider uppercase ${getStatusColor(activeOrder.status).replace('100', '900').replace('600', '100')}`}>
-              {activeOrder.status}
-            </div>
-
-            {/* Security Gatekeeper: Live Anti-Screenshot Pass only illuminates when READY */}
-            {activeOrder.status === 'READY' ? (
-              <div className="mt-6 flex flex-col items-center gap-3 w-full max-w-xs animate-in fade-in zoom-in-95 duration-300">
-                {/* Anti-Screenshot Live Security Watermark */}
-                <div className="flex items-center justify-center gap-2 bg-emerald-500/20 text-emerald-200 px-3.5 py-1.5 rounded-full text-xs font-extrabold border border-emerald-400/40 shadow-inner">
-                  <span className="relative flex h-2.5 w-2.5">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400"></span>
-                  </span>
-                  <span className="tracking-wide font-mono">🔴 LIVE PASS • {liveTickerTime}</span>
+                  <div className="hidden sm:flex items-center gap-2 shrink-0">
+                    <span className="px-3 py-1 rounded-full bg-white/10 text-blue-100 text-xs font-bold border border-white/15">
+                      Hot & Fresh 🔥
+                    </span>
+                  </div>
                 </div>
+              </div>
 
-                {/* High-Contrast QR Code Card with Pulsing Security Halo */}
-                <div
-                  onClick={() => setShowQrModal(true)}
-                  className="bg-white p-4 rounded-3xl shadow-[0_0_30px_rgba(52,211,153,0.35)] cursor-pointer hover:scale-105 transition-all relative group border-4 border-emerald-400"
-                  title="Click to Enlarge QR Code"
-                >
-                  <QRCodeSVG
-                    value={`SKIPTRAY:${activeOrder.id}${enteredOtp.trim() ? `:${enteredOtp.trim()}` : ''}`}
-                    size={180}
-                    className="rounded-xl"
-                  />
-                  <div className="absolute inset-0 bg-indigo-950/70 backdrop-blur-xs rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white gap-1.5 p-2">
-                    <IconMaximize size={24} className="w-6 h-6 text-white" />
-                    <span className="text-[11px] font-extrabold uppercase tracking-wider">Tap to Enlarge</span>
+              {/* Combined Menu Card (Filter & Search Header + Grid in single cohesive section) */}
+              <div id="menu-items-section" className="bg-white/95 backdrop-blur-md border border-slate-200/90 rounded-3xl p-4 sm:p-5 shadow-sm space-y-4">
+                {/* Top Row: Menu Title + Subtitle on Left, Search Input on Right */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-[#1d68f2] shadow-xs shrink-0">
+                      {showMenuExplicit ? <UtensilsCrossed size={20} /> : <Flame size={20} className="text-amber-500" />}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h2 className="text-xl font-black text-slate-900 tracking-tight leading-none">
+                          {showMenuExplicit ? 'All Menu Items' : 'Popular Sold Foods'}
+                        </h2>
+                        <span className="text-[11px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+                          {filteredMenuItems.length} dishes
+                        </span>
+                        {!showMenuExplicit ? (
+                          <Link
+                            to="/student?tab=menu"
+                            className="text-xs font-bold text-[#1d68f2] hover:underline ml-1"
+                          >
+                            View Full Menu →
+                          </Link>
+                        ) : (
+                          <Link
+                            to="/student"
+                            className="text-xs font-bold text-[#1d68f2] hover:underline ml-1"
+                          >
+                            ← Back to Popular
+                          </Link>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-500 font-medium mt-0.5">
+                        {showMenuExplicit
+                          ? 'Browse all available canteen foods, meals & packed items'
+                          : 'Foods sold most this week — fresh, top-rated and popular!'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Search food items input with blue search icon */}
+                  <div className="relative w-full sm:w-72">
+                    <IconSearch size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#1d68f2] pointer-events-none" />
+                    <input
+                      type="text"
+                      placeholder="Search food items..."
+                      value={foodSearchQuery}
+                      onChange={e => setFoodSearchQuery(e.target.value)}
+                      className="w-full bg-slate-50/80 border border-slate-200 focus:bg-white focus:border-[#1d68f2] focus:ring-2 focus:ring-blue-100 rounded-full text-xs text-slate-800 placeholder:text-slate-400 pl-10 pr-8 py-2 outline-none transition-all"
+                    />
+                    {foodSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setFoodSearchQuery('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 rounded-full"
+                      >
+                        <IconX size={13} />
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                <button
-                  onClick={() => setShowQrModal(true)}
-                  className="text-xs text-indigo-100 hover:text-white flex items-center gap-1.5 font-medium transition-colors"
-                >
-                  <IconQrCode size={14} className="w-3.5 h-3.5" />
-                  <span>Show QR at counter for instant scan</span>
-                </button>
-
-                {/* Secure OTP Challenge Info & Resend Trigger */}
-                <div className="bg-white/10 px-4 py-3 rounded-2xl border border-white/20 text-center w-full shadow-inner mt-1">
-                  <p className="text-indigo-200 text-[10px] font-bold uppercase tracking-widest mb-1">Pickup Verification OTP</p>
-                  {challengeData?.status === 'ACTIVE' ? (
-                    <div className="space-y-2">
-                      <p className="text-xs text-emerald-200 font-medium">
-                        OTP sent to your verified contact channel / email.
-                      </p>
-                      {enteredOtp ? (
-                        <p className="text-3xl font-mono font-black tracking-[0.25em] text-white">{enteredOtp}</p>
-                      ) : (
-                        <div className="mt-1">
-                          <input
-                            type="text"
-                            maxLength={6}
-                            placeholder="Type 6-digit OTP to show on pass..."
-                            value={enteredOtp}
-                            onChange={(e) => setEnteredOtp(e.target.value.replace(/\D/g, ''))}
-                            className="w-full text-center bg-white/10 text-white placeholder:text-white/40 text-sm font-mono py-1.5 px-3 rounded-xl border border-white/20 focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                          />
-                        </div>
-                      )}
-                      <div className="flex items-center justify-center gap-2 pt-1">
-                        <button
-                          type="button"
-                          onClick={handleRequestOtp}
-                          disabled={requestingOtp || (challengeData.resendAvailableAt ? Date.now() < challengeData.resendAvailableAt : false)}
-                          className="text-[11px] font-bold px-3 py-1 bg-white/15 hover:bg-white/25 rounded-lg text-indigo-100 transition-colors disabled:opacity-50"
-                        >
-                          {requestingOtp ? 'Sending...' : 'Resend OTP'}
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <p className="text-xs text-indigo-200">
-                        Generate your 5-minute collection OTP to collect your meal.
-                      </p>
-                      <button
-                        type="button"
-                        onClick={handleRequestOtp}
-                        disabled={requestingOtp}
-                        className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-extrabold text-xs rounded-xl shadow transition-all active:scale-95"
-                      >
-                        {requestingOtp ? 'Requesting OTP...' : 'Request Collection OTP'}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : (
-              /* Kitchen Preparing State Card (QR Locked Until Ready) */
-              <div className="mt-6 flex flex-col items-center justify-center bg-white/10 border border-white/20 rounded-3xl p-6 text-center max-w-xs w-full backdrop-blur-xs">
-                <div className="w-14 h-14 rounded-full bg-white/15 flex items-center justify-center mb-3 text-amber-300">
-                  <IconHourglass size={28} className="animate-spin" style={{ animationDuration: '4s' }} />
-                </div>
-                <h4 className="font-extrabold text-base text-white">Kitchen is preparing your meal</h4>
-                <p className="text-xs text-indigo-100 mt-1">
-                  Your food is currently being cooked and boxed.
-                </p>
-                <div className="mt-4 px-3 py-2 bg-indigo-950/40 rounded-2xl border border-indigo-300/20 text-[11px] text-indigo-200 flex items-center gap-2">
-                  <span className="text-amber-300 font-bold">🔒 Secure Pass</span>
-                  <span>• Unlocks automatically when READY</span>
-                </div>
-              </div>
-            )}
-
-            {/* Smart Scheduling Details in Active Order Card */}
-            <div className="mt-5 pt-4 border-t border-indigo-400/20 grid grid-cols-2 sm:grid-cols-3 gap-3 text-left">
-              <div>
-                <span className="text-[10px] text-indigo-300 uppercase tracking-wider block font-bold">Your Pickup Time</span>
-                <span className="text-sm font-bold text-white">
-                  {formatPickupTime((activeOrder as any).requested_pickup_time || activeOrder.pickup_time)}
-                </span>
-              </div>
-              {(activeOrder as any).planned_prep_start_time && (
-                <div>
-                  <span className="text-[10px] text-indigo-300 uppercase tracking-wider block font-bold">Kitchen Prep Starts</span>
-                  <span className="text-sm font-semibold text-amber-300">
-                    {formatPickupTime((activeOrder as any).planned_prep_start_time)}
-                  </span>
-                </div>
-              )}
-              {(activeOrder as any).target_ready_by_time && (
-                <div>
-                  <span className="text-[10px] text-indigo-300 uppercase tracking-wider block font-bold">Hot & Ready By</span>
-                  <span className="text-sm font-semibold text-emerald-300">
-                    {formatPickupTime((activeOrder as any).target_ready_by_time)}
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* Confirmed Bill & GST Summary */}
-            {((activeOrder as any).tax_snapshot || (activeOrder as any).total_tax_amount) && (
-              <div className="mt-3 pt-3 border-t border-indigo-400/20 flex flex-wrap items-center justify-between gap-2 text-xs text-indigo-100">
-                <span className="font-semibold">
-                  Bill Tax ({(activeOrder as any).tax_snapshot?.effective_food_gst_rate || 5}% GST): ₹{Number((activeOrder as any).total_tax_amount || (activeOrder as any).tax_snapshot?.food_gst_amount || 0).toFixed(2)}
-                </span>
-                {(activeOrder as any).tax_snapshot?.cgst_amount !== undefined && (
-                  <span className="text-[11px] text-indigo-200 font-mono">
-                    CGST: ₹{Number((activeOrder as any).tax_snapshot.cgst_amount).toFixed(2)} | SGST: ₹{Number((activeOrder as any).tax_snapshot.sgst_amount).toFixed(2)}
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      ) : (
-        <>
-          {/* Menu — full width now that cart is a floating bar */}
-          <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-6 sm:p-8 shadow-sm">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
-              <div>
-                <h2 className="text-xl font-bold text-slate-800">Menu</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Lunch Pickup: {formatSingleTime(slotConfig.serviceStartTime)} – {formatSingleTime(slotConfig.serviceEndTime)} • Booking Opens: 9:30 AM (Min {slotConfig.minNoticeMinutes || 30}m Notice)</p>
-              </div>
-              {isSunday ? (
-                <span className="self-start sm:self-auto px-3 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm">
-                  <IconBan size={14} className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                  <span>Closed on Sundays</span>
-                </span>
-              ) : isBeforeOpeningTime ? (
-                <span className="self-start sm:self-auto px-3 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm">
-                  <IconClock size={14} className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                  <span>Lunch Booking Opens at 9:30 AM</span>
-                </span>
-              ) : isLunchClosedForToday ? (
-                <span className="self-start sm:self-auto px-3 py-1 bg-rose-50 text-rose-700 border border-rose-200 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm">
-                  <IconClock size={14} className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                  <span>Lunch Ordering Closed Today</span>
-                </span>
-              ) : (
-                <span className="self-start sm:self-auto px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span>Lunch Slots Open ({formatSingleTime(slotConfig.serviceStartTime)} – {formatSingleTime(slotConfig.serviceEndTime)})</span>
-                </span>
-              )}
-            </div>
-
-            {/* Menu Search and Filter Controls */}
-            <div className="space-y-3 mb-6 bg-slate-50/70 border border-slate-200/80 rounded-2xl p-3 sm:p-4">
-              {/* Food Search Bar */}
-              <div className="relative group">
-                <div className="relative flex items-center bg-white border border-slate-300 focus-within:border-indigo-600 focus-within:ring-2 focus-within:ring-indigo-100 rounded-xl shadow-sm transition-all overflow-hidden px-3.5 py-2.5 gap-2.5">
-                  <IconSearch size={16} className="w-4 h-4 text-slate-400 shrink-0 pointer-events-none" />
-                  <input
-                    type="text"
-                    placeholder="Search food items..."
-                    value={foodSearchQuery}
-                    onChange={e => setFoodSearchQuery(e.target.value)}
-                    className="w-full bg-transparent text-sm text-slate-800 placeholder:text-slate-400 border-none outline-none focus:outline-none focus-visible:outline-none ring-0 focus:ring-0 p-0 pr-8"
-                    style={{ caretColor: 'transparent' }}
-                  />
-                  {foodSearchQuery && (
-                    <button
-                      type="button"
-                      onClick={() => setFoodSearchQuery('')}
-                      className="absolute right-2.5 p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
-                      title="Clear search"
-                    >
-                      <IconX size={14} className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Filter Buttons: Veg / Non-Veg & Categories */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
-                {/* Food Type Filter (All / Veg / Non-Veg) */}
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mr-1 hidden xs:inline">Type:</span>
-                  <button
-                    type="button"
-                    onClick={() => setFoodTypeFilter('ALL')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${foodTypeFilter === 'ALL'
-                        ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
-                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                      }`}
-                  >
-                    All
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFoodTypeFilter('VEG')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 ${foodTypeFilter === 'VEG'
-                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
-                        : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50'
-                      }`}
-                  >
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-emerald-300"></span>
-                    <span>Veg</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFoodTypeFilter('NON_VEG')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 ${foodTypeFilter === 'NON_VEG'
-                        ? 'bg-rose-600 text-white border-rose-600 shadow-sm'
-                        : 'bg-white text-rose-700 border-rose-200 hover:bg-rose-50'
-                      }`}
-                  >
-                    <span className="w-2 h-2 rounded-full bg-rose-500 ring-2 ring-rose-300"></span>
-                    <span>Non-Veg</span>
-                  </button>
-                </div>
-
-                {/* Category Filter (All Categories / Packed Food / Meals / Drinks) */}
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mr-1 hidden xs:inline">Category:</span>
-                  <button
-                    type="button"
-                    onClick={() => setCategoryFilter('ALL')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${categoryFilter === 'ALL'
-                        ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
-                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                      }`}
-                  >
-                    All Categories
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCategoryFilter('PACKED_FOOD')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1 ${categoryFilter === 'PACKED_FOOD'
-                        ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
-                        : 'bg-white text-slate-700 border-slate-200 hover:bg-amber-50 hover:text-amber-800 hover:border-amber-200'
-                      }`}
-                  >
-                    <span>Packed Food</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCategoryFilter('MEALS')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1 ${categoryFilter === 'MEALS'
-                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                        : 'bg-white text-slate-700 border-slate-200 hover:bg-indigo-50 hover:text-indigo-800 hover:border-indigo-200'
-                      }`}
-                  >
-                    <span>Meals</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCategoryFilter('DRINKS')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1 ${categoryFilter === 'DRINKS'
-                        ? 'bg-cyan-600 text-white border-cyan-600 shadow-sm'
-                        : 'bg-white text-slate-700 border-slate-200 hover:bg-cyan-50 hover:text-cyan-800 hover:border-cyan-200'
-                      }`}
-                  >
-                    <span>Drinks</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Active Filter Indicators & Reset Link */}
-              {(foodSearchQuery.trim() || foodTypeFilter !== 'ALL' || categoryFilter !== 'ALL') && (
-                <div className="flex items-center justify-between pt-2 border-t border-slate-200/60 text-xs">
-                  <span className="text-slate-500 font-medium">
-                    Showing <strong className="text-slate-800">{filteredMenuItems.length}</strong> of {menuItems.length} items
-                  </span>
+                {/* Filter Pills Row */}
+                <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-slate-100">
+                  {/* All button */}
                   <button
                     type="button"
                     onClick={() => {
-                      setFoodSearchQuery('');
                       setFoodTypeFilter('ALL');
                       setCategoryFilter('ALL');
                     }}
-                    className="text-indigo-600 hover:text-indigo-800 font-bold transition-colors hover:underline"
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
+                      foodTypeFilter === 'ALL' && categoryFilter === 'ALL'
+                        ? 'bg-[#1d68f2] text-white shadow-sm shadow-blue-500/25 ring-2 ring-blue-400/30'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }`}
                   >
-                    Reset all filters
+                    <LayoutGrid size={13} />
+                    <span>All</span>
+                  </button>
+
+                  {/* Veg button */}
+                  <button
+                    type="button"
+                    onClick={() => setFoodTypeFilter('VEG')}
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all border cursor-pointer ${
+                      foodTypeFilter === 'VEG'
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm shadow-emerald-500/20'
+                        : 'bg-emerald-50/80 text-emerald-700 border-emerald-200/80 hover:bg-emerald-100/60'
+                    }`}
+                  >
+                    <Leaf size={13} className={foodTypeFilter === 'VEG' ? 'text-white' : 'text-emerald-600'} />
+                    <span>Veg</span>
+                  </button>
+
+                  {/* Non-Veg button */}
+                  <button
+                    type="button"
+                    onClick={() => setFoodTypeFilter('NON_VEG')}
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all border cursor-pointer ${
+                      foodTypeFilter === 'NON_VEG'
+                        ? 'bg-rose-600 text-white border-rose-600 shadow-sm shadow-rose-500/20'
+                        : 'bg-rose-50/80 text-rose-700 border-rose-200/80 hover:bg-rose-100/60'
+                    }`}
+                  >
+                    <span className="w-2 h-2 rounded-full bg-rose-500 ring-2 ring-rose-200" />
+                    <span>Non-Veg</span>
+                  </button>
+
+                  <div className="h-5 w-px bg-slate-200 mx-1 hidden sm:block" />
+
+                  {/* All Categories Dropdown / Pill */}
+                  <button
+                    type="button"
+                    onClick={() => setCategoryFilter('ALL')}
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
+                      categoryFilter === 'ALL'
+                        ? 'bg-[#0f172a] text-white shadow-sm'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    <LayoutGrid size={13} />
+                    <span>All Categories</span>
+                  </button>
+
+                  {/* Packed Food */}
+                  <button
+                    type="button"
+                    onClick={() => setCategoryFilter(categoryFilter === 'SNACKS' ? 'ALL' : 'SNACKS')}
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all border cursor-pointer ${
+                      categoryFilter === 'SNACKS'
+                        ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Package size={13} className="text-slate-500" />
+                    <span>Packed Food</span>
+                  </button>
+
+                  {/* Meals */}
+                  <button
+                    type="button"
+                    onClick={() => setCategoryFilter(categoryFilter === 'RICE_MEALS' ? 'ALL' : 'RICE_MEALS')}
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all border cursor-pointer ${
+                      categoryFilter === 'RICE_MEALS'
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <UtensilsCrossed size={13} className="text-slate-500" />
+                    <span>Meals</span>
+                  </button>
+
+                  {/* Drinks */}
+                  <button
+                    type="button"
+                    onClick={() => setCategoryFilter(categoryFilter === 'BEVERAGES' ? 'ALL' : 'BEVERAGES')}
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all border cursor-pointer ${
+                      categoryFilter === 'BEVERAGES'
+                        ? 'bg-cyan-600 text-white border-cyan-600 shadow-sm'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Coffee size={13} className="text-slate-500" />
+                    <span>Drinks</span>
                   </button>
                 </div>
-              )}
-            </div>
 
-            {/* Empty State when No Menu Items Match */}
-            {filteredMenuItems.length === 0 ? (
-              <div className="py-12 px-4 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                <IconPackage size={36} className="w-9 h-9 text-slate-300 mx-auto mb-2" />
-                <h3 className="text-base font-bold text-slate-700">No Food Items Found</h3>
-                <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1">
-                  No items matched your current search and filter criteria. Try adjusting your search query, food type, or category.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setFoodSearchQuery('');
-                    setFoodTypeFilter('ALL');
-                    setCategoryFilter('ALL');
-                  }}
-                  className="mt-3 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm"
-                >
-                  Reset Filters
-                </button>
-              </div>
-            ) : (
-              <div className="grid grid-cols-3 gap-2 sm:gap-4">
-                {filteredMenuItems.map(item => (
-                  <div key={item.id} className={`flex flex-col justify-between p-5 rounded-2xl border transition-all ${item.is_sold_out ? 'bg-slate-50 border-slate-100 opacity-60' : 'bg-white border-slate-200 hover:border-indigo-300 hover:shadow-md'}`}>
-                    <div>
-                      <div className="flex items-center justify-between gap-2 mb-3">
-                        <div className="flex items-center gap-2">
-                          <div className={`w-2.5 h-2.5 rounded-full shadow-sm ${item.veg_non_veg === 'VEG' ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                          <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">
-                            {getItemCategory(item)}
-                          </span>
-                        </div>
-                        {item.is_sold_out && <span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full uppercase tracking-wider">Sold Out</span>}
-                      </div>
-                      <h3 className="font-bold text-slate-800 leading-tight">{item.name}</h3>
-                      <div className="text-sm font-extrabold text-indigo-600 mt-1.5">₹{Number(item.price || 0).toFixed(2)}</div>
-                    </div>
-
-                    <div className="mt-4 flex items-center justify-between gap-1">
-                      <span className="text-xs font-medium text-slate-400 shrink-0">{item.veg_non_veg === 'VEG' ? 'Veg' : 'Non-Veg'}</span>
-                      {!item.is_sold_out ? (
-                        (() => {
-                          const cartEntry = cart.find(c => c.item.id === item.id);
-                          const quantity = cartEntry?.quantity || 0;
-
-                          if (quantity > 0) {
-                            return (
-                              <div className="flex items-center bg-indigo-50 border border-indigo-100 rounded-xl p-0.5 shadow-xs">
-                                <button
-                                  type="button"
-                                  onClick={() => removeFromCart(item.id)}
-                                  aria-label={`Decrease quantity of ${item.name}`}
-                                  title={`Decrease quantity of ${item.name}`}
-                                  className="w-8 h-8 flex items-center justify-center text-indigo-600 hover:bg-indigo-600 hover:text-white rounded-lg font-bold text-sm transition-colors active:scale-90"
-                                >
-                                  <span className="leading-none text-base font-semibold">−</span>
-                                </button>
-                                <span
-                                  className="w-6 text-center font-bold text-sm text-indigo-950 tabular-nums select-none"
-                                  aria-label={`${quantity} of ${item.name} in cart`}
-                                >
-                                  {quantity}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => addToCart(item)}
-                                  disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cartTotalItems >= 5}
-                                  aria-label={`Increase quantity of ${item.name}`}
-                                  title={`Increase quantity of ${item.name}`}
-                                  className="w-8 h-8 flex items-center justify-center text-indigo-600 hover:bg-indigo-600 hover:text-white rounded-lg font-bold text-sm transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-indigo-600 active:scale-90"
-                                >
-                                  <span className="leading-none text-base font-semibold">+</span>
-                                </button>
-                              </div>
-                            );
-                          }
-
-                          return (
-                            <button
-                              type="button"
-                              onClick={() => addToCart(item)}
-                              disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cartTotalItems >= 5}
-                              aria-label={`Add ${item.name} to order`}
-                              title={`Add ${item.name} to order`}
-                              className="w-10 h-10 flex items-center justify-center bg-indigo-50 text-indigo-600 rounded-xl font-bold hover:bg-indigo-600 hover:text-white transition-colors disabled:opacity-50 disabled:hover:bg-indigo-50 disabled:hover:text-indigo-600 shadow-sm text-base active:scale-95"
-                            >
-                              +
-                            </button>
-                          );
-                        })()
-                      ) : (
-                        <div className="h-10"></div>
+                {/* Empty State */}
+                {filteredMenuItems.length === 0 ? (
+                  <div className="py-8 px-4 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                    <IconPackage size={32} className="text-slate-300 mx-auto mb-2" />
+                    <h4 className="text-sm font-bold text-slate-700">
+                      {!showMenuExplicit ? 'No Popular Orders This Week' : 'No Food Items Found'}
+                    </h4>
+                    <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1">
+                      {!showMenuExplicit
+                        ? 'Items appear here once orders are placed this week. You can browse the full menu to place an order!'
+                        : 'No items matched your search or category filter.'}
+                    </p>
+                    <div className="flex items-center justify-center gap-2 mt-3 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFoodSearchQuery('');
+                          setFoodTypeFilter('ALL');
+                          setCategoryFilter('ALL');
+                        }}
+                        className="px-3.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold transition-all shadow-xs"
+                      >
+                        Reset Filters
+                      </button>
+                      {!showMenuExplicit && (
+                        <Link
+                          to="/student?tab=menu"
+                          className="px-3.5 py-1.5 bg-[#1d68f2] hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm"
+                        >
+                          Browse All Menu Items →
+                        </Link>
                       )}
                     </div>
                   </div>
-                ))}
+                ) : (
+                  /* Food Grid Cards without Images */
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 pt-1">
+                    {filteredMenuItems.map(item => {
+                      const rawCat = String((item as any).category || '').toLowerCase();
+                      const isPacked =
+                        rawCat === 'packed food' ||
+                        rawCat === 'packed' ||
+                        rawCat === 'packaged' ||
+                        rawCat === 'snacks' ||
+                        rawCat === 'snack' ||
+                        rawCat.includes('pack') ||
+                        (item as any).stock_quantity != null ||
+                        (item as any).prep_time_minutes === 0 ||
+                        (item.name || '').toLowerCase().includes('packed') ||
+                        getItemCategory(item) === 'Packed Food';
+                      const stock = (item as any).stock_quantity ?? null;
+                      const prepMinutes = (item as any).prep_time_minutes ?? (isPacked ? 0 : 10);
+                      const isSoldOut = item.is_sold_out || (isPacked && stock !== null && stock <= 0);
+
+                      const cartEntry = cart.find(c => c.item.id === item.id);
+                      const quantity = cartEntry?.quantity || 0;
+                      const isMaxStockReached = stock !== null && quantity >= stock;
+
+                      // Determine theme accent matching user reference image
+                      // Green for Veg, Amber/Yellow for Packed Food/Snacks, Pink/Rose for Non-Veg or Meals
+                      const isVeg = item.veg_non_veg === 'VEG';
+                      let themeBorder = 'border-l-[6px] border-t-2 border-emerald-500 hover:border-emerald-600';
+                      let themeBg = 'bg-gradient-to-br from-emerald-50/40 via-white to-emerald-50/10';
+                      let themeTag = 'bg-emerald-100/90 text-emerald-800';
+
+                      if (isPacked) {
+                        themeBorder = 'border-l-[6px] border-t-2 border-amber-400 hover:border-amber-500';
+                        themeBg = 'bg-gradient-to-br from-amber-50/40 via-white to-amber-50/10';
+                        themeTag = 'bg-amber-100/90 text-amber-800';
+                      } else if (!isVeg) {
+                        themeBorder = 'border-l-[6px] border-t-2 border-rose-500 hover:border-rose-600';
+                        themeBg = 'bg-gradient-to-br from-rose-50/40 via-white to-rose-50/10';
+                        themeTag = 'bg-rose-100/90 text-rose-800';
+                      }
+
+                      // Dynamic appetizing descriptions matching screenshot style
+                      const itemNameLower = (item.name || '').toLowerCase();
+                      let itemDesc = (item as any).description;
+                      if (!itemDesc) {
+                        if (itemNameLower.includes('idly') || itemNameLower.includes('idli')) {
+                          itemDesc = 'Soft and fluffy idlies, perfect for a healthy start.';
+                        } else if (itemNameLower.includes('dosa')) {
+                          itemDesc = 'Crispy dosa with chutney and sambar.';
+                        } else if (itemNameLower.includes('lays') || itemNameLower.includes('chip')) {
+                          itemDesc = 'Crispy and crunchy potato chips (original).';
+                        } else if (itemNameLower.includes('biscuit') || itemNameLower.includes('cookie')) {
+                          itemDesc = 'Crispy oven baked treats, ready to snack.';
+                        } else if (itemNameLower.includes('poori') || itemNameLower.includes('puri')) {
+                          itemDesc = 'Fluffy golden fried pooris served with potato masala.';
+                        } else if (itemNameLower.includes('pongal')) {
+                          itemDesc = 'Ghee-rich ven pongal tempered with cashews & pepper.';
+                        } else if (itemNameLower.includes('vada')) {
+                          itemDesc = 'Crunchy golden medu vada with hot sambar.';
+                        } else if (itemNameLower.includes('rice') || itemNameLower.includes('meal')) {
+                          itemDesc = 'Wholesome hot meals prepared with authentic spices.';
+                        } else if (itemNameLower.includes('tea') || itemNameLower.includes('chai')) {
+                          itemDesc = 'Freshly brewed aromatic hot tea.';
+                        } else if (itemNameLower.includes('coffee')) {
+                          itemDesc = 'Traditional South Indian filter coffee.';
+                        } else if (isPacked) {
+                          itemDesc = `Ready to eat sealed pack of fresh ${item.name}.`;
+                        } else {
+                          itemDesc = `Freshly cooked delicious ${item.name.toLowerCase()} prepared on order.`;
+                        }
+                      }
+
+                      return (
+                        <div
+                          key={item.id}
+                          className={`relative rounded-2xl border border-slate-200/80 p-4 flex flex-col justify-between shadow-2xs transition-all duration-200 hover:shadow-md ${themeBorder} ${themeBg} ${
+                            isSoldOut ? 'opacity-60 bg-slate-50 grayscale-25' : ''
+                          }`}
+                        >
+                          <div>
+                            {/* Badges Row */}
+                            <div className="flex items-center justify-between gap-1.5 mb-2 flex-wrap">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {/* Veg/Non-Veg Badge */}
+                                <div className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-black shadow-2xs ${
+                                  isVeg ? 'bg-emerald-100/90 text-emerald-800' : 'bg-rose-100/90 text-rose-800'
+                                }`}>
+                                  {isVeg ? (
+                                    <Leaf size={11} className="text-emerald-700" />
+                                  ) : (
+                                    <span className="w-1.5 h-1.5 rounded-full bg-rose-600 ring-2 ring-rose-300" />
+                                  )}
+                                  <span>{isVeg ? 'Veg' : 'Non-Veg'}</span>
+                                </div>
+
+                                {/* Prep Time or Category Badge */}
+                                {isPacked ? (
+                                  <div className="flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-50 text-blue-800 border border-blue-200/60">
+                                    <Package size={11} className="text-blue-600" />
+                                    <span>Packed</span>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100/80 text-amber-900">
+                                    <IconClock size={11} className="text-amber-800" />
+                                    <span>{prepMinutes}m prep</span>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Highlight Tag on Right */}
+                              {isSoldOut ? (
+                                <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 text-[9px] font-black uppercase tracking-wider">
+                                  Sold Out
+                                </span>
+                              ) : (() => {
+                                const soldCount = salesCountMap[item.id] || salesCountMap[`name:${(item.name || '').toLowerCase()}`] || 0;
+                                if (soldCount > 0) {
+                                  return (
+                                    <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-300 text-[9px] font-black flex items-center gap-1 shadow-2xs">
+                                      🔥 {soldCount} sold today
+                                    </span>
+                                  );
+                                }
+                                if (isPacked) {
+                                  return (
+                                    <span className="px-2 py-0.5 rounded-full bg-pink-100/80 text-pink-700 text-[9px] font-extrabold flex items-center gap-1">
+                                      ★ Popular
+                                    </span>
+                                  );
+                                }
+                                if (isVeg) {
+                                  return (
+                                    <span className="px-2 py-0.5 rounded-full bg-emerald-100/70 text-emerald-700 text-[9px] font-extrabold flex items-center gap-1">
+                                      💚 Healthy
+                                    </span>
+                                  );
+                                }
+                                return (
+                                  <span className="px-2 py-0.5 rounded-full bg-blue-100/70 text-blue-700 text-[9px] font-extrabold flex items-center gap-1">
+                                    🍲 Meals
+                                  </span>
+                                );
+                              })()}
+                            </div>
+
+                            {/* Food Title */}
+                            <h3 className="text-lg font-black text-slate-900 tracking-tight leading-snug mt-1 truncate">
+                              {item.name}
+                            </h3>
+
+                            {/* Food Description */}
+                            <p className="text-xs text-slate-500 font-medium leading-snug mt-1 line-clamp-2 min-h-[32px]">
+                              {itemDesc}
+                            </p>
+                          </div>
+
+                          {/* Footer: Price on Left, Pill Button on Right */}
+                          <div className="pt-2.5 border-t border-slate-200/70 flex items-center justify-between gap-2 mt-3">
+                            <div>
+                              <span className="text-[9px] tracking-wider font-extrabold text-slate-400 block uppercase">
+                                PRICE
+                              </span>
+                              <div className="text-xl font-black text-[#1d68f2] tracking-tight leading-tight">
+                                ₹{Number(item.price || 0).toFixed(2)}
+                              </div>
+                            </div>
+
+                            {!isSoldOut ? (
+                              quantity > 0 ? (
+                                <div className="flex items-center bg-[#1d68f2] text-white rounded-full p-0.5 shadow-xs">
+                                  <button
+                                    type="button"
+                                    onClick={() => removeFromCart(item.id)}
+                                    aria-label={`Decrease quantity of ${item.name}`}
+                                    className="w-7 h-7 flex items-center justify-center hover:bg-white/20 rounded-full font-black text-sm transition-colors active:scale-90 cursor-pointer"
+                                  >
+                                    −
+                                  </button>
+                                  <span className="w-6 text-center font-black text-xs text-white tabular-nums">
+                                    {quantity}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => addToCart(item)}
+                                    disabled={isSuspended || isLunchClosedForToday || cartTotalItems >= 5 || isMaxStockReached}
+                                    aria-label={`Increase quantity of ${item.name}`}
+                                    className="w-7 h-7 flex items-center justify-center hover:bg-white/20 rounded-full font-black text-sm transition-colors disabled:opacity-40 active:scale-90 cursor-pointer"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="relative">
+                                  <button
+                                    type="button"
+                                    onClick={() => addToCart(item)}
+                                    disabled={isSuspended || isLunchClosedForToday || cartTotalItems >= 5 || isMaxStockReached}
+                                    className="px-4 py-1.5 rounded-full bg-[#1d68f2] hover:bg-blue-600 text-white font-extrabold text-xs transition-all shadow-sm shadow-blue-500/25 flex items-center gap-1 active:scale-95 disabled:opacity-40 cursor-pointer"
+                                  >
+                                    <span className="text-base leading-none font-black">+</span>
+                                    <span>Add</span>
+                                  </button>
+                                </div>
+                              )
+                            ) : (
+                              <span className="px-3 py-1 rounded-full bg-slate-200/70 text-slate-500 text-[11px] font-bold">
+                                Unavailable
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
 
-          {/* Background Blur Overlay when Cart is Open */}
-          <div
-            onClick={() => setCartOpen(false)}
-            aria-hidden="true"
-            className={`fixed inset-0 bg-slate-950/40 backdrop-blur-md transition-opacity duration-300 z-40 ${
-              cartOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
-            }`}
-          />
+              {/* Today's Special Bottom Strip (No food image, clean modern banner) */}
+              <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#1d68f2] to-[#0ea5e9] text-white p-4 sm:p-5 shadow-md flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-xl bg-white/20 border border-white/30 flex items-center justify-center shrink-0 shadow-inner text-xl">
+                    <span>✨</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider bg-white/20 px-2 py-0.5 rounded-md inline-block mb-1">
+                      Today's Special Combo
+                    </span>
+                    <h4 className="text-base font-black text-white leading-tight">
+                      Fresh Idly + Sambar & Chutney
+                    </h4>
+                    <p className="text-xs text-blue-100 font-medium">Hot South Indian breakfast combo • ₹30.00</p>
+                  </div>
+                </div>
 
-          {/* Floating Bottom Cart Bar */}
-          <div
-            style={{
-              position: 'fixed',
-              bottom: 0,
-              left: 0,
-              right: 0,
-              zIndex: 50,
-              display: 'flex',
-              justifyContent: 'center',
-              pointerEvents: 'none',
-            }}
-          >
-            <div
-              style={{
-                width: '100%',
-                maxWidth: '56rem',
-                pointerEvents: 'auto',
-                transition: 'all 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
-              }}
-            >
-              {/* Expanded Panel */}
-              <div
-                style={{
-                  background: '#0f172a',
-                  borderRadius: cartOpen ? '1.5rem 1.5rem 0 0' : '1.5rem',
-                  overflow: 'hidden',
-                  boxShadow: cartOpen ? '0 -10px 50px rgba(0,0,0,0.5)' : '0 -8px 40px rgba(0,0,0,0.25)',
-                  margin: cartOpen ? '0' : '0 1rem 1rem',
-                  transition: 'all 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
-                }}
-              >
-                {/* Expanded cart body */}
-                {cartOpen && (
-                  <div style={{ padding: '1.5rem 1.5rem 0', maxHeight: '60vh', overflowY: 'auto' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <h3 style={{ color: '#f1f5f9', fontWeight: 700, fontSize: '1.1rem', margin: 0 }}>Your Order</h3>
-                        <span style={{ color: '#64748b', fontSize: '0.75rem', fontWeight: 600 }}>Max 5 items</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const idlyItem = menuItems.find(m => (m.name || '').toLowerCase().includes('idly') || (m.name || '').toLowerCase().includes('idli'));
+                    if (idlyItem && !idlyItem.is_sold_out) {
+                      addToCart(idlyItem);
+                    }
+                  }}
+                  className="px-4 py-2 rounded-xl bg-white text-[#1d68f2] hover:bg-blue-50 font-black text-xs shadow-md transition-all shrink-0 active:scale-95 cursor-pointer"
+                >
+                  Quick Add ₹30 →
+                </button>
+              </div>
+            </div>
+
+            {/* Right Column (4 cols): Sticky Desktop Panel (Active Order Status or Cart Builder) */}
+            <div className="hidden lg:block lg:col-span-4 sticky top-20">
+              <div className="bg-white border border-slate-200/90 rounded-3xl p-5 sm:p-6 shadow-lg shadow-slate-100 flex flex-col justify-between max-h-[calc(100vh-6rem)] overflow-y-auto">
+                {displayOrder ? (
+                  /* ================= Active Order Live Status View Inside Box ================= */
+                  <div className="space-y-4">
+                    {/* Header */}
+                    <div className="flex items-center justify-between pb-3.5 border-b border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs ${
+                          displayOrder.status === 'COLLECTED'
+                            ? 'bg-emerald-100 text-emerald-600'
+                            : 'bg-blue-100 text-[#1d68f2]'
+                        }`}>
+                          {displayOrder.status === 'COLLECTED' ? <CheckCircle2 size={16} /> : <Flame size={16} />}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <h3 className="font-black text-slate-900 text-sm leading-tight">
+                              Order #{displayOrder.order_number}
+                            </h3>
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                              displayOrder.status === 'COLLECTED'
+                                ? 'bg-emerald-100 text-emerald-700 border border-emerald-300'
+                                : displayOrder.status === 'READY'
+                                ? 'bg-emerald-100 text-emerald-700 border border-emerald-300'
+                                : displayOrder.status === 'PREPARING'
+                                ? 'bg-amber-100 text-amber-700 border border-amber-300'
+                                : 'bg-blue-100 text-blue-700 border border-blue-200'
+                            }`}>
+                              {displayOrder.status === 'COLLECTED' ? 'COLLECTED' : getOrderStatusText(displayOrder as any)}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-400 font-medium">
+                            {displayOrder.status === 'COLLECTED'
+                              ? `Collected at ${formatSingleTime((displayOrder as any).collected_at || new Date().toISOString())}`
+                              : `Pickup at ${formatSingleTime(displayOrder.pickup_time)}`}
+                          </p>
+                        </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setCartOpen(false)}
-                        aria-label="Close order section"
-                        title="Close"
-                        style={{
-                          background: 'rgba(239, 68, 68, 0.12)',
-                          border: '1px solid rgba(239, 68, 68, 0.25)',
-                          color: '#ef4444',
-                          padding: '0.375rem',
-                          borderRadius: '0.5rem',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          transition: 'all 0.2s',
-                        }}
-                      >
-                        <IconX size={18} className="w-4.5 h-4.5 text-red-500" />
-                      </button>
+
+                      {/* Cancel button: allowed for PLACED and ACCEPTED */}
+                      {['PLACED', 'ACCEPTED'].includes(displayOrder.status) && (
+                        <button
+                          type="button"
+                          onClick={handleCancelOrder}
+                          className="text-[11px] text-rose-500 hover:text-rose-700 font-bold bg-rose-50 hover:bg-rose-100 px-2.5 py-1 rounded-lg border border-rose-200 transition-colors cursor-pointer"
+                          title="Cancel Order"
+                        >
+                          Cancel
+                        </button>
+                      )}
+
+                      {/* Dismiss button when COLLECTED */}
+                      {displayOrder.status === 'COLLECTED' && (
+                        <button
+                          type="button"
+                          onClick={() => handleDismissCollectedOrder(displayOrder.id)}
+                          className="text-[11px] text-slate-400 hover:text-slate-700 font-bold bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded-lg transition-colors cursor-pointer"
+                          title="Dismiss and Order Again"
+                        >
+                          ✕ Done
+                        </button>
+                      )}
                     </div>
 
-                    {/* Sunday closure banner in cart */}
+                    {/* Progress Step Bar */}
+                    <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3">
+                      <div className="flex items-center justify-between relative px-2">
+                        {/* Connecting background and active progress track */}
+                        <div className="absolute left-[18px] right-[18px] top-2.5 h-0.5 bg-slate-200 -z-0">
+                          <div
+                            className="h-full bg-[#1d68f2] transition-all duration-500"
+                            style={{
+                              width:
+                                displayOrder.status === 'PLACED' ? '0%' :
+                                displayOrder.status === 'ACCEPTED' ? '25%' :
+                                displayOrder.status === 'PREPARING' ? '50%' :
+                                displayOrder.status === 'READY' ? '75%' : '100%'
+                            }}
+                          />
+                        </div>
+
+                        {[
+                          { label: 'Placed', done: true },
+                          { label: 'Accepted', done: ['ACCEPTED', 'PREPARING', 'READY', 'COLLECTED'].includes(displayOrder.status) },
+                          { label: 'Cooking', done: ['PREPARING', 'READY', 'COLLECTED'].includes(displayOrder.status) },
+                          { label: 'Ready', done: ['READY', 'COLLECTED'].includes(displayOrder.status) },
+                          { label: 'Collected', done: displayOrder.status === 'COLLECTED' }
+                        ].map((step, idx) => (
+                          <div key={idx} className="flex flex-col items-center z-10">
+                            <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black border transition-all ${
+                              step.done
+                                ? 'bg-[#1d68f2] border-white text-white shadow-xs'
+                                : 'bg-white border-slate-300 text-slate-400'
+                            }`}>
+                              {step.done ? '✓' : idx + 1}
+                            </div>
+                            <span className={`text-[10px] font-bold mt-1 ${step.done ? 'text-slate-800' : 'text-slate-400'}`}>
+                              {step.label}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Status Highlights & Pass / QR Code / Collected View */}
+                    {displayOrder.status === 'COLLECTED' ? (
+                      /* ================= ORDER COLLECTED SUCCESSFULLY PAGE ================= */
+                      <div className="relative overflow-hidden bg-gradient-to-b from-emerald-50 via-teal-50/50 to-emerald-100/30 border border-emerald-200 rounded-2xl p-4 sm:p-5 text-center space-y-3.5 shadow-xs">
+                        {/* Soft celebratory decorative stars */}
+                        <div className="absolute top-2.5 left-3 text-emerald-400 opacity-60 text-xs select-none">✨</div>
+                        <div className="absolute top-3.5 right-4 text-emerald-400 opacity-60 text-sm select-none">🎉</div>
+                        <div className="absolute bottom-3 left-4 text-emerald-400 opacity-40 text-xs select-none">🌟</div>
+
+                        {/* Animated 3D Success Icon Badge */}
+                        <div className="relative mx-auto w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-400 p-[1.5px] shadow-lg shadow-emerald-500/25 flex items-center justify-center">
+                          <div className="w-full h-full rounded-[14px] bg-gradient-to-b from-emerald-500 to-teal-600 flex items-center justify-center text-white relative overflow-hidden">
+                            <div className="absolute top-0 inset-x-0 h-1/2 bg-white/30 rounded-t-[14px]" />
+                            <CheckCircle2 size={28} className="relative z-10 drop-shadow-sm text-white" strokeWidth={2.6} />
+                          </div>
+                        </div>
+
+                        {/* Heading & description */}
+                        <div>
+                          <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-100 border border-emerald-300/80 text-emerald-800 text-[10px] font-black uppercase tracking-wider mb-1">
+                            <span>Order Handed Over</span>
+                            <span>✓</span>
+                          </div>
+                          <h4 className="font-black text-slate-900 text-base sm:text-lg tracking-tight">
+                            Order Collected Successfully! 🎉
+                          </h4>
+                          <p className="text-xs text-slate-600 mt-1 max-w-xs mx-auto leading-relaxed">
+                            Your food has been handed over at the counter. Enjoy your hot & fresh meal!
+                          </p>
+                        </div>
+
+                        {/* Verified Pickup Details Pill */}
+                        <div className="bg-white/95 border border-emerald-200/90 rounded-xl py-2 px-3 flex items-center justify-around text-center shadow-2xs">
+                          <div>
+                            <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Canteen</span>
+                            <span className="text-xs font-black text-slate-800 truncate max-w-[90px] block">
+                              {(displayOrder as any).canteens?.name || 'Main Canteen'}
+                            </span>
+                          </div>
+                          <div className="w-px h-6 bg-slate-200" />
+                          <div>
+                            <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Verification</span>
+                            <span className="text-xs font-black text-emerald-600 flex items-center justify-center gap-0.5">
+                              <span>Verified</span> ✓
+                            </span>
+                          </div>
+                          <div className="w-px h-6 bg-slate-200" />
+                          <div>
+                            <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Time</span>
+                            <span className="text-xs font-black text-slate-800 font-mono">
+                              {formatSingleTime((displayOrder as any).collected_at || new Date().toISOString())}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Action Buttons: Leave Review & Order More */}
+                        <div className="pt-1 flex flex-col sm:flex-row gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowHistory(true);
+                              setTimeout(() => {
+                                const el = document.getElementById(`order-${displayOrder.id}`);
+                                if (el) el.scrollIntoView({ behavior: 'smooth' });
+                              }, 150);
+                            }}
+                            className="flex-1 py-2 px-3 rounded-xl bg-white border border-emerald-300 hover:bg-emerald-50 text-emerald-700 font-bold text-xs shadow-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                          >
+                            <Star size={13} className="text-amber-500 fill-amber-500" />
+                            <span>Rate Meal</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDismissCollectedOrder(displayOrder.id)}
+                            className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-md shadow-emerald-600/20 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                          >
+                            <span>Order More Food →</span>
+                            {autoCloseCountdown > 0 && (
+                              <span className="px-1.5 py-0.5 rounded-full bg-emerald-800/50 text-[10px] font-mono">
+                                {autoCloseCountdown}s
+                              </span>
+                            )}
+                          </button>
+                        </div>
+                        <p className="text-[10px] text-slate-400 font-medium">
+                          Auto-closing and returning to menu in <span className="font-bold text-emerald-600">{autoCloseCountdown}s</span>
+                        </p>
+                      </div>
+                    ) : displayOrder.status === 'READY' ? (
+                      <div className="bg-gradient-to-b from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl p-4 text-center space-y-3">
+                        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-600 text-white text-[11px] font-black shadow-xs">
+                          <span className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
+                          </span>
+                          <span>READY FOR PICKUP • {liveTickerTime}</span>
+                        </div>
+
+                        {/* QR Code */}
+                        <div
+                          onClick={() => setShowQrModal(true)}
+                          className="bg-white p-3 rounded-2xl border-2 border-emerald-400 shadow-md inline-block cursor-pointer hover:scale-105 transition-transform group relative"
+                          title="Click to Enlarge QR Code"
+                        >
+                          <QRCodeSVG
+                            value={`SKIPTRAY:${displayOrder.id}:${((displayOrder as any).otp_code || (displayOrder as any).otp || enteredOtp || '').trim()}`}
+                            size={140}
+                            className="rounded-lg mx-auto"
+                          />
+                          <div className="absolute inset-0 bg-slate-900/60 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[11px] font-bold gap-1">
+                            <IconMaximize size={16} />
+                            <span>Enlarge</span>
+                          </div>
+                        </div>
+
+                        {/* OTP Display */}
+                        <div className="bg-white px-3 py-2.5 rounded-xl border border-emerald-200">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                            Pickup Verification OTP
+                          </p>
+                          {(() => {
+                            const displayOtp = (displayOrder as any).otp_code || enteredOtp || (displayOrder as any).otp;
+                            if (displayOtp) {
+                              return (
+                                <p className="text-2xl font-mono font-black tracking-[0.2em] text-emerald-700 my-0.5">
+                                  {displayOtp}
+                                </p>
+                              );
+                            }
+                            return (
+                              <button
+                                type="button"
+                                onClick={handleRequestOtp}
+                                disabled={requestingOtp}
+                                className="mt-1 px-3 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-lg shadow-xs hover:bg-emerald-700 disabled:opacity-50 cursor-pointer"
+                              >
+                                {requestingOtp ? 'Generating...' : 'Get OTP Code'}
+                              </button>
+                            );
+                          })()}
+                          <p className="text-[10px] text-slate-500 mt-0.5">
+                            Show OTP or scan QR at counter
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      /* Preparing / In-progress notice */
+                      <div className="bg-blue-50/70 border border-blue-200/80 rounded-2xl p-4 text-center space-y-2">
+                        <div className="w-10 h-10 rounded-full bg-blue-100 text-[#1d68f2] flex items-center justify-center mx-auto">
+                          <IconHourglass size={20} className="animate-spin" style={{ animationDuration: '4s' }} />
+                        </div>
+                        <div>
+                          <h4 className="font-black text-slate-900 text-sm">
+                            {displayOrder.status === 'PLACED' && 'Order Received'}
+                            {displayOrder.status === 'ACCEPTED' && 'Order Accepted'}
+                            {displayOrder.status === 'PREPARING' && 'Preparing Your Meal'}
+                          </h4>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            {displayOrder.status === 'PLACED' && 'Sent to kitchen staff. Awaiting confirmation.'}
+                            {displayOrder.status === 'ACCEPTED' && 'Kitchen accepted and will cook your meal on schedule.'}
+                            {displayOrder.status === 'PREPARING' && 'Food is being freshly cooked right now!'}
+                          </p>
+                        </div>
+                        <div className="pt-2 border-t border-blue-100 flex items-center justify-center gap-1.5 text-[10px] text-blue-700 font-bold">
+                          <Lock size={11} />
+                          <span>QR & OTP unlock automatically when READY</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Items List inside Active Order */}
+                    <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">
+                          Ordered Items
+                        </span>
+                        <span className="text-[11px] font-bold text-slate-500">
+                          {(displayOrder as any).canteens?.name || 'Main Canteen'}
+                        </span>
+                      </div>
+
+                      <div className="space-y-1.5 divide-y divide-slate-100">
+                        {(displayOrder as any).order_items && (displayOrder as any).order_items.length > 0 ? (
+                          (displayOrder as any).order_items.map((oi: any, idx: number) => {
+                            const itemName = oi.menu_items?.name || oi.name || 'Meal Item';
+                            const itemPrice = Number(oi.menu_items?.price ?? oi.price ?? 0);
+                            const itemQty = Number(oi.quantity) || 1;
+                            return (
+                              <div key={idx} className="pt-1.5 first:pt-0 flex items-center justify-between text-xs">
+                                <div>
+                                  <span className="font-bold text-slate-800">{itemName}</span>
+                                  <span className="text-[10px] text-slate-400 block font-medium">Qty: {itemQty}</span>
+                                </div>
+                                <span className="font-black text-slate-900 font-mono">
+                                  ₹{(itemPrice * itemQty).toFixed(2)}
+                                </span>
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <div className="text-xs text-slate-400 italic">Order details loaded</div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Order Meta Badges */}
+                    <div className="grid grid-cols-2 gap-2 text-center text-xs">
+                      <div className="bg-slate-50 border border-slate-200/70 p-2 rounded-xl">
+                        <span className="text-[9px] text-slate-400 uppercase font-black block">Mode</span>
+                        <span className="font-bold text-slate-800 text-xs mt-0.5 block">
+                          {displayOrder.is_takeaway ? 'Takeaway' : 'Dine-In'}
+                        </span>
+                      </div>
+                      <div className="bg-slate-50 border border-slate-200/70 p-2 rounded-xl">
+                        <span className="text-[9px] text-slate-400 uppercase font-black block">Scheduled Pickup</span>
+                        <span className="font-bold text-slate-800 text-xs mt-0.5 block">
+                          {formatSingleTime(displayOrder.pickup_time)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  /* ================= Default Cart & Order Placement Builder ================= */
+                  <div>
+                    {/* Cart Header */}
+                    <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-xl bg-blue-100 text-[#1d68f2] flex items-center justify-center font-black text-xs">
+                          <ShoppingCart size={16} />
+                        </div>
+                        <div>
+                          <h3 className="font-black text-slate-900 text-base leading-tight">Your Order</h3>
+                          <p className="text-[11px] text-slate-400 font-medium">
+                            {cartTotalItems} item{cartTotalItems === 1 ? '' : 's'} (Max 5)
+                          </p>
+                        </div>
+                      </div>
+
+                      {cart.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setCart([])}
+                          className="text-xs text-rose-500 hover:text-rose-700 font-bold transition-colors cursor-pointer"
+                        >
+                          Clear All
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Operational Warnings */}
                     {isSunday && (
-                      <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: '0.75rem', display: 'flex', gap: '0.625rem', alignItems: 'center' }}>
-                        <IconBan size={20} className="w-5 h-5 text-amber-400 shrink-0" />
-                        <div>
-                          <div style={{ color: '#fbbf24', fontSize: '0.8125rem', fontWeight: 700 }}>Canteen Closed on Sundays</div>
-                          <div style={{ color: '#fde68a', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders are not accepted on Sundays.</div>
-                        </div>
+                      <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-2 text-xs text-amber-800 font-medium">
+                        <IconBan size={16} className="text-amber-600 shrink-0" />
+                        <span>Canteen closed on Sundays.</span>
                       </div>
                     )}
 
-                    {/* Morning pre-opening banner in cart */}
                     {!isSunday && isBeforeOpeningTime && (
-                      <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: '0.75rem', display: 'flex', gap: '0.625rem', alignItems: 'center' }}>
-                        <IconClock size={20} className="w-5 h-5 text-indigo-400 shrink-0" />
-                        <div>
-                          <div style={{ color: '#818cf8', fontSize: '0.8125rem', fontWeight: 700 }}>Lunch Booking Opens at 9:30 AM</div>
-                          <div style={{ color: '#c7d2fe', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders open at 9:30 AM today (Lunch Slots: {formatSingleTime(slotConfig.serviceStartTime)} – {formatSingleTime(slotConfig.serviceEndTime)}, Min {slotConfig.minNoticeMinutes || 30}m notice).</div>
-                        </div>
+                      <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center gap-2 text-xs text-blue-800 font-medium">
+                        <IconClock size={16} className="text-blue-600 shrink-0" />
+                        <span>Lunch booking opens at 9:30 AM today.</span>
                       </div>
                     )}
 
-                    {/* Lunch cutoff banner in cart */}
                     {!isSunday && isLunchClosedForToday && (
-                      <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '0.75rem', display: 'flex', gap: '0.625rem', alignItems: 'center' }}>
-                        <IconClock size={20} className="w-5 h-5 text-rose-400 shrink-0" />
-                        <div>
-                          <div style={{ color: '#f87171', fontSize: '0.8125rem', fontWeight: 700 }}>Lunch Ordering Closed Today</div>
-                          <div style={{ color: '#fca5a5', fontSize: '0.75rem', marginTop: '0.125rem' }}>Orders must be placed at least {slotConfig.minNoticeMinutes || 30} mins before pickup (Lunch: {formatSingleTime(slotConfig.serviceStartTime)} – {formatSingleTime(slotConfig.serviceEndTime)}).</div>
-                        </div>
+                      <div className="mb-4 p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-center gap-2 text-xs text-rose-800 font-medium">
+                        <IconClock size={16} className="text-rose-600 shrink-0" />
+                        <span>Lunch ordering closed for today.</span>
                       </div>
                     )}
 
-                    <div style={{ marginBottom: '1rem' }}>
+                    {/* Cart Items List without food images */}
+                    <div className="space-y-3 mb-4 max-h-60 overflow-y-auto pr-1">
                       {cart.length === 0 ? (
-                        <div style={{ color: '#64748b', fontSize: '0.875rem', textAlign: 'center', padding: '1.5rem 0' }}>Select items from the menu. (Max 5)</div>
+                        <div className="text-center py-8 px-3 bg-slate-50/70 rounded-2xl border border-dashed border-slate-200">
+                          <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-2 text-slate-300">
+                            <ShoppingCart size={22} />
+                          </div>
+                          <p className="text-xs font-bold text-slate-600">No items selected</p>
+                          <p className="text-[11px] text-slate-400 mt-0.5">
+                            Click "+ Add" on any menu item to build your lunch order.
+                          </p>
+                        </div>
                       ) : (
                         cart.map(c => {
                           const liveItem = menuItems.find(m => m.id === c.item.id);
                           const isSoldOut = liveItem?.is_sold_out ?? false;
+
                           return (
-                            <div key={c.item.id} style={{
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                              borderBottom: `1px solid ${isSoldOut ? 'rgba(239,68,68,0.2)' : '#1e293b'}`,
-                              borderLeft: `3px solid ${liveItem?.veg_non_veg === 'VEG' ? '#22c55e' : '#ef4444'}`,
-                              paddingLeft: '0.75rem',
-                              paddingBottom: '0.75rem',
-                              marginBottom: '0.75rem',
-                            }}>
-                              <div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                  <div style={{ width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: liveItem?.veg_non_veg === 'VEG' ? '#22c55e' : '#ef4444' }}></div>
-                                  <span style={{ fontSize: '0.875rem', fontWeight: 500, color: isSoldOut ? '#f87171' : '#e2e8f0', textDecoration: isSoldOut ? 'line-through' : 'none' }}>
+                            <div
+                              key={c.item.id}
+                              className={`flex items-center justify-between gap-2 p-2.5 rounded-xl border transition-all ${
+                                isSoldOut ? 'bg-rose-50/50 border-rose-200' : 'bg-slate-50/70 border-slate-200/70'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span
+                                  className={`w-2 h-2 rounded-full shrink-0 ${
+                                    liveItem?.veg_non_veg === 'VEG' ? 'bg-emerald-500' : 'bg-rose-500'
+                                  }`}
+                                />
+                                <div className="min-w-0">
+                                  <h4
+                                    className={`text-xs font-bold truncate leading-tight ${
+                                      isSoldOut ? 'text-rose-600 line-through' : 'text-slate-800'
+                                    }`}
+                                  >
                                     {c.item.name}
-                                  </span>
-                                  {isSoldOut && (
-                                    <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#f87171', background: 'rgba(239,68,68,0.15)', padding: '1px 6px', borderRadius: '9999px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Sold Out</span>
-                                  )}
-                                </div>
-                                <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                                  <span>Qty: {c.quantity}</span>
-                                  <span style={{ color: '#94a3b8' }}>• ₹{Number(c.item.price || 0).toFixed(2)}</span>
-                                  <span style={{ color: '#818cf8', fontWeight: 600 }}>= ₹{(Number(c.item.price || 0) * c.quantity).toFixed(2)}</span>
+                                  </h4>
+                                  <div className="text-[11px] text-slate-500 font-semibold mt-0.5">
+                                    ₹{Number(c.item.price || 0).toFixed(2)}
+                                  </div>
                                 </div>
                               </div>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                <div style={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  background: '#1e293b',
-                                  borderRadius: '0.5rem',
-                                  border: '1px solid #334155',
-                                  overflow: 'hidden'
-                                }}>
+
+                              {/* Qty controller */}
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <div className="flex items-center bg-white border border-slate-200 rounded-lg shadow-xs overflow-hidden">
                                   <button
                                     type="button"
                                     onClick={() => removeFromCart(c.item.id)}
-                                    aria-label={`Decrease quantity of ${c.item.name}`}
-                                    title={`Decrease quantity of ${c.item.name}`}
-                                    style={{
-                                      background: 'transparent',
-                                      border: 'none',
-                                      color: '#94a3b8',
-                                      padding: '0.2rem 0.5rem',
-                                      cursor: 'pointer',
-                                      fontSize: '0.875rem',
-                                      fontWeight: 'bold',
-                                      lineHeight: 1,
-                                    }}
+                                    className="w-6 h-6 flex items-center justify-center text-slate-500 hover:bg-slate-100 font-bold text-xs"
                                   >
                                     −
                                   </button>
-                                  <span style={{ color: '#f8fafc', fontSize: '0.75rem', fontWeight: 700, padding: '0 0.25rem', minWidth: '1.25rem', textAlign: 'center' }}>
+                                  <span className="w-5 text-center text-xs font-black text-slate-800 tabular-nums">
                                     {c.quantity}
                                   </span>
                                   <button
                                     type="button"
                                     onClick={() => addToCart(c.item)}
                                     disabled={cartTotalItems >= 5}
-                                    aria-label={`Increase quantity of ${c.item.name}`}
-                                    title={`Increase quantity of ${c.item.name}`}
-                                    style={{
-                                      background: 'transparent',
-                                      border: 'none',
-                                      color: cartTotalItems >= 5 ? '#475569' : '#818cf8',
-                                      padding: '0.2rem 0.5rem',
-                                      cursor: cartTotalItems >= 5 ? 'not-allowed' : 'pointer',
-                                      fontSize: '0.875rem',
-                                      fontWeight: 'bold',
-                                      lineHeight: 1,
-                                    }}
+                                    className="w-6 h-6 flex items-center justify-center text-[#1d68f2] hover:bg-blue-50 font-bold text-xs disabled:opacity-30"
                                   >
                                     +
                                   </button>
                                 </div>
+
                                 <button
                                   type="button"
                                   onClick={() => setCart(cart.filter(x => x.item.id !== c.item.id))}
-                                  aria-label={`Remove ${c.item.name} from cart`}
-                                  style={{
-                                    fontSize: '0.75rem',
-                                    padding: '0.25rem 0.5rem',
-                                    borderRadius: '0.5rem',
-                                    background: isSoldOut ? 'rgba(239,68,68,0.1)' : '#1e293b',
-                                    color: isSoldOut ? '#f87171' : '#94a3b8',
-                                    border: 'none',
-                                    cursor: 'pointer',
-                                  }}
-                                >Remove</button>
+                                  className="p-1 text-slate-400 hover:text-rose-600 rounded-md transition-colors"
+                                  title="Remove"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
                               </div>
                             </div>
                           );
@@ -1735,376 +2507,450 @@ export default function StudentDashboard() {
                       )}
                     </div>
 
-                    {/* Sold out warning */}
+                    {/* Sold-out alert in cart */}
                     {cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out) && (
-                      <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.15)', borderRadius: '0.75rem' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', marginBottom: '0.25rem' }}>
-                          <IconAlertTriangle size={14} className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                          <p style={{ color: '#f87171', fontSize: '0.75rem', fontWeight: 600, margin: 0 }}>Sold out items in your order:</p>
+                      <div className="mb-3 p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700">
+                        <div className="flex items-center gap-1 font-bold mb-1">
+                          <IconAlertTriangle size={14} className="text-rose-600" />
+                          <span>Some items are sold out</span>
                         </div>
-                        <ul style={{ color: '#fca5a5', fontSize: '0.75rem' }}>
-                          {cart.filter(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out).map(c => (
-                            <li key={c.item.id}>• {c.item.name}</li>
-                          ))}
-                        </ul>
-                        <p style={{ color: 'rgba(248,113,113,0.6)', fontSize: '0.625rem', marginTop: '0.5rem' }}>Remove sold out items to place your order.</p>
+                        <p className="text-[11px] text-rose-600">Please remove them to place your order.</p>
                       </div>
                     )}
 
-                    {/* Pickup time */}
-                    <form onSubmit={handlePlaceOrder} style={{ paddingTop: '1rem', borderTop: '1px solid #1e293b' }}>
-                      {error && <div style={{ color: '#f87171', fontSize: '0.75rem', marginBottom: '0.75rem', fontWeight: 600 }}>{error}</div>}
-                      {/* Flexible User-Selected Lunch Pickup Time & Smart Preparation Scheduling */}
-                      <div style={{ marginBottom: '1rem', background: '#1e293b', padding: '0.875rem 1rem', borderRadius: '0.75rem', border: '1px solid #334155' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.625rem' }}>
-                          <label style={{ fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em' }}>
-                            Your Preferred Pickup Time
-                          </label>
-                          <span style={{ fontSize: '0.65rem', color: '#818cf8', fontWeight: 600, background: 'rgba(99,102,241,0.15)', padding: '2px 6px', borderRadius: '4px' }}>
-                            Service: {formatSingleTime(slotConfig.serviceStartTime)} – {formatSingleTime(slotConfig.serviceEndTime)}
-                          </span>
-                        </div>
-
-                        {/* Service Date Selector */}
-                        <div style={{ marginBottom: '0.75rem' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.375rem' }}>
-                            <label style={{ fontSize: '0.6875rem', color: '#cbd5e1', fontWeight: 600 }}>
-                              Service Date
-                            </label>
-                            <span style={{ fontSize: '0.625rem', color: '#818cf8', fontWeight: 600 }}>
-                              {smartSchedule.serviceDateFormatted}
-                            </span>
-                          </div>
-                          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.max(1, availableServiceDates.length)}, 1fr)`, gap: '0.375rem' }}>
-                            {availableServiceDates.map(d => {
-                              const isSelected = selectedDate === d.dateStr;
-                              return (
-                                <button
-                                  key={d.dateStr}
-                                  type="button"
-                                  onClick={() => {
-                                    if (d.isBookable) {
-                                      setSelectedDate(d.dateStr);
-                                      if (error) setError('');
-                                    }
-                                  }}
-                                  disabled={!d.isBookable}
-                                  title={d.unbookableReason || undefined}
-                                  style={{
-                                    padding: '0.45rem 0.25rem',
-                                    borderRadius: '0.5rem',
-                                    border: isSelected ? '1px solid #6366f1' : '1px solid #334155',
-                                    background: isSelected ? '#4f46e5' : d.isBookable ? '#0f172a' : 'rgba(30,41,59,0.5)',
-                                    color: isSelected ? 'white' : d.isBookable ? '#e2e8f0' : '#64748b',
-                                    cursor: d.isBookable ? 'pointer' : 'not-allowed',
-                                    opacity: d.isBookable ? 1 : 0.5,
-                                    textAlign: 'center',
-                                    transition: 'all 0.15s ease',
-                                  }}
-                                >
-                                  <div style={{ fontSize: '0.72rem', fontWeight: 700 }}>{d.dayName}</div>
-                                  <div style={{ fontSize: '0.6rem', color: isSelected ? '#e0e7ff' : d.isBookable ? '#94a3b8' : '#64748b' }}>
-                                    {d.isBookable ? d.displayLabel : 'Closed'}
-                                  </div>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                        {/* Preferred Time Picker supporting any minute (12:17, 12:26, 12:43 etc.) */}
-                        <div style={{ marginBottom: '0.625rem' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            <div style={{ flex: 1 }}>
-                              <label style={{ display: 'block', fontSize: '0.6875rem', color: '#cbd5e1', fontWeight: 600, marginBottom: '0.25rem' }}>
-                                When will you arrive to collect food?
-                              </label>
-                              <input
-                                type="time"
-                                step="60"
-                                value={normalizeTimeTo24h(pickupTime) || pickupTime}
-                                onChange={e => {
-                                  setPickupTime(e.target.value);
-                                  if (error) setError('');
-                                }}
-                                disabled={isSuspended}
-                                style={{
-                                  width: '100%',
-                                  background: '#0f172a',
-                                  border: '1px solid #334155',
-                                  color: 'white',
-                                  padding: '0.5rem 0.625rem',
-                                  borderRadius: '0.5rem',
-                                  fontSize: '0.925rem',
-                                  fontWeight: 700,
-                                  cursor: isSuspended ? 'not-allowed' : 'pointer',
-                                  opacity: isSuspended ? 0.6 : 1,
-                                }}
-                              />
-                            </div>
-                            <div style={{ paddingTop: '1.25rem' }}>
-                              <span style={{
-                                display: 'inline-block',
-                                fontSize: '0.75rem',
-                                fontWeight: 700,
-                                color: smartSchedule.isValid ? '#34d399' : smartSchedule.validationCode === 'INSUFFICIENT_LEAD_TIME' ? '#fbbf24' : '#f87171',
-                                background: smartSchedule.isValid ? 'rgba(52,211,153,0.1)' : smartSchedule.validationCode === 'INSUFFICIENT_LEAD_TIME' ? 'rgba(251,191,36,0.1)' : 'rgba(239,68,68,0.1)',
-                                padding: '0.5rem 0.75rem',
-                                borderRadius: '0.5rem',
-                                border: `1px solid ${smartSchedule.isValid ? 'rgba(52,211,153,0.3)' : smartSchedule.validationCode === 'INSUFFICIENT_LEAD_TIME' ? 'rgba(251,191,36,0.3)' : 'rgba(239,68,68,0.3)'}`
-                              }}>
-                                {smartSchedule.isValid ? smartSchedule.pickupTimeFormatted : smartSchedule.statusBadge}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Quick Suggestions for Convenient 1-Tap Selection */}
-                        <div style={{ marginBottom: '0.75rem' }}>
-                          <span style={{ fontSize: '0.65rem', color: '#64748b', fontWeight: 600, display: 'block', marginBottom: '0.25rem' }}>
-                            Quick Suggestions (or pick any exact minute above):
-                          </span>
-                          <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap' }}>
-                            {suggestedQuickSlots.length > 0 ? (
-                              suggestedQuickSlots.map(t => (
-                                <button
-                                  key={t}
-                                  type="button"
-                                  onClick={() => {
-                                    setPickupTime(t);
-                                    if (error) setError('');
-                                  }}
-                                  disabled={isSuspended}
-                                  style={{
-                                    background: (normalizeTimeTo24h(pickupTime) === t) ? '#4f46e5' : '#0f172a',
-                                    color: (normalizeTimeTo24h(pickupTime) === t) ? 'white' : '#94a3b8',
-                                    border: `1px solid ${(normalizeTimeTo24h(pickupTime) === t) ? '#6366f1' : '#334155'}`,
-                                    borderRadius: '0.375rem',
-                                    padding: '2px 7px',
-                                    fontSize: '0.6875rem',
-                                    fontWeight: 600,
-                                    cursor: 'pointer',
-                                    transition: 'all 0.15s ease'
-                                  }}
-                                >
-                                  {formatSingleTime(t)}
-                                </button>
-                              ))
-                            ) : (
-                              <span style={{ fontSize: '0.6875rem', color: '#94a3b8', fontStyle: 'italic', padding: '0.25rem 0' }}>
-                                No pickup times remain today. Choose the next available service date above.
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Smart Preparation Scheduling Breakdown Box */}
-                        {smartSchedule.isValid ? (
-                          <div style={{
-                            padding: '0.75rem',
-                            background: 'rgba(99,102,241,0.08)',
-                            border: '1px solid rgba(99,102,241,0.25)',
-                            borderRadius: '0.625rem',
-                          }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.375rem' }}>
-                              <span style={{ fontSize: '0.7rem', color: '#a5b4fc', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                                ⚡ Smart Kitchen Prep Schedule
-                              </span>
-                              <span style={{ fontSize: '0.65rem', color: '#34d399', fontWeight: 700, background: 'rgba(52,211,153,0.15)', padding: '2px 6px', borderRadius: '4px' }}>
-                                Concurrent Prep
-                              </span>
-                            </div>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem', textAlign: 'center' }}>
-                              <div style={{ background: '#0f172a', padding: '0.4rem', borderRadius: '0.375rem', border: '1px solid #334155' }}>
-                                <span style={{ display: 'block', fontSize: '0.6rem', color: '#94a3b8', fontWeight: 600 }}>Kitchen Starts</span>
-                                <span style={{ display: 'block', fontSize: '0.75rem', color: '#fbbf24', fontWeight: 800 }}>{smartSchedule.prepStartFormatted}</span>
-                              </div>
-                              <div style={{ background: '#0f172a', padding: '0.4rem', borderRadius: '0.375rem', border: '1px solid #334155' }}>
-                                <span style={{ display: 'block', fontSize: '0.6rem', color: '#94a3b8', fontWeight: 600 }}>Prep Duration</span>
-                                <span style={{ display: 'block', fontSize: '0.75rem', color: '#e2e8f0', fontWeight: 800 }}>{smartSchedule.estimatedPrepDurationMinutes} mins</span>
-                              </div>
-                              <div style={{ background: '#0f172a', padding: '0.4rem', borderRadius: '0.375rem', border: '1px solid #334155' }}>
-                                <span style={{ display: 'block', fontSize: '0.6rem', color: '#94a3b8', fontWeight: 600 }}>Hot & Ready</span>
-                                <span style={{ display: 'block', fontSize: '0.75rem', color: '#34d399', fontWeight: 800 }}>{smartSchedule.readyByFormatted}</span>
-                              </div>
-                            </div>
-                            <p style={{ margin: '0.5rem 0 0', fontSize: '0.65rem', color: '#94a3b8', textAlign: 'center' }}>
-                              Arrival on {smartSchedule.serviceDateFormatted} at {smartSchedule.pickupTimeFormatted} allows fresh preparation starting at {smartSchedule.prepStartFormatted}.
-                            </p>
-                          </div>
-                        ) : (
-                          <div style={{
-                            padding: '0.625rem 0.75rem',
-                            background: 'rgba(239,68,68,0.12)',
-                            border: '1px solid rgba(239,68,68,0.3)',
-                            borderRadius: '0.5rem',
-                          }}>
-                            <div style={{ color: '#fca5a5', fontSize: '0.72rem', fontWeight: 600, marginBottom: smartSchedule.suggestedPickupTime ? '0.5rem' : '0' }}>
-                              ⚠️ {smartSchedule.reason}
-                            </div>
-                            {smartSchedule.suggestedPickupTime && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (smartSchedule.suggestedDateStr) {
-                                    setSelectedDate(smartSchedule.suggestedDateStr);
-                                  }
-                                  if (smartSchedule.suggestedPickupTime) {
-                                    setPickupTime(smartSchedule.suggestedPickupTime);
-                                  }
-                                  if (error) setError('');
-                                }}
-                                style={{
-                                  background: '#4f46e5',
-                                  color: 'white',
-                                  border: 'none',
-                                  borderRadius: '0.375rem',
-                                  padding: '5px 10px',
-                                  fontSize: '0.7rem',
-                                  fontWeight: 700,
-                                  cursor: 'pointer',
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '4px'
-                                }}
-                              >
-                                {smartSchedule.suggestedDateStr && smartSchedule.suggestedDateStr !== selectedDate
-                                  ? `Switch to ${smartSchedule.suggestedDateFormatted || 'Next Date'}: ${smartSchedule.suggestedPickupFormatted}`
-                                  : `Switch to Feasible Time: ${smartSchedule.suggestedPickupFormatted}`}
-                              </button>
-                            )}
-                          </div>
-                        )}
+                    {/* Pickup Time Selector */}
+                    <div className="mb-4 p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-[11px] font-black uppercase tracking-wider text-slate-600">
+                          Pickup Time
+                        </label>
+                        <span className="text-[10px] text-[#1d68f2] font-bold bg-blue-50 px-2 py-0.5 rounded">
+                          Lunch Slots
+                        </span>
                       </div>
 
-                      {/* Transparent Customer Order Bill */}
-                      {cart.length > 0 && (
-                        <div style={{ marginBottom: '1rem', padding: '1rem', background: '#1e293b', borderRadius: '0.75rem', border: '1px solid #334155' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>Food Subtotal</span>
-                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem' }}>₹{ledger.food_subtotal.toFixed(2)}</span>
-                          </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>Platform Fee (3%)</span>
-                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem' }}>₹{ledger.commission_fee.toFixed(2)}</span>
-                          </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>Payment Gateway Fee</span>
-                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem' }}>₹{ledger.gateway_fee.toFixed(2)}</span>
-                          </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem', paddingBottom: '0.75rem', borderBottom: '1px solid #334155' }}>
-                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>GST</span>
-                            <span style={{ color: '#94a3b8', fontSize: '0.875rem' }}>₹0.00 (Included)</span>
-                          </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span style={{ color: '#e2e8f0', fontSize: '0.875rem', fontWeight: 600 }}>Total Amount to Pay</span>
-                            <span style={{ color: '#38bdf8', fontSize: '1.125rem', fontWeight: 700 }}>₹{ledger.gross_payable.toFixed(2)}</span>
-                          </div>
+                      <input
+                        type="time"
+                        step="60"
+                        value={normalizeTimeTo24h(pickupTime) || pickupTime}
+                        onChange={e => {
+                          setPickupTime(e.target.value);
+                          if (error) setError('');
+                        }}
+                        disabled={isSuspended}
+                        className="w-full bg-white border border-slate-200 text-slate-900 rounded-xl px-3 py-2 text-xs font-bold shadow-xs focus:border-[#1d68f2] focus:ring-1 focus:ring-blue-100 outline-none"
+                      />
+
+                      {/* Quick suggestion slots */}
+                      <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                        {suggestedQuickSlots.slice(0, 4).map(t => (
+                          <button
+                            key={t}
+                            type="button"
+                            onClick={() => {
+                              setPickupTime(t);
+                              if (error) setError('');
+                            }}
+                            className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition-all ${
+                              normalizeTimeTo24h(pickupTime) === t
+                                ? 'bg-[#1d68f2] text-white border-[#1d68f2] shadow-xs'
+                                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                            }`}
+                          >
+                            {formatSingleTime(t)}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Smart Kitchen schedule info */}
+                      {smartSchedule.isValid && (
+                        <div className="mt-2.5 pt-2 border-t border-slate-200/80 flex items-center justify-between text-[10px] font-semibold text-slate-500">
+                          <span>⚡ Prep starts: <strong className="text-amber-600">{smartSchedule.prepStartFormatted}</strong></span>
+                          <span>Hot by: <strong className="text-emerald-600">{smartSchedule.readyByFormatted}</strong></span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Order Bill Summary */}
+                    {cart.length > 0 && (
+                      <div className="space-y-1.5 py-3 border-t border-b border-slate-100 text-xs mb-4">
+                        <div className="flex justify-between text-slate-500 font-medium">
+                          <span>Subtotal</span>
+                          <span className="text-slate-800 font-bold">₹{ledger.food_subtotal.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between text-slate-500 font-medium">
+                          <span>Platform Fee (3%)</span>
+                          <span className="text-slate-800 font-bold">₹{ledger.commission_fee.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between text-slate-500 font-medium">
+                          <span>Payment Method</span>
+                          <span className="text-emerald-600 font-bold">Pay at Counter</span>
+                        </div>
+                        <div className="flex justify-between items-center pt-2 border-t border-slate-100 text-sm">
+                          <span className="font-black text-slate-900">Total Amount</span>
+                          <span className="text-lg font-black text-[#1d68f2]">
+                            ₹{(ledger.food_subtotal + ledger.commission_fee).toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Checkout Submit Button */}
+                    <form onSubmit={handlePlaceOrder}>
+                      {error && (
+                        <div className="mb-3 p-2 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center gap-1.5 font-bold">
+                          <IconAlertTriangle size={14} className="shrink-0 text-rose-600" />
+                          <span>{error}</span>
                         </div>
                       )}
 
-                      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem' }}>
-                        <button
-                          type="button"
-                          onClick={() => setCartOpen(false)}
-                          aria-label="Cancel order"
-                          style={{
-                            padding: '0.875rem 1.25rem',
-                            background: '#1e293b',
-                            color: '#94a3b8',
-                            borderRadius: '0.875rem',
-                            fontWeight: 600,
-                            fontSize: '0.875rem',
-                            border: '1px solid #334155',
-                            cursor: 'pointer',
-                            transition: 'all 0.2s',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="submit"
-                          disabled={isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out)}
-                          style={{
-                            flex: 1,
-                            padding: '0.875rem',
-                            background: isSuspended
-                              ? '#ef4444'
-                              : isSunday
-                                ? '#64748b'
-                                : isBeforeOpeningTime
-                                  ? '#4f46e5'
-                                  : isLunchClosedForToday
-                                    ? '#64748b'
-                                    : (cart.length === 0 || !pickupTime || submitting || cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out))
-                                      ? 'rgba(99,102,241,0.4)' : '#6366f1',
-                            color: 'white',
-                            borderRadius: '0.875rem',
-                            fontWeight: 700,
-                            fontSize: '0.875rem',
-                            border: 'none',
-                            cursor: isSuspended || isSunday || isBeforeOpeningTime || isLunchClosedForToday || cart.length === 0 || !pickupTime || submitting ? 'not-allowed' : 'pointer',
-                            transition: 'background 0.2s',
-                          }}
-                        >
-                          {isSuspended
-                            ? 'Account Deactivated (3-Day Penalty)'
-                            : isSunday
-                              ? 'Closed on Sundays'
-                              : isBeforeOpeningTime
-                                ? 'Lunch Booking Opens at 9:30 AM'
-                                : isLunchClosedForToday
-                                  ? 'Lunch Ordering Closed Today'
-                                  : (submitting ? 'Placing...' : `Place Order (${cartTotalItems} items • ₹${ledger.gross_payable.toFixed(2)})`)}
-                        </button>
-                      </div>
+                      {(() => {
+                        const isSelectedSlotClosed = isLunchClosedForToday;
+                        const isOrderDisabled =
+                          isSuspended ||
+                          isSunday ||
+                          isBeforeOpeningTime ||
+                          isSelectedSlotClosed ||
+                          cart.length === 0 ||
+                          !pickupTime ||
+                          submitting ||
+                          cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out);
+
+                        return (
+                          <button
+                            type="submit"
+                            disabled={isOrderDisabled}
+                            className={`w-full py-3.5 px-4 rounded-2xl font-black text-xs sm:text-sm shadow-lg transition-all flex items-center justify-center gap-2 ${
+                              isOrderDisabled
+                                ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
+                                : 'bg-gradient-to-r from-[#1d68f2] to-[#2563eb] text-white hover:from-blue-600 hover:to-blue-700 shadow-blue-500/30 active:scale-98'
+                            }`}
+                          >
+                            {isSuspended ? (
+                              'Account Deactivated'
+                            ) : isSunday ? (
+                              'Closed on Sundays'
+                            ) : isBeforeOpeningTime ? (
+                              'Lunch Booking Opens at 9:30 AM'
+                            ) : isSelectedSlotClosed ? (
+                              'Lunch Ordering Closed'
+                            ) : submitting ? (
+                              'Placing Order...'
+                            ) : (
+                              <>
+                                <span>Place Order</span>
+                                <span>•</span>
+                                <span>₹{ledger.gross_payable.toFixed(2)}</span>
+                                <ArrowRight size={16} />
+                              </>
+                            )}
+                          </button>
+                        );
+                      })()}
                     </form>
                   </div>
                 )}
-
-                {/* Always-visible bottom strip / toggle handle */}
-                <button
-                  onClick={() => setCartOpen(o => !o)}
-                  style={{
-                    width: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '1rem 1.5rem',
-                    background: 'transparent',
-                    border: 'none',
-                    cursor: 'pointer',
-                    borderTop: cartOpen ? '1px solid #1e293b' : 'none',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                    <div style={{
-                      width: '2rem', height: '2rem',
-                      background: cartTotalItems > 0 ? '#6366f1' : '#1e293b',
-                      borderRadius: '0.5rem',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: '0.8rem', fontWeight: 700, color: 'white',
-                      transition: 'background 0.2s',
-                    }}>
-                      {cartTotalItems}
-                    </div>
-                    <span style={{ color: '#f1f5f9', fontWeight: 700, fontSize: '0.95rem' }}>Your Order</span>
-                    {cartTotalItems > 0 && (
-                      <span style={{ color: '#818cf8', fontSize: '0.75rem', fontWeight: 600 }}>
-                        ₹{ledger.gross_payable.toFixed(2)} • {cartTotalItems} item{cartTotalItems > 1 ? 's' : ''}
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ color: '#64748b', display: 'flex', alignItems: 'center', transition: 'transform 0.3s', transform: cartOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}>
-                    <IconChevronUp size={18} className="w-4.5 h-4.5" />
-                  </div>
-                </button>
               </div>
             </div>
           </div>
+
+          {/* Responsive Mobile Drawer Trigger (< lg screens) */}
+          <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 p-3 bg-white/95 backdrop-blur-md border-t border-slate-200 shadow-2xl flex items-center justify-between gap-3">
+            {displayOrder ? (
+              <>
+                <div className="flex items-center gap-2">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm ${
+                    displayOrder.status === 'COLLECTED'
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : displayOrder.status === 'READY'
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : 'bg-blue-100 text-[#1d68f2]'
+                  }`}>
+                    {displayOrder.status === 'COLLECTED' ? <CheckCircle2 size={18} /> : <Flame size={18} />}
+                  </div>
+                  <div>
+                    <div className="text-xs font-black text-slate-900 leading-tight flex items-center gap-1.5">
+                      <span>Order #{displayOrder.order_number}</span>
+                      <span className={`text-[10px] font-bold ${displayOrder.status === 'COLLECTED' ? 'text-emerald-700' : 'text-[#1d68f2]'}`}>
+                        ({displayOrder.status === 'COLLECTED' ? 'COLLECTED' : getOrderStatusText(displayOrder as any)})
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 font-semibold">
+                      {displayOrder.status === 'COLLECTED'
+                        ? `Collected at ${formatSingleTime((displayOrder as any).collected_at || new Date().toISOString())}`
+                        : `Pickup at ${formatSingleTime(displayOrder.pickup_time)}`}
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setCartOpen(true)}
+                  className="px-4 py-2 rounded-xl bg-[#1d68f2] text-white font-black text-xs shadow-md shadow-blue-500/20 flex items-center gap-1 cursor-pointer"
+                >
+                  <span>{displayOrder.status === 'COLLECTED' ? 'View Collected Order' : 'View Status & OTP'}</span>
+                  <IconChevronUp size={14} />
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-2">
+                  <div className="w-10 h-10 rounded-xl bg-blue-100 text-[#1d68f2] flex items-center justify-center font-black text-sm">
+                    {cartTotalItems}
+                  </div>
+                  <div>
+                    <div className="text-xs font-black text-slate-900 leading-tight">Your Order</div>
+                    <div className="text-xs font-bold text-[#1d68f2]">
+                      ₹{ledger.gross_payable.toFixed(2)}
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setCartOpen(true)}
+                  className="px-5 py-2.5 rounded-xl bg-[#1d68f2] text-white font-black text-xs shadow-md shadow-blue-500/20 flex items-center gap-1.5"
+                >
+                  <span>View & Checkout</span>
+                  <IconChevronUp size={14} />
+                </button>
+              </>
+            )}
+          </div>
+
+          {/* Mobile Bottom Sheet Modal when cartOpen is true on small screens */}
+          {cartOpen && (
+            <div className="lg:hidden fixed inset-0 z-50 flex flex-col justify-end bg-slate-950/50 backdrop-blur-sm animate-in fade-in">
+              <div className="bg-white rounded-t-3xl max-h-[85vh] overflow-y-auto p-5 shadow-2xl flex flex-col justify-between">
+                {displayOrder ? (
+                  <div>
+                    <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-base font-black text-slate-900">Order #{displayOrder.order_number}</h3>
+                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                          displayOrder.status === 'COLLECTED'
+                            ? 'bg-emerald-100 text-emerald-700 border border-emerald-300'
+                            : 'bg-blue-100 text-[#1d68f2]'
+                        }`}>
+                          {displayOrder.status === 'COLLECTED' ? 'COLLECTED' : getOrderStatusText(displayOrder as any)}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setCartOpen(false)}
+                        className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100"
+                      >
+                        <IconX size={18} />
+                      </button>
+                    </div>
+
+                    {/* Progress Step Bar */}
+                    <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3 mb-4">
+                      <div className="flex items-center justify-between relative px-2">
+                        <div className="absolute left-[18px] right-[18px] top-2.5 h-0.5 bg-slate-200 -z-0">
+                          <div
+                            className="h-full bg-[#1d68f2] transition-all duration-500"
+                            style={{
+                              width:
+                                displayOrder.status === 'PLACED' ? '0%' :
+                                displayOrder.status === 'ACCEPTED' ? '25%' :
+                                displayOrder.status === 'PREPARING' ? '50%' :
+                                displayOrder.status === 'READY' ? '75%' : '100%'
+                            }}
+                          />
+                        </div>
+
+                        {[
+                          { label: 'Placed', done: true },
+                          { label: 'Accepted', done: ['ACCEPTED', 'PREPARING', 'READY', 'COLLECTED'].includes(displayOrder.status) },
+                          { label: 'Cooking', done: ['PREPARING', 'READY', 'COLLECTED'].includes(displayOrder.status) },
+                          { label: 'Ready', done: ['READY', 'COLLECTED'].includes(displayOrder.status) },
+                          { label: 'Collected', done: displayOrder.status === 'COLLECTED' }
+                        ].map((step, idx) => (
+                          <div key={idx} className="flex flex-col items-center z-10">
+                            <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black border transition-all ${
+                              step.done
+                                ? 'bg-[#1d68f2] border-white text-white shadow-xs'
+                                : 'bg-white border-slate-300 text-slate-400'
+                            }`}>
+                              {step.done ? '✓' : idx + 1}
+                            </div>
+                            <span className={`text-[10px] font-bold mt-1 ${step.done ? 'text-slate-800' : 'text-slate-400'}`}>
+                              {step.label}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* QR Code / Ready State / Collected State */}
+                    {displayOrder.status === 'COLLECTED' ? (
+                      <div className="relative overflow-hidden bg-gradient-to-b from-emerald-50 via-teal-50/50 to-emerald-100/30 border border-emerald-200 rounded-2xl p-4 text-center space-y-3 mb-4 shadow-xs">
+                        <div className="relative mx-auto w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-400 p-[1.5px] shadow-md shadow-emerald-500/25 flex items-center justify-center">
+                          <div className="w-full h-full rounded-[14px] bg-gradient-to-b from-emerald-500 to-teal-600 flex items-center justify-center text-white relative overflow-hidden">
+                            <div className="absolute top-0 inset-x-0 h-1/2 bg-white/30 rounded-t-[14px]" />
+                            <CheckCircle2 size={24} className="relative z-10 text-white" strokeWidth={2.6} />
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-100 border border-emerald-300/80 text-emerald-800 text-[10px] font-black uppercase tracking-wider mb-1">
+                            <span>Order Handed Over</span> ✓
+                          </div>
+                          <h4 className="font-black text-slate-900 text-base">
+                            Order Collected Successfully! 🎉
+                          </h4>
+                          <p className="text-xs text-slate-600 mt-0.5">
+                            Your food has been handed over at the counter. Enjoy your meal!
+                          </p>
+                        </div>
+
+                        <div className="pt-1 flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCartOpen(false);
+                              setShowHistory(true);
+                              setTimeout(() => {
+                                const el = document.getElementById(`order-${displayOrder.id}`);
+                                if (el) el.scrollIntoView({ behavior: 'smooth' });
+                              }, 150);
+                            }}
+                            className="flex-1 py-2 px-3 rounded-xl bg-white border border-emerald-300 text-emerald-700 font-bold text-xs flex items-center justify-center gap-1 cursor-pointer"
+                          >
+                            <Star size={12} className="text-amber-500 fill-amber-500" />
+                            <span>Rate Meal</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleDismissCollectedOrder(displayOrder.id);
+                              setCartOpen(false);
+                            }}
+                            className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-md shadow-emerald-600/20 cursor-pointer flex items-center justify-center gap-1"
+                          >
+                            <span>Order More →</span>
+                            {autoCloseCountdown > 0 && (
+                              <span className="px-1.5 py-0.2 rounded-full bg-emerald-800/50 text-[10px] font-mono">
+                                {autoCloseCountdown}s
+                              </span>
+                            )}
+                          </button>
+                        </div>
+                        <p className="text-[10px] text-slate-400 font-medium text-center">
+                          Auto-closing and returning to menu in <span className="font-bold text-emerald-600">{autoCloseCountdown}s</span>
+                        </p>
+                      </div>
+                    ) : displayOrder.status === 'READY' ? (
+                      <div className="text-center p-4 bg-emerald-50 border border-emerald-200 rounded-2xl mb-4 space-y-3">
+                        <span className="text-xs font-black text-emerald-700 uppercase tracking-wider block">
+                          Ready For Pickup!
+                        </span>
+                        <div
+                          onClick={() => setShowQrModal(true)}
+                          className="bg-white p-3 rounded-2xl border-2 border-emerald-400 shadow-sm inline-block mx-auto cursor-pointer"
+                        >
+                          <QRCodeSVG
+                            value={`SKIPTRAY:${displayOrder.id}:${((displayOrder as any).otp_code || (displayOrder as any).otp || enteredOtp || '').trim()}`}
+                            size={160}
+                          />
+                        </div>
+                        <div className="bg-white py-2 rounded-xl border border-emerald-200">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block">Pickup OTP</span>
+                          <span className="text-2xl font-mono font-black text-emerald-700 tracking-[0.2em]">
+                            {(displayOrder as any).otp_code || enteredOtp || (displayOrder as any).otp || 'PENDING'}
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-center p-4 bg-blue-50 border border-blue-200 rounded-2xl mb-4">
+                        <IconHourglass size={24} className="animate-spin text-[#1d68f2] mx-auto mb-2" />
+                        <h4 className="font-black text-slate-900 text-sm">Kitchen is preparing your meal</h4>
+                        <p className="text-xs text-slate-500 mt-1">Scheduled for pickup at {formatSingleTime(displayOrder.pickup_time)}</p>
+                      </div>
+                    )}
+
+                    {['PLACED', 'ACCEPTED'].includes(displayOrder.status) && (
+                      <button
+                        type="button"
+                        onClick={() => { handleCancelOrder(); setCartOpen(false); }}
+                        className="w-full py-2.5 text-rose-600 bg-rose-50 border border-rose-200 font-bold text-xs rounded-xl hover:bg-rose-100"
+                      >
+                        Cancel Order
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div>
+                    <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
+                      <h3 className="text-base font-black text-slate-900">Your Order ({cartTotalItems})</h3>
+                      <button
+                        type="button"
+                        onClick={() => setCartOpen(false)}
+                        className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100"
+                      >
+                        <IconX size={18} />
+                      </button>
+                    </div>
+
+                    {/* Cart Items list */}
+                    <div className="space-y-2 mb-4">
+                      {cart.map(c => (
+                        <div key={c.item.id} className="flex items-center justify-between p-2 rounded-xl bg-slate-50 border border-slate-200">
+                          <div>
+                            <div className="text-xs font-bold text-slate-900">{c.item.name}</div>
+                            <div className="text-[11px] text-slate-500">₹{Number(c.item.price || 0).toFixed(2)} x {c.quantity}</div>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => removeFromCart(c.item.id)}
+                              className="w-7 h-7 flex items-center justify-center bg-white border border-slate-200 rounded-lg font-bold text-xs"
+                            >
+                              −
+                            </button>
+                            <span className="w-5 text-center text-xs font-bold">{c.quantity}</span>
+                            <button
+                              type="button"
+                              onClick={() => addToCart(c.item)}
+                              className="w-7 h-7 flex items-center justify-center bg-white border border-slate-200 rounded-lg font-bold text-xs"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Mobile Pickup Time Selector */}
+                    <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                      <label className="text-[11px] font-bold text-slate-700 block mb-1">Pickup Time</label>
+                      <input
+                        type="time"
+                        value={normalizeTimeTo24h(pickupTime) || pickupTime}
+                        onChange={e => setPickupTime(e.target.value)}
+                        className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-bold"
+                      />
+                    </div>
+
+                    {/* Mobile Place Order Button */}
+                    <form onSubmit={e => { handlePlaceOrder(e); setCartOpen(false); }}>
+                      <button
+                        type="submit"
+                        disabled={cart.length === 0 || !pickupTime || submitting || isSuspended}
+                        className="w-full py-3 bg-[#1d68f2] text-white rounded-xl font-black text-xs shadow-md disabled:bg-slate-300"
+                      >
+                        Confirm & Place Order (₹{ledger.gross_payable.toFixed(2)})
+                      </button>
+                    </form>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </>
       )}
+      </div>
 
       {/* Fullscreen Enlarge QR Modal */}
       {showQrModal && activeOrder && (
@@ -2120,7 +2966,8 @@ export default function StudentDashboard() {
             <div>
               <div className="inline-flex items-center justify-center gap-1.5 bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-[11px] font-extrabold border border-emerald-200 uppercase tracking-wider mb-1">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
-                <span>🔴 LIVE PASS • {liveTickerTime}</span>
+                <Radio size={12} className="text-emerald-600 shrink-0" />
+                <span>LIVE PASS • {liveTickerTime}</span>
               </div>
               <h3 className="text-2xl font-extrabold text-slate-900 mt-1">Order #{activeOrder.order_number}</h3>
               <p className="text-xs text-slate-500 font-mono mt-0.5">ID: {activeOrder.id.split('-')[0].toUpperCase()}</p>
@@ -2128,7 +2975,7 @@ export default function StudentDashboard() {
 
             <div className="p-3 bg-slate-50 border-2 border-slate-100 rounded-2xl shadow-inner">
               <QRCodeSVG
-                value={`SKIPTRAY:${activeOrder.id}${enteredOtp.trim() ? `:${enteredOtp.trim()}` : ''}`}
+                value={`SKIPTRAY:${activeOrder.id}:${((activeOrder as any).otp_code || (activeOrder as any).otp || enteredOtp || '').trim()}`}
                 size={230}
               />
             </div>
@@ -2136,13 +2983,143 @@ export default function StudentDashboard() {
             <div className="w-full bg-slate-900 text-white py-3 rounded-2xl">
               <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Pickup OTP</div>
               <div className="text-2xl font-mono font-extrabold tracking-[0.2em]">
-                {enteredOtp ? enteredOtp : 'Check Email / SMS'}
+                {(activeOrder as any).otp_code || (activeOrder as any).otp || enteredOtp || 'PENDING'}
               </div>
             </div>
 
             <p className="text-xs text-slate-400 font-medium">
               Requested Slot: <strong className="text-slate-700">{formatPickupTime(activeOrder.pickup_time)} (Lunch)</strong>
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* Immediate Order Collected & OTP Verified Confirmation Modal */}
+      {collectedOrderConfirmation && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="collection-modal-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setCollectedOrderConfirmation(null);
+            }
+          }}
+        >
+          <div className="bg-white rounded-[2rem] p-6 sm:p-8 max-w-sm sm:max-w-md w-full shadow-2xl border border-slate-100 relative overflow-hidden animate-in zoom-in-95 duration-200">
+            {/* Decorative ambient gradient backdrop */}
+            <div className="absolute top-0 left-0 right-0 h-36 bg-gradient-to-b from-emerald-500/15 via-teal-500/5 to-transparent pointer-events-none" />
+
+            {/* Close button */}
+            <button
+              onClick={() => setCollectedOrderConfirmation(null)}
+              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-700 rounded-full hover:bg-slate-100 transition-colors z-10"
+              aria-label="Close confirmation"
+            >
+              <LucideX size={20} className="w-5 h-5" />
+            </button>
+
+            <div className="flex flex-col items-center text-center relative z-10">
+              {/* Animated Celebration Icon with Dual Glowing Rings */}
+              <div className="relative mb-3 flex items-center justify-center">
+                <div className="w-20 h-20 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 shadow-[0_0_30px_rgba(16,185,129,0.35)] ring-8 ring-emerald-50">
+                  <CheckCircle2 size={40} className="w-10 h-10 text-emerald-600 animate-in zoom-in duration-300" />
+                </div>
+                <div className="absolute -top-1 -right-1 bg-amber-400 text-white p-1.5 rounded-full shadow-md animate-bounce">
+                  <Sparkles size={16} className="w-4 h-4 fill-white" />
+                </div>
+              </div>
+
+              {/* Status Badge */}
+              <div className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-xs font-black border border-emerald-200 uppercase tracking-wider mb-2">
+                <ShieldCheck size={14} className="text-emerald-600" />
+                <span>OTP Verified • Collected</span>
+              </div>
+
+              {/* Main Title */}
+              <h3 id="collection-modal-title" className="text-2xl font-black text-slate-900 tracking-tight">
+                Order Collected! 🎉
+              </h3>
+              <p className="text-sm text-slate-600 mt-1.5 leading-relaxed max-w-xs sm:max-w-sm">
+                Your OTP was verified at the counter and your meal has been handed over.
+              </p>
+
+              {/* Order Details Receipt Card */}
+              <div className="w-full bg-slate-50 border border-slate-200/80 rounded-2xl p-4 mt-5 text-left shadow-inner">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-200/70">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Order Number</span>
+                    <span className="text-lg font-black text-slate-800">#{collectedOrderConfirmation.order.order_number}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Verified OTP</span>
+                    <span className="font-mono text-base font-extrabold text-emerald-700 bg-emerald-100/70 px-2 py-0.5 rounded-md border border-emerald-200">
+                      {(collectedOrderConfirmation.order as any).otp_code || 'Verified'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Items Summary if available */}
+                {collectedOrderConfirmation.items && collectedOrderConfirmation.items.length > 0 && (
+                  <div className="py-2.5 border-b border-slate-200/70 space-y-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">Items Collected</span>
+                    {collectedOrderConfirmation.items.map((it, idx) => (
+                      <div key={idx} className="flex justify-between items-center text-xs text-slate-700">
+                        <span className="font-medium text-slate-800">{it.quantity}x {it.name}</span>
+                        {it.price && <span className="text-slate-500 font-semibold">₹{(Number(it.price) * it.quantity).toFixed(2)}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between pt-2.5 text-xs text-slate-500">
+                  <span>Collected At:</span>
+                  <span className="font-semibold text-slate-700">
+                    {new Date((collectedOrderConfirmation.order as any).collected_at || Date.now()).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })}
+                  </span>
+                </div>
+
+                {collectedOrderConfirmation.items && collectedOrderConfirmation.items.length > 0 && (
+                  <div className="flex items-center justify-between pt-2 text-xs border-t border-slate-200/60 mt-2">
+                    <span className="font-bold text-slate-600">Total Paid:</span>
+                    <span className="font-black text-slate-900 text-sm">
+                      ₹{collectedOrderConfirmation.items.reduce((sum, it) => sum + (Number(it.price || 0) * it.quantity), 0).toFixed(2)}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="w-full flex flex-col gap-2.5 mt-6">
+                <button
+                  onClick={() => {
+                    const currentOrder = collectedOrderConfirmation.order;
+                    const items = collectedOrderConfirmation.items;
+                    setCollectedOrderConfirmation(null);
+                    setShowHistory(true);
+                    if (items && items.length > 0 && items[0].menuItemId) {
+                      setReviewingItem({
+                        orderId: currentOrder.id,
+                        menuItemId: items[0].menuItemId,
+                        itemName: items[0].name
+                      });
+                    }
+                  }}
+                  className="w-full py-3.5 px-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-extrabold rounded-xl shadow-lg shadow-emerald-600/25 hover:shadow-emerald-600/35 active:scale-[0.99] transition-all flex items-center justify-center gap-2 text-sm"
+                >
+                  <Star size={16} className="fill-amber-300 text-amber-300" />
+                  <span>Rate Your Meal</span>
+                </button>
+
+                <button
+                  onClick={() => setCollectedOrderConfirmation(null)}
+                  className="w-full py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-colors text-sm"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

@@ -15,7 +15,7 @@ import {
 // Format helper for timestamps (both relative and exact time)
 function formatNotificationTime(timestamp: number): { exact: string; relative: string } {
   const date = new Date(timestamp);
-  const exact = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const exact = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
 
   const diffSec = Math.floor((Date.now() - timestamp) / 1000);
   let relative = 'Just now';
@@ -168,6 +168,11 @@ export function NotificationBell() {
         return {
           icon: <Sparkles size={16} className="text-emerald-600 shrink-0" />,
           bg: 'bg-emerald-50 text-emerald-700 border-emerald-300',
+        };
+      case 'COLLECTED':
+        return {
+          icon: <CheckCircle2 size={16} className="text-teal-600 shrink-0" />,
+          bg: 'bg-teal-50 text-teal-700 border-teal-300',
         };
       default:
         return {

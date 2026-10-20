@@ -2,60 +2,101 @@
 
 :root {
   color-scheme: light;
+  --theme-navy: #0b2149;
+  --theme-navy-dark: #071733;
+  --theme-navy-surface: #102d62;
+  --theme-blue-active: #1d68f2;
+  --theme-blue-hover: #1656cb;
+  --theme-bg-canvas: #f0f4f9;
 }
 
 html {
   scroll-behavior: smooth;
+  background-color: #f0f4f9;
+}
+
+body {
+  background-color: #f0f4f9;
+  color: #1e293b;
 }
 
 button,
 a,
 select,
 [role="button"] {
-  transition: box-shadow 0.2s ease, outline-color 0.2s ease;
+  transition: box-shadow 0.2s ease, outline-color 0.2s ease, background-color 0.15s ease;
+}
+
+/* High-visibility accessible focus rings for keyboard navigation */
+:focus-visible {
+  outline: 2px solid #1d68f2 !important;
+  outline-offset: 2px !important;
+  box-shadow: 0 0 0 4px rgba(29, 104, 242, 0.25) !important;
 }
 
 button:focus-visible,
 a:focus-visible,
 select:focus-visible,
-[role="button"]:focus-visible {
-  outline: 3px solid rgba(79, 70, 229, 0.45);
-  outline-offset: 3px;
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid #1d68f2 !important;
+  outline-offset: 2px !important;
+  box-shadow: 0 0 0 4px rgba(29, 104, 242, 0.25) !important;
 }
 
-input:focus,
 input:focus-visible,
-textarea:focus,
 textarea:focus-visible {
-  outline: none;
+  outline: 2px solid #1d68f2 !important;
+  outline-offset: 1px !important;
+  box-shadow: 0 0 0 3px rgba(29, 104, 242, 0.2) !important;
 }
 
-/* Custom sleek scrollbar styles */
+/* Skip link for keyboard users */
+.skip-to-content {
+  position: absolute;
+  top: -9999px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1d68f2;
+  color: #ffffff;
+  padding: 0.75rem 1.5rem;
+  border-radius: 0.75rem;
+  font-weight: 800;
+  font-size: 0.875rem;
+  z-index: 10000;
+  text-decoration: none;
+  box-shadow: 0 10px 25px -5px rgba(29, 104, 242, 0.5);
+  transition: top 0.2s ease;
+}
+
+.skip-to-content:focus {
+  top: 1rem;
+}
+
+/* Hide scrollbars across the entire application while preserving scrolling functionality */
+* {
+  scrollbar-width: none !important; /* Firefox */
+  -ms-overflow-style: none !important; /* IE and Edge */
+}
+
+*::-webkit-scrollbar {
+  display: none !important; /* Chrome, Safari, Opera */
+  width: 0 !important;
+  height: 0 !important;
+}
+
+/* Ensure helper classes also hide scrollbars */
 .custom-scrollbar,
-.scrollbar-thin {
-  scrollbar-width: thin;
-  scrollbar-color: #cbd5e1 #f8fafc;
+.scrollbar-thin,
+.dark-scrollbar {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
 }
 
 .custom-scrollbar::-webkit-scrollbar,
-.scrollbar-thin::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-.custom-scrollbar::-webkit-scrollbar-track,
-.scrollbar-thin::-webkit-scrollbar-track {
-  background: #f8fafc;
-  border-radius: 9999px;
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb,
-.scrollbar-thin::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 9999px;
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb:hover,
-.scrollbar-thin::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+.scrollbar-thin::-webkit-scrollbar,
+.dark-scrollbar::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
 }
