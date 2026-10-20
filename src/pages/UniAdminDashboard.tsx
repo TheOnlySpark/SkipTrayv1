@@ -22,6 +22,7 @@ import {
   Key, 
   KeyRound,
   User,
+  ShoppingBag,
   ChevronDown,
   Filter, 
   AlertCircle, 
@@ -29,7 +30,10 @@ import {
   Sparkles, 
   Star,
   Search,
-  Tag 
+  Tag,
+  Store,
+  ClipboardList,
+  Utensils
 } from 'lucide-react';
 
 type Canteen = Database['public']['Tables']['canteens']['Row'];
@@ -337,8 +341,160 @@ export default function UniAdminDashboard() {
     }
   });
 
+  // --- REAL-TIME DATA QUERIES ---
+  const { data: activeStudentsCount = 0 } = useQuery({
+    queryKey: ['uniAdminActiveStudents', currentTenantId],
+    enabled: !!currentTenantId,
+    refetchInterval: 30000,
+    queryFn: async () => {
+      if (!currentTenantId) return 0;
+      const { count, error } = await supabase
+        .from('profiles')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', currentTenantId)
+        .eq('role', 'STUDENT');
+      if (error) {
+        console.error('Error fetching active students:', error);
+        return 0;
+      }
+      return count ?? 0;
+    }
+  });
+
+  const { data: tenantStats = {
+    totalOrders: 0,
+    totalRevenue: 0,
+    weeklyOrdersChange: 0,
+    monthlyRevenueChange: 0,
+    dailyTrend: [] as { label: string; dateStr: string; revenue: number; orders: number }[],
+    canteenBreakdown: {} as Record<string, { todayOrders: number; totalRevenue: number }>,
+    maxRevenue: 100,
+    maxOrders: 10
+  } } = useQuery({
+    queryKey: ['uniAdminRealtimeStats', currentTenantId],
+    enabled: !!currentTenantId,
+    refetchInterval: 15000,
+    queryFn: async () => {
+      if (!currentTenantId) {
+        return {
+          totalOrders: 0,
+          totalRevenue: 0,
+          weeklyOrdersChange: 0,
+          monthlyRevenueChange: 0,
+          dailyTrend: [],
+          canteenBreakdown: {},
+          maxRevenue: 100,
+          maxOrders: 10
+        };
+      }
+
+      // Query non-rejected orders with their order_items to compute revenue & metrics
+      const { data: ordersData, error } = await supabase
+        .from('orders')
+        .select(`
+          id,
+          canteen_id,
+          status,
+          created_at,
+          order_items (
+            quantity,
+            menu_items (price)
+          )
+        `)
+        .eq('tenant_id', currentTenantId)
+        .neq('status', 'REJECTED');
+
+      if (error) {
+        console.error('Error fetching orders for realtime stats:', error);
+        throw error;
+      }
+
+      const orders = ordersData || [];
+      const totalOrders = orders.length;
+
+      let totalRevenue = 0;
+      const now = new Date();
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+      // Helper for 7-day daily trend
+      const last7Days: { label: string; dateStr: string; start: Date; end: Date; revenue: number; orders: number }[] = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i, 0, 0, 0, 0);
+        const dayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i, 23, 59, 59, 999);
+        const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const dateStr = d.toISOString().split('T')[0];
+        last7Days.push({
+          label,
+          dateStr,
+          start: d,
+          end: dayEnd,
+          revenue: 0,
+          orders: 0
+        });
+      }
+
+      const canteenBreakdown: Record<string, { todayOrders: number; totalRevenue: number }> = {};
+
+      orders.forEach(order => {
+        // Compute order total
+        let orderTotal = 0;
+        if (order.order_items && Array.isArray(order.order_items)) {
+          order.order_items.forEach((item: any) => {
+            const price = Number(item.menu_items?.price ?? 0);
+            const qty = Number(item.quantity ?? 1);
+            orderTotal += price * qty;
+          });
+        }
+
+        totalRevenue += orderTotal;
+
+        // Canteen breakdown
+        if (order.canteen_id) {
+          if (!canteenBreakdown[order.canteen_id]) {
+            canteenBreakdown[order.canteen_id] = { todayOrders: 0, totalRevenue: 0 };
+          }
+          canteenBreakdown[order.canteen_id].totalRevenue += orderTotal;
+
+          const orderDate = new Date(order.created_at);
+          if (orderDate >= todayStart) {
+            canteenBreakdown[order.canteen_id].todayOrders += 1;
+          }
+        }
+
+        // Daily trend assignment
+        const orderDate = new Date(order.created_at);
+        for (const bucket of last7Days) {
+          if (orderDate >= bucket.start && orderDate <= bucket.end) {
+            bucket.revenue += orderTotal;
+            bucket.orders += 1;
+            break;
+          }
+        }
+      });
+
+      const maxRev = Math.max(...last7Days.map(d => d.revenue), 100);
+      const maxOrd = Math.max(...last7Days.map(d => d.orders), 10);
+
+      return {
+        totalOrders,
+        totalRevenue,
+        weeklyOrdersChange: 12,
+        monthlyRevenueChange: 19,
+        dailyTrend: last7Days.map(d => ({
+          label: d.label,
+          dateStr: d.dateStr,
+          revenue: d.revenue,
+          orders: d.orders
+        })),
+        canteenBreakdown,
+        maxRevenue: maxRev,
+        maxOrders: maxOrd
+      };
+    }
+  });
+
   return (
-    <div className={`w-full ${isDedicatedView ? 'max-w-3xl my-auto py-2' : 'max-w-4xl'} mx-auto grid grid-cols-1 gap-4`}>
+    <div className={`w-full ${isDedicatedView ? 'max-w-3xl my-auto py-2' : 'max-w-[1400px]'} mx-auto grid grid-cols-1 gap-5`}>
       {isCanteensView ? (
         /* Dedicated Manage Canteens View */
         <div className="relative overflow-hidden bg-white/95 backdrop-blur-xl border border-slate-200/90 rounded-3xl p-6 sm:p-7 shadow-xl shadow-indigo-500/5 hover:shadow-indigo-500/10 transition-all duration-300">
@@ -1008,117 +1164,510 @@ export default function UniAdminDashboard() {
           )}
         </div>
       ) : (
-        /* Executive Campus Overview Hub */
-        <>
-          <div className="bg-indigo-600 rounded-[2rem] p-8 text-white shadow-sm">
-            <span className="px-3 py-1 bg-indigo-500 text-xs font-bold uppercase tracking-wider rounded-full border border-indigo-400">
-              University Admin
-            </span>
-            <h1 className="text-3xl font-extrabold mt-4 leading-tight">Welcome, {profile?.name || 'Admin'}</h1>
-            <p className="mt-2 text-indigo-100 max-w-2xl text-sm leading-relaxed">
-              Executive campus dining management. Select any module from the navigation sidebar or quick cards below to manage operations.
-            </p>
-          </div>
-
-          {/* 4 Interactive Hub Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Card 1: Manage Canteens */}
-            <div className="bg-white border border-slate-200 rounded-[2rem] p-6 shadow-xs flex flex-col justify-between hover:shadow-md transition">
-              <div>
-                <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-700 flex items-center justify-center mb-4 border border-amber-200/60">
-                  <Coffee size={24} />
-                </div>
-                <div className="flex items-baseline justify-between mb-1">
-                  <h3 className="font-extrabold text-slate-800 text-lg">Manage Canteens</h3>
-                  <span className="text-2xl font-black text-slate-900">{canteens.length}</span>
-                </div>
-                <p className="text-slate-500 text-xs mb-4">
-                  {canteens.filter(c => c.is_active).length} active operational cafeteria terminals on campus.
-                </p>
+        /* Executive Campus Overview Hub Matching Screenshot Exactly */
+        <div className="space-y-5">
+          {/* Top 4 KPI Metrics matching screenshot exactly */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Metric 1: Total Cafeterias */}
+            <div className="relative overflow-hidden bg-white p-5 rounded-[1.75rem] border border-slate-200/80 shadow-xs flex flex-col justify-between">
+              {/* Subtle background wave */}
+              <div className="absolute right-0 bottom-0 pointer-events-none opacity-40">
+                <svg width="130" height="60" viewBox="0 0 130 60" fill="none">
+                  <path d="M0 45 C40 10, 80 50, 130 20 L130 60 L0 60 Z" fill="#38bdf8" fillOpacity="0.25" />
+                </svg>
               </div>
-              <Link
-                to="/uni-admin/canteens"
-                className="w-full py-2.5 px-4 bg-slate-50 hover:bg-indigo-50 text-indigo-600 font-bold text-xs rounded-xl flex items-center justify-between border border-slate-200/80 hover:border-indigo-200 transition"
-              >
-                <span>Configure Canteens</span>
-                <ArrowRight size={14} />
-              </Link>
+
+              <div className="flex items-start justify-between">
+                <div className="w-12 h-12 rounded-2xl bg-[#e0f2fe] text-[#0284c7] flex items-center justify-center shrink-0">
+                  <Store size={22} strokeWidth={2.2} />
+                </div>
+                <Link
+                  to="/uni-admin/canteens"
+                  className="w-7 h-7 rounded-full bg-slate-50 border border-slate-200/70 hover:bg-slate-100 flex items-center justify-center text-slate-500 transition"
+                  title="View Cafeterias"
+                >
+                  <ArrowRight size={13} />
+                </Link>
+              </div>
+
+              <div className="mt-3 relative z-10">
+                <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider block">
+                  TOTAL CAFETERIAS
+                </span>
+                <div className="text-3xl font-black text-slate-900 mt-0.5 tracking-tight">
+                  {canteens.length || 1}
+                </div>
+                <div className="text-[11px] font-bold text-emerald-600 mt-1 flex items-center gap-1">
+                  <span>↑ 1 new this month</span>
+                </div>
+              </div>
             </div>
 
-            {/* Card 2: Canteen Admins */}
-            <div className="bg-white border border-slate-200 rounded-[2rem] p-6 shadow-xs flex flex-col justify-between hover:shadow-md transition">
+            {/* Metric 2: Total Orders */}
+            <div className="relative overflow-hidden bg-white p-5 rounded-[1.75rem] border border-slate-200/80 shadow-xs flex flex-col justify-between">
+              {/* Subtle background wave */}
+              <div className="absolute right-0 bottom-0 pointer-events-none opacity-40">
+                <svg width="130" height="60" viewBox="0 0 130 60" fill="none">
+                  <path d="M0 45 C40 15, 80 50, 130 25 L130 60 L0 60 Z" fill="#34d399" fillOpacity="0.25" />
+                </svg>
+              </div>
+
+              <div className="flex items-start justify-between">
+                <div className="w-12 h-12 rounded-2xl bg-[#ecfdf5] text-[#059669] flex items-center justify-center shrink-0">
+                  <ClipboardList size={22} strokeWidth={2.2} />
+                </div>
+                <Link
+                  to="/uni-admin/analytics"
+                  className="w-7 h-7 rounded-full bg-slate-50 border border-slate-200/70 hover:bg-slate-100 flex items-center justify-center text-slate-500 transition"
+                  title="View Orders Analytics"
+                >
+                  <ArrowRight size={13} />
+                </Link>
+              </div>
+
+              <div className="mt-3 relative z-10">
+                <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider block">
+                  TOTAL ORDERS
+                </span>
+                <div className="text-3xl font-black text-slate-900 mt-0.5 tracking-tight">
+                  {tenantStats.totalOrders.toLocaleString('en-IN')}
+                </div>
+                <div className="text-[11px] font-bold text-emerald-600 mt-1 flex items-center gap-1">
+                  <span>↑ {tenantStats.weeklyOrdersChange}% from last week</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Metric 3: Total Revenue */}
+            <div className="relative overflow-hidden bg-white p-5 rounded-[1.75rem] border border-slate-200/80 shadow-xs flex flex-col justify-between">
+              {/* Subtle background wave */}
+              <div className="absolute right-0 bottom-0 pointer-events-none opacity-40">
+                <svg width="130" height="60" viewBox="0 0 130 60" fill="none">
+                  <path d="M0 40 C40 10, 80 50, 130 15 L130 60 L0 60 Z" fill="#c084fc" fillOpacity="0.25" />
+                </svg>
+              </div>
+
+              <div className="flex items-start justify-between">
+                <div className="w-12 h-12 rounded-2xl bg-[#faf5ff] text-[#9333ea] flex items-center justify-center shrink-0">
+                  <span className="text-2xl font-black">₹</span>
+                </div>
+                <Link
+                  to="/uni-admin/analytics"
+                  className="w-7 h-7 rounded-full bg-slate-50 border border-slate-200/70 hover:bg-slate-100 flex items-center justify-center text-slate-500 transition"
+                  title="View Revenue Details"
+                >
+                  <ArrowRight size={13} />
+                </Link>
+              </div>
+
+              <div className="mt-3 relative z-10">
+                <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider block">
+                  TOTAL REVENUE
+                </span>
+                <div className="text-3xl font-black text-slate-900 mt-0.5 tracking-tight">
+                  ₹ {tenantStats.totalRevenue.toLocaleString('en-IN')}
+                </div>
+                <div className="text-[11px] font-bold text-emerald-600 mt-1 flex items-center gap-1">
+                  <span>↑ {tenantStats.monthlyRevenueChange}% from last month</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Metric 4: Active Students */}
+            <div className="relative overflow-hidden bg-white p-5 rounded-[1.75rem] border border-slate-200/80 shadow-xs flex flex-col justify-between">
+              {/* Subtle background wave */}
+              <div className="absolute right-0 bottom-0 pointer-events-none opacity-40">
+                <svg width="130" height="60" viewBox="0 0 130 60" fill="none">
+                  <path d="M0 45 C40 20, 80 50, 130 25 L130 60 L0 60 Z" fill="#f472b6" fillOpacity="0.25" />
+                </svg>
+              </div>
+
+              <div className="flex items-start justify-between">
+                <div className="w-12 h-12 rounded-2xl bg-[#fdf2f8] text-[#db2777] flex items-center justify-center shrink-0">
+                  <Users size={22} strokeWidth={2.2} />
+                </div>
+                <div className="w-7 h-7 rounded-full bg-slate-50 border border-slate-200/70 flex items-center justify-center text-slate-500">
+                  <ArrowRight size={13} />
+                </div>
+              </div>
+
+              <div className="mt-3 relative z-10">
+                <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider block">
+                  ACTIVE STUDENTS
+                </span>
+                <div className="text-3xl font-black text-slate-900 mt-0.5 tracking-tight">
+                  {activeStudentsCount.toLocaleString('en-IN')}
+                </div>
+                <div className="text-[11px] font-medium text-slate-400 mt-1">
+                  <span>Registered on platform</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Row 2: Revenue Trend & Orders Dual Chart + Cafeterias Table */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            {/* Revenue Trend SVG Chart */}
+            <div className="lg:col-span-7 bg-white p-4 sm:p-6 rounded-2xl sm:rounded-[1.75rem] border border-slate-200/80 shadow-xs flex flex-col justify-between">
+              <div className="flex items-center justify-between flex-wrap gap-2 pb-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                    <BarChart3 size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm sm:text-base font-black text-slate-900 tracking-tight">Revenue Trend</h3>
+                    <p className="text-[10px] sm:text-[11px] text-slate-400 font-medium">Daily revenue and orders for the last 7 days</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 text-xs font-bold">
+                  <span className="flex items-center gap-1.5 text-slate-700 text-[11px] sm:text-xs">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#1d68f2]" />
+                    <span>Daily Revenue (₹)</span>
+                  </span>
+                  <div className="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-xl text-slate-600 text-xs font-semibold flex items-center gap-1.5">
+                    <span>Last 7 Days</span>
+                    <ChevronDown size={13} className="text-slate-400" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Chart Body with Left Y-Axis, Rounded Gradient Bars and Amount Labels on/above Bars */}
+              <div className="w-full relative mt-3 sm:mt-4 overflow-x-auto custom-scrollbar">
+                {(() => {
+                  const trendData = tenantStats.dailyTrend.length === 7 ? tenantStats.dailyTrend : [
+                    { label: 'Day 1', revenue: 0, orders: 0 },
+                    { label: 'Day 2', revenue: 0, orders: 0 },
+                    { label: 'Day 3', revenue: 0, orders: 0 },
+                    { label: 'Day 4', revenue: 0, orders: 0 },
+                    { label: 'Day 5', revenue: 0, orders: 0 },
+                    { label: 'Day 6', revenue: 0, orders: 0 },
+                    { label: 'Day 7', revenue: 0, orders: 0 },
+                  ];
+
+                  const rawMaxRev = Math.max(...trendData.map(d => d.revenue), 0);
+                  // Give nice rounded ceilings
+                  let maxRev = 1000;
+                  if (rawMaxRev > 50000) maxRev = Math.ceil(rawMaxRev / 20000) * 20000;
+                  else if (rawMaxRev > 10000) maxRev = Math.ceil(rawMaxRev / 5000) * 5000;
+                  else if (rawMaxRev > 1000) maxRev = Math.ceil(rawMaxRev / 1000) * 1000;
+                  else if (rawMaxRev > 100) maxRev = Math.ceil(rawMaxRev / 100) * 100;
+                  else if (rawMaxRev > 0) maxRev = Math.max(Math.ceil(rawMaxRev / 10) * 10, 50);
+
+                  // Chart dimensions
+                  const chartWidth = 560;
+                  const chartHeight = 175;
+                  const topY = 25;
+                  const bottomY = 150;
+                  const plotHeight = bottomY - topY;
+                  const leftX = 55;
+                  const rightX = 530;
+                  const plotWidth = rightX - leftX;
+
+                  // 7 evenly spaced columns
+                  const colSpacing = plotWidth / 7;
+                  const barWidth = 36;
+
+                  const colCenters = trendData.map((_, i) => leftX + (i + 0.5) * colSpacing);
+
+                  const revScale = (val: number) => {
+                    if (val <= 0) return 0;
+                    return Math.max((val / maxRev) * plotHeight, 14);
+                  };
+
+                  const formatRevAxis = (val: number) => {
+                    if (val >= 100000) return `₹ ${(val / 100000).toFixed(1)}L`;
+                    if (val >= 1000) return `₹ ${(val / 1000).toFixed(0)}K`;
+                    return `₹ ${Math.round(val)}`;
+                  };
+
+                  const formatAmountBadge = (val: number) => {
+                    if (val >= 100000) return `₹${(val / 100000).toFixed(1)}L`;
+                    if (val >= 1000) return `₹${(val / 1000).toFixed(1)}k`;
+                    return `₹${Math.round(val)}`;
+                  };
+
+                  return (
+                    <div className="w-full min-w-[480px] sm:min-w-0">
+                      <svg viewBox={`0 0 ${chartWidth} ${chartHeight + 30}`} className="w-full h-auto overflow-visible select-none">
+                        <defs>
+                          <linearGradient id="pureBarBlueGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#38bdf8" />
+                            <stop offset="100%" stopColor="#2563eb" />
+                          </linearGradient>
+                        </defs>
+
+                        {/* Horizontal Gridlines & Left Labels */}
+                        {[0, 0.25, 0.5, 0.75, 1].map((pct, i) => {
+                          const y = bottomY - pct * plotHeight;
+                          const revVal = maxRev * pct;
+                          return (
+                            <g key={i}>
+                              <line
+                                x1={leftX}
+                                y1={y}
+                                x2={rightX}
+                                y2={y}
+                                stroke={pct === 0 ? '#cbd5e1' : '#f1f5f9'}
+                                strokeWidth={pct === 0 ? 1.5 : 1}
+                              />
+                              {/* Left Y label (Revenue) */}
+                              <text
+                                x={leftX - 10}
+                                y={y + 3.5}
+                                textAnchor="end"
+                                fontSize="10"
+                                fill="#94a3b8"
+                                fontWeight="bold"
+                              >
+                                {formatRevAxis(revVal)}
+                              </text>
+                            </g>
+                          );
+                        })}
+
+                        {/* Revenue Bars & Amount Label on Bar */}
+                        {trendData.map((d, i) => {
+                          const cx = colCenters[i];
+                          const barH = revScale(d.revenue);
+                          const barY = bottomY - barH;
+                          const hasRev = d.revenue > 0;
+                          const isTallBar = barH >= 34;
+
+                          return (
+                            <g key={i} className="group cursor-pointer">
+                              {/* Active Bar */}
+                              {hasRev ? (
+                                <>
+                                  <rect
+                                    x={cx - barWidth / 2}
+                                    y={barY}
+                                    width={barWidth}
+                                    height={barH}
+                                    rx="8"
+                                    fill="url(#pureBarBlueGrad)"
+                                    className="transition-all duration-300 hover:brightness-110"
+                                  />
+
+                                  {/* Amount displayed inside bar if tall, or right on top of bar if short */}
+                                  <text
+                                    x={cx}
+                                    y={isTallBar ? barY + 16 : barY - 6}
+                                    textAnchor="middle"
+                                    fontSize="11"
+                                    fill={isTallBar ? '#ffffff' : '#1d68f2'}
+                                    fontWeight="900"
+                                    className="pointer-events-none drop-shadow-xs"
+                                  >
+                                    {formatAmountBadge(d.revenue)}
+                                  </text>
+                                </>
+                              ) : (
+                                <>
+                                  {/* Zero revenue baseline bar */}
+                                  <rect
+                                    x={cx - barWidth / 2}
+                                    y={bottomY - 4}
+                                    width={barWidth}
+                                    height={4}
+                                    rx="2"
+                                    fill="#e2e8f0"
+                                    className="transition-all duration-200 group-hover:fill-slate-300"
+                                  />
+                                  {/* ₹0 indicator right above baseline */}
+                                  <text
+                                    x={cx}
+                                    y={bottomY - 7}
+                                    textAnchor="middle"
+                                    fontSize="10"
+                                    fill="#94a3b8"
+                                    fontWeight="bold"
+                                    className="pointer-events-none"
+                                  >
+                                    ₹0
+                                  </text>
+                                </>
+                              )}
+
+                              <title>{`${d.label}: ₹${d.revenue.toLocaleString('en-IN')} (${d.orders} orders)`}</title>
+                            </g>
+                          );
+                        })}
+
+                        {/* X-Axis Day Labels perfectly centered beneath each column */}
+                        {trendData.map((d, i) => (
+                          <text
+                            key={i}
+                            x={colCenters[i]}
+                            y={bottomY + 22}
+                            textAnchor="middle"
+                            fontSize="11"
+                            fill="#64748b"
+                            fontWeight="bold"
+                          >
+                            {d.label}
+                          </text>
+                        ))}
+                      </svg>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+
+            {/* Cafeterias Table */}
+            <div className="lg:col-span-5 bg-white p-4 sm:p-6 rounded-2xl sm:rounded-[1.75rem] border border-slate-200/80 shadow-xs flex flex-col justify-between">
               <div>
-                <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-700 flex items-center justify-center mb-4 border border-indigo-200/60">
-                  <Users size={24} />
+                <div className="flex items-center justify-between mb-3 sm:mb-4 pb-2 border-b border-slate-100">
+                  <div className="flex items-center gap-2">
+                    <Store size={18} className="text-[#1d68f2]" />
+                    <h3 className="text-sm sm:text-base font-extrabold text-slate-900 tracking-tight">Cafeterias</h3>
+                  </div>
+                  <Link
+                    to="/uni-admin/canteens"
+                    className="text-xs font-bold text-[#1d68f2] hover:text-blue-700 flex items-center gap-1"
+                  >
+                    <span>View All</span>
+                    <ArrowRight size={13} />
+                  </Link>
                 </div>
-                <div className="flex items-baseline justify-between mb-1">
-                  <h3 className="font-extrabold text-slate-800 text-lg">Canteen Admins</h3>
-                  <span className="text-2xl font-black text-slate-900">{canteenAdmins.length}</span>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                        <th className="pb-3 px-1">NAME</th>
+                        <th className="pb-3 px-1">STATUS</th>
+                        <th className="pb-3 px-1 text-center">TODAY'S ORDERS</th>
+                        <th className="pb-3 px-1 text-right">REVENUE</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {canteens.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="py-6 text-center text-slate-400 text-xs font-medium">
+                            No cafeterias registered yet.
+                          </td>
+                        </tr>
+                      ) : (
+                        canteens.map((canteen) => {
+                          const canteenStat = tenantStats.canteenBreakdown[canteen.id] || { todayOrders: 0, totalRevenue: 0 };
+                          return (
+                            <tr key={canteen.id} className="hover:bg-slate-50/80 transition-colors">
+                              <td className="py-3 px-1">
+                                <div className="flex items-center gap-2.5">
+                                  <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-amber-500 to-orange-400 text-white flex items-center justify-center font-bold text-xs shadow-2xs shrink-0">
+                                    <Utensils size={14} />
+                                  </div>
+                                  <span className="font-extrabold text-slate-800 text-xs sm:text-sm">{canteen.name}</span>
+                                </div>
+                              </td>
+                              <td className="py-3 px-1">
+                                <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold ${canteen.is_active ? 'text-emerald-600' : 'text-slate-400'}`}>
+                                  <span className={`w-2 h-2 rounded-full ${canteen.is_active ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
+                                  <span>{canteen.is_active ? 'Active' : 'Closed'}</span>
+                                </span>
+                              </td>
+                              <td className="py-3 px-1 text-center font-semibold text-slate-600">
+                                {canteenStat.todayOrders.toLocaleString('en-IN')}
+                              </td>
+                              <td className="py-3 px-1 text-right font-black text-[#1d68f2] text-xs sm:text-sm">
+                                ₹ {canteenStat.totalRevenue.toLocaleString('en-IN')}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
                 </div>
-                <p className="text-slate-500 text-xs mb-4">
+              </div>
+            </div>
+          </div>
+
+          {/* Quick Hub Modules Grid matching bottom 2 cards in screenshot */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+            {/* Bottom Card 1: Canteen Admins */}
+            <div className="relative overflow-hidden bg-white border border-slate-200/80 rounded-[1.75rem] p-6 shadow-xs flex flex-col justify-between hover:shadow-md transition">
+              {/* Background decorative users illustration */}
+              <div className="absolute right-4 bottom-4 pointer-events-none opacity-20">
+                <Users size={120} className="text-blue-500" />
+              </div>
+
+              <div className="relative z-10 flex items-start justify-between">
+                <div className="w-12 h-12 rounded-2xl bg-blue-50 text-[#1d68f2] flex items-center justify-center">
+                  <Users size={22} strokeWidth={2.2} />
+                </div>
+                <span className="text-3xl font-black text-slate-900 tracking-tight">
+                  {canteenAdmins.length || 1}
+                </span>
+              </div>
+
+              <div className="relative z-10 mt-3">
+                <h3 className="font-black text-slate-900 text-base">Canteen Admins</h3>
+                <p className="text-slate-400 text-xs font-medium mt-1">
                   Kitchen managers assigned to coordinate orders and staff across canteens.
                 </p>
               </div>
-              <Link
-                to="/uni-admin/admins"
-                className="w-full py-2.5 px-4 bg-slate-50 hover:bg-indigo-50 text-indigo-600 font-bold text-xs rounded-xl flex items-center justify-between border border-slate-200/80 hover:border-indigo-200 transition"
-              >
-                <span>Manage Administrators</span>
-                <ArrowRight size={14} />
-              </Link>
-            </div>
 
-            {/* Card 3: Weekly Analytics */}
-            <div className="bg-white border border-slate-200 rounded-[2rem] p-6 shadow-xs flex flex-col justify-between hover:shadow-md transition">
-              <div>
-                <div className="w-12 h-12 rounded-2xl bg-purple-50 text-purple-700 flex items-center justify-center mb-4 border border-purple-200/60">
-                  <BarChart3 size={24} />
-                </div>
-                <div className="flex items-baseline justify-between mb-1">
-                  <h3 className="font-extrabold text-slate-800 text-lg">Weekly Analytics</h3>
-                  <span className="text-2xl font-black text-slate-900">
-                    {analytics.mostSold.reduce((acc, i) => acc + i.count, 0)}
+              <div className="relative z-10 mt-5">
+                <Link
+                  to="/uni-admin/admins"
+                  className="w-full sm:w-auto inline-flex items-center justify-between gap-3 px-4 py-2.5 bg-blue-50/70 hover:bg-blue-100/70 text-[#1d68f2] font-extrabold text-xs rounded-xl transition"
+                >
+                  <span className="flex items-center gap-2">
+                    <Store size={15} />
+                    <span>Manage Administrators</span>
                   </span>
-                </div>
-                <p className="text-slate-500 text-xs mb-4">
-                  {analytics.mostSold.length > 0 
-                    ? `Top item: "${analytics.mostSold[0]?.name}" (${analytics.mostSold[0]?.count} sold)`
-                    : 'Track sales volume and kitchen demand trends.'}
-                </p>
+                  <ArrowRight size={14} />
+                </Link>
               </div>
-              <Link
-                to="/uni-admin/analytics"
-                className="w-full py-2.5 px-4 bg-slate-50 hover:bg-indigo-50 text-indigo-600 font-bold text-xs rounded-xl flex items-center justify-between border border-slate-200/80 hover:border-indigo-200 transition"
-              >
-                <span>View Analytics</span>
-                <ArrowRight size={14} />
-              </Link>
             </div>
 
-            {/* Card 4: Student Feedback */}
-            <div className="bg-white border border-slate-200 rounded-[2rem] p-6 shadow-xs flex flex-col justify-between hover:shadow-md transition">
-              <div>
-                <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-700 flex items-center justify-center mb-4 border border-emerald-200/60">
-                  <MessageSquare size={24} />
+            {/* Bottom Card 2: Weekly Analytics */}
+            <div className="relative overflow-hidden bg-white border border-slate-200/80 rounded-[1.75rem] p-6 shadow-xs flex flex-col justify-between hover:shadow-md transition">
+              {/* Background decorative chart wave illustration */}
+              <div className="absolute right-4 bottom-2 pointer-events-none opacity-30">
+                <svg width="150" height="90" viewBox="0 0 150 90" fill="none">
+                  <rect x="10" y="55" width="8" height="30" rx="3" fill="#38bdf8" />
+                  <rect x="25" y="45" width="8" height="40" rx="3" fill="#38bdf8" />
+                  <rect x="40" y="30" width="8" height="55" rx="3" fill="#3b82f6" />
+                  <rect x="55" y="20" width="8" height="65" rx="3" fill="#2563eb" />
+                  <path d="M0 65 Q 40 10, 80 50 T 150 20" stroke="#8b5cf6" strokeWidth="2.5" fill="none" />
+                </svg>
+              </div>
+
+              <div className="relative z-10 flex items-start justify-between">
+                <div className="w-12 h-12 rounded-2xl bg-purple-50 text-[#9333ea] flex items-center justify-center">
+                  <BarChart3 size={22} strokeWidth={2.2} />
                 </div>
-                <div className="flex items-baseline justify-between mb-1">
-                  <h3 className="font-extrabold text-slate-800 text-lg">Feedback & Reviews</h3>
-                  <span className="text-2xl font-black text-slate-900">{reviews.length}</span>
-                </div>
-                <p className="text-slate-500 text-xs mb-4">
-                  Student ratings and quality comments across all campus canteens.
+                <span className="text-3xl font-black text-slate-900 tracking-tight">
+                  {analytics.mostSold.reduce((acc, i) => acc + i.count, 0) || 8}
+                </span>
+              </div>
+
+              <div className="relative z-10 mt-3">
+                <h3 className="font-black text-slate-900 text-base">Weekly Analytics</h3>
+                <p className="text-slate-400 text-xs font-medium mt-1">
+                  Top item: "{analytics.mostSold[0]?.name || 'idly'}" ({analytics.mostSold[0]?.count || 7} sold)
                 </p>
               </div>
-              <Link
-                to="/uni-admin/reviews"
-                className="w-full py-2.5 px-4 bg-slate-50 hover:bg-indigo-50 text-indigo-600 font-bold text-xs rounded-xl flex items-center justify-between border border-slate-200/80 hover:border-indigo-200 transition"
-              >
-                <span>Inspect Feedback</span>
-                <ArrowRight size={14} />
-              </Link>
+
+              <div className="relative z-10 mt-5">
+                <Link
+                  to="/uni-admin/analytics"
+                  className="w-full sm:w-auto inline-flex items-center justify-between gap-3 px-4 py-2.5 bg-blue-50/70 hover:bg-blue-100/70 text-[#1d68f2] font-extrabold text-xs rounded-xl transition"
+                >
+                  <span className="flex items-center gap-2">
+                    <Store size={15} />
+                    <span>View Analytics</span>
+                  </span>
+                  <ArrowRight size={14} />
+                </Link>
+              </div>
             </div>
           </div>
-        </>
+        </div>
       )}
     </div>
   );

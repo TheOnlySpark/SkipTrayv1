@@ -28,8 +28,8 @@ export interface LunchSlotConfig {
 }
 
 export const DEFAULT_LUNCH_SLOT_CONFIG: LunchSlotConfig = {
-  serviceStartTime: '12:00',
-  serviceEndTime: '14:00',
+  serviceStartTime: '08:00',
+  serviceEndTime: '20:00',
   slotDurationMinutes: 15,
   minNoticeMinutes: 15,
   isLunchEnabled: true,
@@ -70,11 +70,16 @@ export const isValidTimeString = (timeStr?: string | null): boolean => {
 export const parseTimeToMinutes = (timeStr?: string | null): number => {
   if (!timeStr || typeof timeStr !== 'string') return NaN;
   let trimmed = timeStr.trim().toUpperCase();
+  // If it's a full ISO string with date, parse as Date object first to handle timezone correctly
   if (trimmed.includes('T')) {
+    const d = new Date(timeStr);
+    if (!isNaN(d.getTime())) {
+      return d.getHours() * 60 + d.getMinutes();
+    }
     trimmed = trimmed.split('T')[1].trim();
   }
   trimmed = trimmed.replace(/([+-]\d{2}:\d{2}|Z)$/, '').trim();
-  const match = trimmed.match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?$/);
+  const match = trimmed.match(/^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?\s*(AM|PM)?$/);
   if (!match) return NaN;
   let h = parseInt(match[1], 10);
   const m = parseInt(match[2], 10);
@@ -281,7 +286,7 @@ const getCacheKey = (canteenId?: string | null) =>
 export async function fetchLunchSlotConfig(canteenId?: string | null): Promise<LunchSlotConfig> {
   const cacheKey = getCacheKey(canteenId);
 
-  // 1. Check local cache
+  // 1. Check local cache (either specific or global default fallback)
   let cachedConfig: LunchSlotConfig | null = null;
   try {
     const local = localStorage.getItem(cacheKey) || localStorage.getItem('skiptray_lunch_slot_config_default');
@@ -294,28 +299,29 @@ export async function fetchLunchSlotConfig(canteenId?: string | null): Promise<L
 
   // 2. Fetch from Supabase
   try {
-    let query = supabase.from('lunch_slot_configs').select('*');
+    const baseColumns = 'id, canteen_id, tenant_id, service_start_time, service_end_time, slot_duration_minutes, min_notice_minutes, is_lunch_enabled, disabled_slots, slot_capacities, updated_at';
+    let query = supabase.from('lunch_slot_configs').select(baseColumns);
     if (canteenId) {
       query = query.eq('canteen_id', canteenId);
     }
-    const { data, error } = await query.order('created_at', { ascending: false }).limit(1).maybeSingle();
+    const { data, error } = await query.order('updated_at', { ascending: false }).limit(1).maybeSingle();
 
     if (!error && data) {
       const parsedConfig: LunchSlotConfig = {
-        id: data.id,
-        canteenId: data.canteen_id,
-        tenantId: data.tenant_id,
-        serviceStartTime: data.service_start_time || '12:00',
-        serviceEndTime: data.service_end_time || '14:00',
-        slotDurationMinutes: Number(data.slot_duration_minutes) || 15,
-        minNoticeMinutes: data.min_notice_minutes !== null && data.min_notice_minutes !== undefined ? Number(data.min_notice_minutes) : 15,
-        isLunchEnabled: data.is_lunch_enabled ?? true,
-        disabledSlots: Array.isArray(data.disabled_slots) ? (data.disabled_slots as string[]) : [],
-        slotCapacities: typeof data.slot_capacities === 'object' && data.slot_capacities !== null ? (data.slot_capacities as Record<string, number>) : {},
-        maxConcurrentOrders: Number(data.max_concurrent_orders) || 15,
-        defaultPrepTimeMinutes: Number(data.default_prep_time_minutes) || 10,
-        orderCutoffMinutes: Number(data.order_cutoff_minutes) || 15,
-        updatedAt: data.updated_at,
+        id: (data as any).id,
+        canteenId: (data as any).canteen_id,
+        tenantId: (data as any).tenant_id,
+        serviceStartTime: (data as any).service_start_time || '08:00',
+        serviceEndTime: (data as any).service_end_time || '20:00',
+        slotDurationMinutes: Number((data as any).slot_duration_minutes) || 15,
+        minNoticeMinutes: (data as any).min_notice_minutes !== null && (data as any).min_notice_minutes !== undefined ? Number((data as any).min_notice_minutes) : 15,
+        isLunchEnabled: (data as any).is_lunch_enabled ?? true,
+        disabledSlots: Array.isArray((data as any).disabled_slots) ? ((data as any).disabled_slots as string[]) : [],
+        slotCapacities: typeof (data as any).slot_capacities === 'object' && (data as any).slot_capacities !== null ? ((data as any).slot_capacities as Record<string, number>) : {},
+        maxConcurrentOrders: Number((data as any).max_concurrent_orders) || 15,
+        defaultPrepTimeMinutes: Number((data as any).default_prep_time_minutes) || 10,
+        orderCutoffMinutes: Number((data as any).order_cutoff_minutes) || 15,
+        updatedAt: (data as any).updated_at,
       };
 
       try {

@@ -39,7 +39,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(({
   // Variant styles
   const variantStyles: Record<ButtonVariant, string> = {
     primary:
-      'bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white shadow-sm shadow-indigo-600/25 focus-visible:ring-indigo-500 border border-transparent',
+      'bg-[#1d68f2] hover:bg-[#1656cb] active:bg-[#1147ac] text-white shadow-sm shadow-blue-500/25 focus-visible:ring-blue-500 border border-transparent',
     secondary:
       'bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-700 hover:text-slate-900 border border-slate-200 shadow-2xs hover:border-slate-300 focus-visible:ring-slate-400',
     tertiary:
