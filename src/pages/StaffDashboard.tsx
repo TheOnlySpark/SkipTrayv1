@@ -1067,14 +1067,40 @@ export default function StaffDashboard() {
     return parseTimeToMinutes(prepTime);
   };
 
+  // Helper to test if an order belongs to a slot tab (matching by exact value, normalized 24h, or within interval)
+  const isOrderInSlot = (order: OrderWithDetails, slot: LunchSlot): boolean => {
+    const rawTime = order.pickup_time || (order as any).requested_pickup_time || '';
+    if (!rawTime) return false;
+    const orderMin = parseTimeToMinutes(rawTime);
+    if (isNaN(orderMin)) return false;
+
+    const slotStartMin = parseTimeToMinutes(slot.startTime || slot.value);
+    const slotEndMin = parseTimeToMinutes(slot.endTime);
+
+    // If slot has both start and end, check if order is within the window [startMin, endMin]
+    if (!isNaN(slotStartMin) && !isNaN(slotEndMin)) {
+      return orderMin >= slotStartMin && orderMin <= slotEndMin;
+    }
+
+    // Direct match against slot.value (normalized "HH:mm")
+    const normOrderTime = normalizeTimeTo24h(rawTime);
+    const normSlotTime = normalizeTimeTo24h(slot.value);
+    return normOrderTime === normSlotTime;
+  };
+
   // Filter orders by Slot and Search Query, and sort by Planned Prep Start Time sequence
   const filteredOrders = useMemo(() => {
     const matched = orders.filter(order => {
       // Slot filtering
       if (selectedSlot !== 'ALL') {
-        const orderTime = (order as any).requested_pickup_time || order.pickup_time || '';
-        if (orderTime !== selectedSlot && !orderTime.startsWith(selectedSlot)) {
-          return false;
+        const activeSlot = activeLunchSlots.find(s => s.value === selectedSlot);
+        if (activeSlot) {
+          if (!isOrderInSlot(order, activeSlot)) return false;
+        } else {
+          const rawTime = order.pickup_time || (order as any).requested_pickup_time || '';
+          if (normalizeTimeTo24h(rawTime) !== normalizeTimeTo24h(selectedSlot)) {
+            return false;
+          }
         }
       }
       // Search filtering (Order #, Name, ID, OTP)
@@ -1096,7 +1122,7 @@ export default function StaffDashboard() {
     }
 
     return matched;
-  }, [orders, selectedSlot, searchQuery, sortByPrepStart]);
+  }, [orders, selectedSlot, searchQuery, sortByPrepStart, activeLunchSlots]);
 
   // Count of matches found in other slots when a specific slot filter is active
   const otherSlotMatchesCount = useMemo(() => {
@@ -1126,16 +1152,8 @@ export default function StaffDashboard() {
   // Compute live order counts per lunch slot
   const slotCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    orders.forEach(o => {
-      const orderTime = o.pickup_time || '';
-      // Direct count
-      counts[orderTime] = (counts[orderTime] || 0) + 1;
-      // Also credit matching configured tab if orderTime starts with slot value
-      activeLunchSlots.forEach(s => {
-        if (orderTime !== s.value && orderTime.startsWith(s.value)) {
-          counts[s.value] = (counts[s.value] || 0) + 1;
-        }
-      });
+    activeLunchSlots.forEach(slot => {
+      counts[slot.value] = orders.filter(o => isOrderInSlot(o, slot)).length;
     });
     return counts;
   }, [orders, activeLunchSlots]);
@@ -1340,17 +1358,19 @@ export default function StaffDashboard() {
           {order.status === 'PLACED' && (
             <div className="flex gap-2">
               <Button
-                variant="primary"
-                size="sm"
+                variant="success"
+                size="md"
                 fullWidth
                 onClick={() => updateOrderStatus(order.id, 'ACCEPTED')}
+                className="font-bold bg-emerald-600 hover:bg-emerald-700 shadow-sm shadow-emerald-600/30 active:scale-95 text-white"
               >
                 Accept Order
               </Button>
               <Button
                 variant="danger"
-                size="sm"
+                size="md"
                 onClick={() => updateOrderStatus(order.id, 'REJECTED')}
+                className="font-bold shadow-sm shadow-rose-600/25 active:scale-95 text-white"
               >
                 Reject
               </Button>
@@ -1359,11 +1379,11 @@ export default function StaffDashboard() {
 
           {order.status === 'ACCEPTED' && (
             <Button
-              variant="secondary"
               size="sm"
               fullWidth
               onClick={() => updateOrderStatus(order.id, 'PREPARING')}
-              leftIcon={<IconCooking size={14} className="w-3.5 h-3.5" />}
+              leftIcon={<IconCooking size={14} className="w-3.5 h-3.5 text-amber-100" />}
+              className="bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white font-bold border-0 shadow-sm shadow-orange-500/30 active:scale-95"
             >
               Start Preparing
             </Button>
@@ -1572,18 +1592,18 @@ export default function StaffDashboard() {
             {order.status === 'PLACED' && (
               <>
                 <Button
-                  size="sm"
-                  variant="primary"
+                  size="md"
+                  variant="success"
                   onClick={() => updateOrderStatus(order.id, 'ACCEPTED')}
-                  className="text-xs px-2.5 py-1"
+                  className="text-xs px-3.5 py-1.5 font-bold bg-emerald-600 hover:bg-emerald-700 shadow-sm shadow-emerald-600/30 active:scale-95 text-white"
                 >
                   Accept
                 </Button>
                 <Button
-                  size="sm"
+                  size="md"
                   variant="danger"
                   onClick={() => updateOrderStatus(order.id, 'REJECTED')}
-                  className="text-xs px-2 py-1"
+                  className="text-xs px-3.5 py-1.5 font-bold shadow-sm shadow-rose-600/25 active:scale-95 text-white"
                 >
                   Reject
                 </Button>
@@ -1593,10 +1613,9 @@ export default function StaffDashboard() {
             {order.status === 'ACCEPTED' && (
               <Button
                 size="sm"
-                variant="secondary"
                 onClick={() => updateOrderStatus(order.id, 'PREPARING')}
-                leftIcon={<IconCooking size={13} className="w-3.5 h-3.5" />}
-                className="text-xs px-2.5 py-1"
+                leftIcon={<IconCooking size={13} className="w-3.5 h-3.5 text-amber-100" />}
+                className="text-xs px-3 py-1 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white font-bold border-0 shadow-sm shadow-orange-500/30 active:scale-95"
               >
                 Start Prep
               </Button>

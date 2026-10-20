@@ -1,5 +1,6 @@
 import React from "react";
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/ModalDialogContext';
 import { supabase } from '../lib/supabase';
@@ -95,9 +96,9 @@ export default function StudentDashboard() {
   const [foodTypeFilter, setFoodTypeFilter] = useState<'ALL' | 'VEG' | 'NON_VEG'>('ALL');
   const [categoryFilter, setCategoryFilter] = useState<'ALL' | 'SOUTH_INDIAN' | 'NORTH_INDIAN' | 'RICE_MEALS' | 'SNACKS' | 'BEVERAGES' | 'DESSERTS' | 'PACKED_FOOD' | 'MEALS' | 'DRINKS'>('ALL');
 
-  // Date-Aware Service Scheduling State
+  // Date is strictly Today (orders can only be placed for today)
   const [selectedDate, setSelectedDate] = useState(() => {
-    return getNextFeasibleServiceDate(Date.now(), DEFAULT_LUNCH_SLOT_CONFIG, 10).dateStr;
+    return getISTDateTime(Date.now()).dateStr;
   });
 
   const getInitialPickupTime = () => {
@@ -116,14 +117,18 @@ export default function StudentDashboard() {
     const isToday = nextFeasible.dateStr === nowIST.dateStr;
     const startMin = parseTimeToMinutes(activeConfig.serviceStartTime || '08:00');
     const endMin = parseTimeToMinutes(activeConfig.serviceEndTime || '20:00');
+    const interval = Number(activeConfig.slotDurationMinutes) || 15;
+    const leadTime = Math.max(Number(activeConfig.defaultPrepTimeMinutes) || 10, Number(activeConfig.minNoticeMinutes) || 0);
 
     if (!isToday) {
       return minutesToTimeString(startMin);
     }
 
-    const earliest = Math.max(startMin, nowIST.totalMinutes + 15);
-    if (earliest <= endMin) {
-      return minutesToTimeString(earliest);
+    // Must be in the future: current time + lead time, snapped up to next slot
+    const targetMin = nowIST.totalMinutes + leadTime;
+    const nextSlotMin = Math.max(startMin, Math.ceil(targetMin / interval) * interval);
+    if (nextSlotMin <= endMin) {
+      return minutesToTimeString(nextSlotMin);
     }
     return minutesToTimeString(startMin);
   };
@@ -266,7 +271,9 @@ export default function StudentDashboard() {
     return generateSlotsFromConfig(slotConfig);
   }, [slotConfig]);
 
-  const isTodayServiceEnded = currentISTMinutes >= parseTimeToMinutes(slotConfig.serviceEndTime || '14:00');
+  const serviceStartMin = parseTimeToMinutes(slotConfig.serviceStartTime || '08:00');
+  const serviceEndMin = parseTimeToMinutes(slotConfig.serviceEndTime || '20:00');
+  const isTodayServiceEnded = currentISTMinutes >= serviceEndMin;
   const isLunchClosedForToday = !slotConfig.isLunchEnabled || isTodayServiceEnded;
 
   // Helper to determine slot availability
@@ -324,14 +331,38 @@ export default function StudentDashboard() {
   }, [pickupTime, scheduledCartItems, slotConfig, currentISTMinutes, selectedDate, currentTime]);
 
   const suggestedQuickSlots = useMemo(() => {
-    const startMin = parseTimeToMinutes(slotConfig.serviceStartTime || '12:00');
-    const endMin = parseTimeToMinutes(slotConfig.serviceEndTime || '14:00');
     const prepDuration = calculateOrderPrepDuration(scheduledCartItems, slotConfig.defaultPrepTimeMinutes || 10);
     const todayDateStr = getISTDateTime(currentTime).dateStr;
     const isToday = selectedDate === todayDateStr;
+    const minNotice = slotConfig.minNoticeMinutes || 0;
+    const disabledSet = new Set(slotConfig.disabledSlots || []);
 
+    // 1. If CUSTOM slot mode and customSlots exist, filter from the admin-defined custom slots
+    if (slotConfig.slotMode === 'CUSTOM' && Array.isArray(slotConfig.customSlots) && slotConfig.customSlots.length > 0) {
+      const candidates = slotConfig.customSlots
+        .filter(s => !disabledSet.has(normalizeTimeTo24h(s.startTime)))
+        .map(s => normalizeTimeTo24h(s.startTime))
+        .filter(Boolean)
+        .sort((a, b) => parseTimeToMinutes(a) - parseTimeToMinutes(b));
+
+      if (!isToday) {
+        return candidates.slice(0, 5);
+      }
+
+      // If today, filter out past or lead-time violated slots and return next 5 slots from current time
+      const earliestFeasibleMin = currentISTMinutes + Math.max(prepDuration, minNotice);
+      const feasible = candidates.filter(t => parseTimeToMinutes(t) >= earliestFeasibleMin);
+      return feasible.slice(0, 5);
+    }
+
+    // 2. FIXED slot mode: use configured service hours and configured interval duration (e.g. 5m, 10m, 15m, 30m, 60m)
+    const startMin = parseTimeToMinutes(slotConfig.serviceStartTime || '08:00');
+    const endMin = parseTimeToMinutes(slotConfig.serviceEndTime || '20:00');
+    const interval = Number(slotConfig.slotDurationMinutes) || 15;
+
+    // Strictly next slot from current time (including preparation & notice lead time)
     const earliestFeasibleMin = isToday
-      ? Math.max(startMin, currentISTMinutes + prepDuration)
+      ? Math.max(startMin, currentISTMinutes + Math.max(prepDuration, minNotice))
       : startMin;
 
     if (isToday && earliestFeasibleMin > endMin) {
@@ -339,12 +370,75 @@ export default function StudentDashboard() {
     }
 
     const list: string[] = [];
-    const firstSlot = Math.max(startMin, Math.ceil(earliestFeasibleMin / 15) * 15);
-    for (let m = firstSlot; m <= endMin && list.length < 6; m += 15) {
-      list.push(minutesToTimeString(m));
+    const firstSlot = Math.max(startMin, Math.ceil(earliestFeasibleMin / interval) * interval);
+    for (let m = firstSlot; m <= endMin && list.length < 5; m += interval) {
+      const slotStr = minutesToTimeString(m);
+      if (!disabledSet.has(slotStr)) {
+        list.push(slotStr);
+      }
     }
     return list;
   }, [slotConfig, currentISTMinutes, scheduledCartItems, selectedDate, currentTime]);
+
+  // Allowed minute dropdown options according to canteen slot strategy
+  const availableMinuteOptions = useMemo(() => {
+    if (slotConfig.slotMode === 'CUSTOM' && Array.isArray(slotConfig.customSlots) && slotConfig.customSlots.length > 0) {
+      const minutesSet = new Set<string>();
+      slotConfig.customSlots.forEach(s => {
+        const m = parseTimeToMinutes(s.startTime);
+        if (!isNaN(m)) {
+          minutesSet.add(String(m % 60).padStart(2, '0'));
+        }
+      });
+      const arr = Array.from(minutesSet).sort((a, b) => Number(a) - Number(b));
+      if (arr.length > 0) return arr;
+    }
+
+    const interval = Number(slotConfig.slotDurationMinutes) || 15;
+    const minutes: string[] = [];
+    for (let m = 0; m < 60; m += interval) {
+      minutes.push(String(m).padStart(2, '0'));
+    }
+    return minutes.length > 0 ? minutes : ['00'];
+  }, [slotConfig.slotMode, slotConfig.customSlots, slotConfig.slotDurationMinutes]);
+
+  // Snap current pickupTime to the nearest valid, future slot for today
+  useEffect(() => {
+    const todayDateStr = getISTDateTime(currentTime).dateStr;
+    if (selectedDate !== todayDateStr) {
+      setSelectedDate(todayDateStr);
+    }
+    const currentPickupMin = parseTimeToMinutes(pickupTime);
+    const prepDuration = calculateOrderPrepDuration(scheduledCartItems, slotConfig.defaultPrepTimeMinutes || 10);
+    const minNotice = slotConfig.minNoticeMinutes || 0;
+    const earliestFeasibleMin = currentISTMinutes + Math.max(prepDuration, minNotice);
+
+    // If today and pickupTime is in the past or before earliest feasible next slot, snap to the first available slot
+    if (currentPickupMin < earliestFeasibleMin) {
+      if (suggestedQuickSlots.length > 0) {
+        setPickupTime(suggestedQuickSlots[0]);
+        return;
+      }
+    }
+
+    if (availableMinuteOptions.length === 0) return;
+    const { hour, minute, period } = parse12hParts(pickupTime);
+    const minuteStr = String(minute).padStart(2, '0');
+    if (!availableMinuteOptions.includes(minuteStr)) {
+      // Find closest minute option
+      const currentMinNum = minute;
+      let closest = availableMinuteOptions[0];
+      let minDiff = 999;
+      for (const opt of availableMinuteOptions) {
+        const diff = Math.abs(Number(opt) - currentMinNum);
+        if (diff < minDiff) {
+          minDiff = diff;
+          closest = opt;
+        }
+      }
+      setPickupTime(compose24hString(hour, Number(closest), period));
+    }
+  }, [availableMinuteOptions, pickupTime, selectedDate, currentISTMinutes, currentTime, suggestedQuickSlots, scheduledCartItems, slotConfig.defaultPrepTimeMinutes, slotConfig.minNoticeMinutes]);
 
   useEffect(() => {
     if (smartSchedule.isValid && error) {
@@ -962,6 +1056,22 @@ export default function StudentDashboard() {
       return;
     }
 
+    // Authoritative check: Pickup time cannot be in the past or before required lead time
+    const nowIST = getISTDateTime(Date.now());
+    const isToday = selectedDate === nowIST.dateStr;
+    const reqMinutes = parseTimeToMinutes(smartSchedule.pickupTimeStr || pickupTime);
+    const prepDuration = calculateOrderPrepDuration(scheduledCartItems, slotConfig.defaultPrepTimeMinutes || 10);
+    const minNotice = slotConfig.minNoticeMinutes || 0;
+    const earliestAllowed = nowIST.totalMinutes + Math.max(prepDuration, minNotice);
+
+    if (isToday && (reqMinutes <= nowIST.totalMinutes || reqMinutes < earliestAllowed)) {
+      setError(`Cannot place order: selected pickup time (${formatSingleTime(smartSchedule.pickupTimeStr || pickupTime)}) has passed or is too soon. Please select the next available slot.`);
+      if (suggestedQuickSlots.length > 0) {
+        setPickupTime(suggestedQuickSlots[0]);
+      }
+      return;
+    }
+
     if (!smartSchedule.isValid) {
       setError(smartSchedule.reason || 'Please select a valid lunch pickup time.');
       return;
@@ -1200,6 +1310,16 @@ export default function StudentDashboard() {
 
   const handleCancelOrder = async () => {
     if (!activeOrder) return;
+
+    if (activeOrder.status !== 'PLACED') {
+      showAlert({
+        title: 'Cannot Cancel Order',
+        message: 'This order has already been accepted by the kitchen staff and cannot be cancelled.',
+        type: 'error'
+      });
+      return;
+    }
+
     const confirmed = await showConfirm({
       title: 'Cancel Order',
       message: 'Are you sure you want to cancel this order? This action cannot be undone.',
@@ -1224,8 +1344,8 @@ export default function StudentDashboard() {
 
     if (error) {
       console.warn('cancel_order RPC returned error, attempting fallback update:', error.message);
-      // Fallback: If in PLACED or ACCEPTED state, attempt direct status update to REJECTED
-      if (['PLACED', 'ACCEPTED'].includes(activeOrder.status)) {
+      // Fallback: If in PLACED state, attempt direct status update to REJECTED
+      if (activeOrder.status === 'PLACED') {
         try {
           const { error: directErr } = await supabase
             .from('orders')
@@ -1600,8 +1720,13 @@ export default function StudentDashboard() {
           <div className="col-span-12 grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
             {/* Left Column (8 cols): Compact Hero Promo + Combined Menu Header & Food Grid */}
             <div className="lg:col-span-8 space-y-4">
-              {/* Compact Hero Banner */}
-              <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#002b66] via-[#023e8a] to-[#001845] text-white p-3.5 sm:p-5 shadow-md">
+              {/* Compact Hero Banner with Motion */}
+              <motion.div
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+                className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#002b66] via-[#023e8a] to-[#001845] text-white p-3.5 sm:p-5 shadow-md"
+              >
                 <div className="relative z-10 flex items-center justify-between gap-4">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
@@ -1624,7 +1749,7 @@ export default function StudentDashboard() {
                     </span>
                   </div>
                 </div>
-              </div>
+              </motion.div>
 
               {/* Combined Menu Card (Filter & Search Header + Grid in single cohesive section) */}
               <div id="menu-items-section" className="bg-white/95 backdrop-blur-md border border-slate-200/90 rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 shadow-sm space-y-3 sm:space-y-4">
@@ -1911,8 +2036,13 @@ export default function StudentDashboard() {
 
             </div>
 
-            {/* Right Column (4 cols): Sticky Desktop Panel (Active Order Status or Cart Builder) */}
-            <div className="hidden lg:block lg:col-span-4 sticky top-20">
+            {/* Right Column (4 cols): Sticky Desktop Panel (Active Order Status or Cart Builder) with Motion */}
+            <motion.div
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.6, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
+              className="hidden lg:block lg:col-span-4 sticky top-20"
+            >
               <div className="bg-white border border-slate-200/90 rounded-3xl p-5 sm:p-6 shadow-lg shadow-slate-100 flex flex-col justify-between max-h-[calc(100vh-6rem)] overflow-y-auto">
                 {displayOrder ? (
                   /* ================= Active Order Live Status View Inside Box ================= */
@@ -1952,8 +2082,8 @@ export default function StudentDashboard() {
                         </div>
                       </div>
 
-                      {/* Cancel button: allowed for PLACED and ACCEPTED */}
-                      {['PLACED', 'ACCEPTED'].includes(displayOrder.status) && (
+                      {/* Cancel button: allowed anytime before staff accepts order (PLACED only) */}
+                      {displayOrder.status === 'PLACED' && (
                         <button
                           type="button"
                           onClick={handleCancelOrder}
@@ -1977,13 +2107,23 @@ export default function StudentDashboard() {
                       )}
                     </div>
 
-                    {/* Progress Step Bar */}
+                    {/* Progress Step Bar with Distinct Colors per Stage */}
                     <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3">
                       <div className="flex items-center justify-between relative px-2">
                         {/* Connecting background and active progress track */}
                         <div className="absolute left-[18px] right-[18px] top-2.5 h-0.5 bg-slate-200 -z-0">
                           <div
-                            className="h-full bg-[#1d68f2] transition-all duration-500"
+                            className={`h-full transition-all duration-500 ${
+                              displayOrder.status === 'COLLECTED'
+                                ? 'bg-gradient-to-r from-blue-500 via-emerald-500 via-amber-500 via-purple-500 to-teal-500'
+                                : displayOrder.status === 'READY'
+                                ? 'bg-gradient-to-r from-blue-500 via-emerald-500 via-amber-500 to-purple-600'
+                                : displayOrder.status === 'PREPARING'
+                                ? 'bg-gradient-to-r from-blue-500 via-emerald-500 to-amber-500'
+                                : displayOrder.status === 'ACCEPTED'
+                                ? 'bg-gradient-to-r from-blue-500 to-emerald-500'
+                                : 'bg-blue-500'
+                            }`}
                             style={{
                               width:
                                 displayOrder.status === 'PLACED' ? '0%' :
@@ -1995,21 +2135,58 @@ export default function StudentDashboard() {
                         </div>
 
                         {[
-                          { label: 'Placed', done: true },
-                          { label: 'Accepted', done: ['ACCEPTED', 'PREPARING', 'READY', 'COLLECTED'].includes(displayOrder.status) },
-                          { label: 'Cooking', done: ['PREPARING', 'READY', 'COLLECTED'].includes(displayOrder.status) },
-                          { label: 'Ready', done: ['READY', 'COLLECTED'].includes(displayOrder.status) },
-                          { label: 'Collected', done: displayOrder.status === 'COLLECTED' }
+                          {
+                            key: 'PLACED',
+                            label: 'Placed',
+                            done: true,
+                            current: displayOrder.status === 'PLACED',
+                            color: 'bg-blue-600 text-white border-blue-600 shadow-blue-500/25',
+                            textColor: 'text-blue-700',
+                          },
+                          {
+                            key: 'ACCEPTED',
+                            label: 'Accepted',
+                            done: ['ACCEPTED', 'PREPARING', 'READY', 'COLLECTED'].includes(displayOrder.status),
+                            current: displayOrder.status === 'ACCEPTED',
+                            color: 'bg-emerald-600 text-white border-emerald-600 shadow-emerald-500/25',
+                            textColor: 'text-emerald-700',
+                          },
+                          {
+                            key: 'PREPARING',
+                            label: 'Cooking',
+                            done: ['PREPARING', 'READY', 'COLLECTED'].includes(displayOrder.status),
+                            current: displayOrder.status === 'PREPARING',
+                            color: 'bg-amber-500 text-white border-amber-500 shadow-amber-500/25',
+                            textColor: 'text-amber-700',
+                          },
+                          {
+                            key: 'READY',
+                            label: 'Ready',
+                            done: ['READY', 'COLLECTED'].includes(displayOrder.status),
+                            current: displayOrder.status === 'READY',
+                            color: 'bg-purple-600 text-white border-purple-600 shadow-purple-500/25',
+                            textColor: 'text-purple-700',
+                          },
+                          {
+                            key: 'COLLECTED',
+                            label: 'Collected',
+                            done: displayOrder.status === 'COLLECTED',
+                            current: displayOrder.status === 'COLLECTED',
+                            color: 'bg-teal-600 text-white border-teal-600 shadow-teal-500/25',
+                            textColor: 'text-teal-700',
+                          }
                         ].map((step, idx) => (
                           <div key={idx} className="flex flex-col items-center z-10">
                             <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black border transition-all ${
                               step.done
-                                ? 'bg-[#1d68f2] border-white text-white shadow-xs'
+                                ? `${step.color} shadow-xs scale-105`
                                 : 'bg-white border-slate-300 text-slate-400'
-                            }`}>
+                            } ${step.current ? 'ring-2 ring-offset-1 ring-slate-300 scale-110' : ''}`}>
                               {step.done ? '✓' : idx + 1}
                             </div>
-                            <span className={`text-[10px] font-bold mt-1 ${step.done ? 'text-slate-800' : 'text-slate-400'}`}>
+                            <span className={`text-[10px] font-bold mt-1 transition-colors ${
+                              step.done ? step.textColor : 'text-slate-400'
+                            }`}>
                               {step.label}
                             </span>
                           </div>
@@ -2381,8 +2558,10 @@ export default function StudentDashboard() {
                         <label className="text-[11px] font-black uppercase tracking-wider text-slate-600">
                           Pickup Time
                         </label>
-                        <span className="text-[10px] text-[#1d68f2] font-bold bg-blue-50 px-2 py-0.5 rounded">
-                          Lunch Slots
+                        <span className="text-[10px] text-[#1d68f2] font-bold bg-blue-50 px-2 py-0.5 rounded border border-blue-100/60">
+                          {slotConfig.slotMode === 'CUSTOM'
+                            ? 'Custom Slots'
+                            : `${slotConfig.slotDurationMinutes || 15}m Fixed Slots`}
                         </span>
                       </div>
 
@@ -2422,7 +2601,7 @@ export default function StudentDashboard() {
                             aria-label="Select Pickup Minute"
                             className="w-full bg-slate-50 hover:bg-slate-100 text-slate-800 font-black text-xs rounded-lg px-2 py-1.5 outline-none cursor-pointer border border-slate-100 text-center"
                           >
-                            {Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0')).map(m => (
+                            {availableMinuteOptions.map(m => (
                               <option key={m} value={m}>{m}</option>
                             ))}
                           </select>
@@ -2466,25 +2645,27 @@ export default function StudentDashboard() {
                       </div>
 
                       {/* Quick suggestion slots */}
-                      <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-                        {suggestedQuickSlots.slice(0, 4).map(t => (
-                          <button
-                            key={t}
-                            type="button"
-                            onClick={() => {
-                              setPickupTime(t);
-                              if (error) setError('');
-                            }}
-                            className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition-all ${
-                              normalizeTimeTo24h(pickupTime) === t
-                                ? 'bg-[#1d68f2] text-white border-[#1d68f2] shadow-xs'
-                                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                            }`}
-                          >
-                            {formatSingleTime(t)}
-                          </button>
-                        ))}
-                      </div>
+                      {suggestedQuickSlots.length > 0 && (
+                        <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                          {suggestedQuickSlots.map(t => (
+                            <button
+                              key={t}
+                              type="button"
+                              onClick={() => {
+                                setPickupTime(t);
+                                if (error) setError('');
+                              }}
+                              className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition-all ${
+                                normalizeTimeTo24h(pickupTime) === t
+                                  ? 'bg-[#1d68f2] text-white border-[#1d68f2] shadow-xs'
+                                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                              }`}
+                            >
+                              {formatSingleTime(t)}
+                            </button>
+                          ))}
+                        </div>
+                      )}
 
                       {/* Smart Kitchen schedule info */}
                       {smartSchedule.isValid && (
@@ -2530,11 +2711,13 @@ export default function StudentDashboard() {
 
                       {(() => {
                         const isSelectedSlotClosed = isLunchClosedForToday;
+                        const isScheduleInvalid = !smartSchedule.isValid;
                         const isOrderDisabled =
                           isSuspended ||
                           isSunday ||
                           isBeforeOpeningTime ||
                           isSelectedSlotClosed ||
+                          isScheduleInvalid ||
                           cart.length === 0 ||
                           !pickupTime ||
                           submitting ||
@@ -2558,6 +2741,8 @@ export default function StudentDashboard() {
                               'Lunch Booking Opens at 9:30 AM'
                             ) : isSelectedSlotClosed ? (
                               'Lunch Ordering Closed'
+                            ) : isScheduleInvalid ? (
+                              smartSchedule.badge || 'Invalid Pickup Slot'
                             ) : submitting ? (
                               'Placing Order...'
                             ) : (
@@ -2575,71 +2760,73 @@ export default function StudentDashboard() {
                   </div>
                 )}
               </div>
-            </div>
+            </motion.div>
           </div>
 
           {/* Responsive Mobile Drawer Trigger (< lg screens) */}
-          <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 p-3 bg-white/95 backdrop-blur-md border-t border-slate-200 shadow-2xl flex items-center justify-between gap-3">
-            {displayOrder ? (
-              <>
-                <div className="flex items-center gap-2">
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm ${
-                    displayOrder.status === 'COLLECTED'
-                      ? 'bg-emerald-100 text-emerald-700'
-                      : displayOrder.status === 'READY'
-                      ? 'bg-emerald-100 text-emerald-700'
-                      : 'bg-blue-100 text-[#1d68f2]'
-                  }`}>
-                    {displayOrder.status === 'COLLECTED' ? <CheckCircle2 size={18} /> : <Flame size={18} />}
-                  </div>
-                  <div>
-                    <div className="text-xs font-black text-slate-900 leading-tight flex items-center gap-1.5">
-                      <span>Order #{displayOrder.order_number}</span>
-                      <span className={`text-[10px] font-bold ${displayOrder.status === 'COLLECTED' ? 'text-emerald-700' : 'text-[#1d68f2]'}`}>
-                        ({displayOrder.status === 'COLLECTED' ? 'COLLECTED' : getOrderStatusText(displayOrder as any)})
-                      </span>
+          <div className="lg:hidden fixed bottom-2 left-2 right-2 sm:left-3 sm:right-3 z-40 pointer-events-none">
+            <div className="pointer-events-auto w-full h-15 bg-white/95 backdrop-blur-md border border-slate-200/90 rounded-2xl px-3 sm:px-4 flex items-center justify-between shadow-lg">
+              {displayOrder ? (
+                <>
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm shrink-0 ${
+                      displayOrder.status === 'COLLECTED'
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : displayOrder.status === 'READY'
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : 'bg-blue-100 text-[#1d68f2]'
+                    }`}>
+                      {displayOrder.status === 'COLLECTED' ? <CheckCircle2 size={18} /> : <Flame size={18} />}
                     </div>
-                    <div className="text-[11px] text-slate-500 font-semibold">
-                      {displayOrder.status === 'COLLECTED'
-                        ? `Collected at ${formatSingleTime((displayOrder as any).collected_at || new Date().toISOString())}`
-                        : `Pickup at ${formatSingleTime(displayOrder.pickup_time)}`}
+                    <div className="min-w-0">
+                      <div className="text-xs font-black text-slate-900 leading-tight flex items-center gap-1.5 truncate">
+                        <span>Order #{displayOrder.order_number}</span>
+                        <span className={`text-[10px] font-bold ${displayOrder.status === 'COLLECTED' ? 'text-emerald-700' : 'text-[#1d68f2]'}`}>
+                          ({displayOrder.status === 'COLLECTED' ? 'COLLECTED' : getOrderStatusText(displayOrder as any)})
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-500 font-medium truncate">
+                        {displayOrder.status === 'COLLECTED'
+                          ? `Collected at ${formatSingleTime((displayOrder as any).collected_at || new Date().toISOString())}`
+                          : `Pickup at ${formatSingleTime(displayOrder.pickup_time)}`}
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <button
-                  type="button"
-                  onClick={() => setCartOpen(true)}
-                  className="px-4 py-2 rounded-xl bg-[#1d68f2] text-white font-black text-xs shadow-md shadow-blue-500/20 flex items-center gap-1 cursor-pointer"
-                >
-                  <span>{displayOrder.status === 'COLLECTED' ? 'View Collected Order' : 'View Status & OTP'}</span>
-                  <IconChevronUp size={14} />
-                </button>
-              </>
-            ) : (
-              <>
-                <div className="flex items-center gap-2">
-                  <div className="w-10 h-10 rounded-xl bg-blue-100 text-[#1d68f2] flex items-center justify-center font-black text-sm">
-                    {cartTotalItems}
-                  </div>
-                  <div>
-                    <div className="text-xs font-black text-slate-900 leading-tight">Your Order</div>
-                    <div className="text-xs font-bold text-[#1d68f2]">
-                      ₹{ledger.gross_payable.toFixed(2)}
+                  <button
+                    type="button"
+                    onClick={() => setCartOpen(true)}
+                    className="px-3.5 py-2 rounded-xl bg-[#1d68f2] hover:bg-blue-600 active:scale-95 text-white font-bold text-xs shadow-xs transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
+                  >
+                    <span>{displayOrder.status === 'COLLECTED' ? 'View Receipt' : 'View OTP'}</span>
+                    <IconChevronUp size={14} />
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-200/80 text-[#1d68f2] flex items-center justify-center font-black text-sm shadow-2xs">
+                      {cartTotalItems}
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-slate-800 leading-tight">Your Order</div>
+                      <div className="text-xs font-black text-[#1d68f2]">
+                        ₹{ledger.gross_payable.toFixed(2)}
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <button
-                  type="button"
-                  onClick={() => setCartOpen(true)}
-                  className="px-5 py-2.5 rounded-xl bg-[#1d68f2] text-white font-black text-xs shadow-md shadow-blue-500/20 flex items-center gap-1.5"
-                >
-                  <span>View & Checkout</span>
-                  <IconChevronUp size={14} />
-                </button>
-              </>
-            )}
+                  <button
+                    type="button"
+                    onClick={() => setCartOpen(true)}
+                    className="px-4 py-2 rounded-xl bg-[#1d68f2] hover:bg-blue-600 active:scale-95 text-white font-bold text-xs shadow-xs transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
+                  >
+                    <span>View & Checkout</span>
+                    <IconChevronUp size={14} />
+                  </button>
+                </>
+              )}
+            </div>
           </div>
 
           {/* Mobile Bottom Sheet Modal when cartOpen is true on small screens */}
@@ -2668,12 +2855,22 @@ export default function StudentDashboard() {
                       </button>
                     </div>
 
-                    {/* Progress Step Bar */}
+                    {/* Progress Step Bar with Distinct Colors per Stage */}
                     <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3 mb-4">
                       <div className="flex items-center justify-between relative px-2">
                         <div className="absolute left-[18px] right-[18px] top-2.5 h-0.5 bg-slate-200 -z-0">
                           <div
-                            className="h-full bg-[#1d68f2] transition-all duration-500"
+                            className={`h-full transition-all duration-500 ${
+                              displayOrder.status === 'COLLECTED'
+                                ? 'bg-gradient-to-r from-blue-500 via-emerald-500 via-amber-500 via-purple-500 to-teal-500'
+                                : displayOrder.status === 'READY'
+                                ? 'bg-gradient-to-r from-blue-500 via-emerald-500 via-amber-500 to-purple-600'
+                                : displayOrder.status === 'PREPARING'
+                                ? 'bg-gradient-to-r from-blue-500 via-emerald-500 to-amber-500'
+                                : displayOrder.status === 'ACCEPTED'
+                                ? 'bg-gradient-to-r from-blue-500 to-emerald-500'
+                                : 'bg-blue-500'
+                            }`}
                             style={{
                               width:
                                 displayOrder.status === 'PLACED' ? '0%' :
@@ -2685,21 +2882,58 @@ export default function StudentDashboard() {
                         </div>
 
                         {[
-                          { label: 'Placed', done: true },
-                          { label: 'Accepted', done: ['ACCEPTED', 'PREPARING', 'READY', 'COLLECTED'].includes(displayOrder.status) },
-                          { label: 'Cooking', done: ['PREPARING', 'READY', 'COLLECTED'].includes(displayOrder.status) },
-                          { label: 'Ready', done: ['READY', 'COLLECTED'].includes(displayOrder.status) },
-                          { label: 'Collected', done: displayOrder.status === 'COLLECTED' }
+                          {
+                            key: 'PLACED',
+                            label: 'Placed',
+                            done: true,
+                            current: displayOrder.status === 'PLACED',
+                            color: 'bg-blue-600 text-white border-blue-600 shadow-blue-500/25',
+                            textColor: 'text-blue-700',
+                          },
+                          {
+                            key: 'ACCEPTED',
+                            label: 'Accepted',
+                            done: ['ACCEPTED', 'PREPARING', 'READY', 'COLLECTED'].includes(displayOrder.status),
+                            current: displayOrder.status === 'ACCEPTED',
+                            color: 'bg-emerald-600 text-white border-emerald-600 shadow-emerald-500/25',
+                            textColor: 'text-emerald-700',
+                          },
+                          {
+                            key: 'PREPARING',
+                            label: 'Cooking',
+                            done: ['PREPARING', 'READY', 'COLLECTED'].includes(displayOrder.status),
+                            current: displayOrder.status === 'PREPARING',
+                            color: 'bg-amber-500 text-white border-amber-500 shadow-amber-500/25',
+                            textColor: 'text-amber-700',
+                          },
+                          {
+                            key: 'READY',
+                            label: 'Ready',
+                            done: ['READY', 'COLLECTED'].includes(displayOrder.status),
+                            current: displayOrder.status === 'READY',
+                            color: 'bg-purple-600 text-white border-purple-600 shadow-purple-500/25',
+                            textColor: 'text-purple-700',
+                          },
+                          {
+                            key: 'COLLECTED',
+                            label: 'Collected',
+                            done: displayOrder.status === 'COLLECTED',
+                            current: displayOrder.status === 'COLLECTED',
+                            color: 'bg-teal-600 text-white border-teal-600 shadow-teal-500/25',
+                            textColor: 'text-teal-700',
+                          }
                         ].map((step, idx) => (
                           <div key={idx} className="flex flex-col items-center z-10">
                             <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black border transition-all ${
                               step.done
-                                ? 'bg-[#1d68f2] border-white text-white shadow-xs'
+                                ? `${step.color} shadow-xs scale-105`
                                 : 'bg-white border-slate-300 text-slate-400'
-                            }`}>
+                            } ${step.current ? 'ring-2 ring-offset-1 ring-slate-300 scale-110' : ''}`}>
                               {step.done ? '✓' : idx + 1}
                             </div>
-                            <span className={`text-[10px] font-bold mt-1 ${step.done ? 'text-slate-800' : 'text-slate-400'}`}>
+                            <span className={`text-[10px] font-bold mt-1 transition-colors ${
+                              step.done ? step.textColor : 'text-slate-400'
+                            }`}>
                               {step.label}
                             </span>
                           </div>
@@ -2815,7 +3049,8 @@ export default function StudentDashboard() {
                       </div>
                     )}
 
-                    {['PLACED', 'ACCEPTED'].includes(displayOrder.status) && (
+                    {/* Cancel button: allowed anytime before staff accepts order (PLACED only) */}
+                    {displayOrder.status === 'PLACED' && (
                       <button
                         type="button"
                         onClick={() => { handleCancelOrder(); setCartOpen(false); }}
@@ -2871,8 +3106,10 @@ export default function StudentDashboard() {
                     <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
                       <div className="flex items-center justify-between">
                         <label className="text-[11px] font-bold text-slate-700">Pickup Time (12h AM/PM)</label>
-                        <span className="text-[10px] text-[#1d68f2] font-bold bg-blue-50 px-2 py-0.5 rounded">
-                          {formatSingleTime(pickupTime)}
+                        <span className="text-[10px] text-[#1d68f2] font-bold bg-blue-50 px-2 py-0.5 rounded border border-blue-100/60">
+                          {slotConfig.slotMode === 'CUSTOM'
+                            ? 'Custom'
+                            : `${slotConfig.slotDurationMinutes || 15}m Fixed`}
                         </span>
                       </div>
 
@@ -2910,7 +3147,7 @@ export default function StudentDashboard() {
                             aria-label="Select Pickup Minute"
                             className="w-full bg-slate-50 hover:bg-slate-100 text-slate-800 font-black text-xs rounded-lg px-2 py-1.5 outline-none cursor-pointer border border-slate-100 text-center"
                           >
-                            {Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0')).map(m => (
+                            {availableMinuteOptions.map(m => (
                               <option key={m} value={m}>{m}</option>
                             ))}
                           </select>
@@ -2956,7 +3193,7 @@ export default function StudentDashboard() {
                       {/* Quick suggestion slots */}
                       {suggestedQuickSlots.length > 0 && (
                         <div className="flex items-center gap-1.5 flex-wrap pt-1">
-                          {suggestedQuickSlots.slice(0, 4).map(t => (
+                          {suggestedQuickSlots.map(t => (
                             <button
                               key={t}
                               type="button"
@@ -2989,10 +3226,12 @@ export default function StudentDashboard() {
                     <form onSubmit={e => { handlePlaceOrder(e); setCartOpen(false); }}>
                       <button
                         type="submit"
-                        disabled={cart.length === 0 || !pickupTime || submitting || isSuspended}
-                        className="w-full py-3 bg-[#1d68f2] text-white rounded-xl font-black text-xs shadow-md disabled:bg-slate-300"
+                        disabled={cart.length === 0 || !pickupTime || !smartSchedule.isValid || submitting || isSuspended || isLunchClosedForToday}
+                        className="w-full py-3 bg-[#1d68f2] text-white rounded-xl font-black text-xs shadow-md disabled:bg-slate-300 disabled:cursor-not-allowed"
                       >
-                        Confirm & Place Order (₹{ledger.gross_payable.toFixed(2)})
+                        {!smartSchedule.isValid
+                          ? (smartSchedule.badge || 'Invalid Pickup Slot')
+                          : `Confirm & Place Order (₹${ledger.gross_payable.toFixed(2)})`}
                       </button>
                     </form>
                   </div>

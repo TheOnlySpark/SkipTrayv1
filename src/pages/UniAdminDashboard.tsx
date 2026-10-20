@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useLocation, Link } from "react-router-dom";
+import { motion } from "motion/react";
 import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/ModalDialogContext';
 import { supabase } from '../lib/supabase';
@@ -1294,10 +1295,16 @@ export default function UniAdminDashboard() {
       ) : (
         /* Executive Campus Overview Hub Matching Screenshot Exactly */
         <div className="space-y-5">
-          {/* Top 4 KPI Metrics matching screenshot exactly */}
+          {/* Top 4 KPI Metrics matching screenshot exactly with PRD motion */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* Metric 1: Total Cafeterias */}
-            <div className="relative overflow-hidden bg-white p-5 rounded-[1.75rem] border border-slate-200/80 shadow-xs flex flex-col justify-between">
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
+              whileHover={{ y: -4, transition: { duration: 0.2 } }}
+              className="relative overflow-hidden bg-white p-5 rounded-[1.75rem] border border-slate-200/80 shadow-xs flex flex-col justify-between group hover:shadow-md transition-shadow"
+            >
               {/* Subtle background wave */}
               <div className="absolute right-0 bottom-0 pointer-events-none opacity-40">
                 <svg width="130" height="60" viewBox="0 0 130 60" fill="none">
@@ -1306,12 +1313,12 @@ export default function UniAdminDashboard() {
               </div>
 
               <div className="flex items-start justify-between">
-                <div className="w-12 h-12 rounded-2xl bg-[#e0f2fe] text-[#0284c7] flex items-center justify-center shrink-0">
+                <div className="w-12 h-12 rounded-2xl bg-[#e0f2fe] text-[#0284c7] flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
                   <Store size={22} strokeWidth={2.2} />
                 </div>
                 <Link
                   to="/uni-admin/canteens"
-                  className="w-7 h-7 rounded-full bg-slate-50 border border-slate-200/70 hover:bg-slate-100 flex items-center justify-center text-slate-500 transition"
+                  className="w-7 h-7 rounded-full bg-slate-50 border border-slate-200/70 hover:bg-slate-100 flex items-center justify-center text-slate-500 transition active:scale-95"
                   title="View Cafeterias"
                 >
                   <ArrowRight size={13} />
@@ -1329,10 +1336,16 @@ export default function UniAdminDashboard() {
                   <span>↑ 1 new this month</span>
                 </div>
               </div>
-            </div>
+            </motion.div>
 
             {/* Metric 2: Total Orders */}
-            <div className="relative overflow-hidden bg-white p-5 rounded-[1.75rem] border border-slate-200/80 shadow-xs flex flex-col justify-between">
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
+              whileHover={{ y: -4, transition: { duration: 0.2 } }}
+              className="relative overflow-hidden bg-white p-5 rounded-[1.75rem] border border-slate-200/80 shadow-xs flex flex-col justify-between group hover:shadow-md transition-shadow"
+            >
               {/* Subtle background wave */}
               <div className="absolute right-0 bottom-0 pointer-events-none opacity-40">
                 <svg width="130" height="60" viewBox="0 0 130 60" fill="none">
@@ -1341,12 +1354,12 @@ export default function UniAdminDashboard() {
               </div>
 
               <div className="flex items-start justify-between">
-                <div className="w-12 h-12 rounded-2xl bg-[#ecfdf5] text-[#059669] flex items-center justify-center shrink-0">
+                <div className="w-12 h-12 rounded-2xl bg-[#ecfdf5] text-[#059669] flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
                   <ClipboardList size={22} strokeWidth={2.2} />
                 </div>
                 <Link
                   to="/uni-admin/analytics"
-                  className="w-7 h-7 rounded-full bg-slate-50 border border-slate-200/70 hover:bg-slate-100 flex items-center justify-center text-slate-500 transition"
+                  className="w-7 h-7 rounded-full bg-slate-50 border border-slate-200/70 hover:bg-slate-100 flex items-center justify-center text-slate-500 transition active:scale-95"
                   title="View Orders Analytics"
                 >
                   <ArrowRight size={13} />
@@ -1364,10 +1377,16 @@ export default function UniAdminDashboard() {
                   <span>↑ {tenantStats.weeklyOrdersChange}% from last week</span>
                 </div>
               </div>
-            </div>
+            </motion.div>
 
             {/* Metric 3: Total Revenue */}
-            <div className="relative overflow-hidden bg-white p-5 rounded-[1.75rem] border border-slate-200/80 shadow-xs flex flex-col justify-between">
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.7, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
+              whileHover={{ y: -4, transition: { duration: 0.2 } }}
+              className="relative overflow-hidden bg-white p-5 rounded-[1.75rem] border border-slate-200/80 shadow-xs flex flex-col justify-between group hover:shadow-md transition-shadow"
+            >
               {/* Subtle background wave */}
               <div className="absolute right-0 bottom-0 pointer-events-none opacity-40">
                 <svg width="130" height="60" viewBox="0 0 130 60" fill="none">
@@ -1376,12 +1395,12 @@ export default function UniAdminDashboard() {
               </div>
 
               <div className="flex items-start justify-between">
-                <div className="w-12 h-12 rounded-2xl bg-[#faf5ff] text-[#9333ea] flex items-center justify-center shrink-0">
+                <div className="w-12 h-12 rounded-2xl bg-[#faf5ff] text-[#9333ea] flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
                   <span className="text-2xl font-black">₹</span>
                 </div>
                 <Link
                   to="/uni-admin/analytics"
-                  className="w-7 h-7 rounded-full bg-slate-50 border border-slate-200/70 hover:bg-slate-100 flex items-center justify-center text-slate-500 transition"
+                  className="w-7 h-7 rounded-full bg-slate-50 border border-slate-200/70 hover:bg-slate-100 flex items-center justify-center text-slate-500 transition active:scale-95"
                   title="View Revenue Details"
                 >
                   <ArrowRight size={13} />
@@ -1399,10 +1418,16 @@ export default function UniAdminDashboard() {
                   <span>↑ {tenantStats.monthlyRevenueChange}% from last month</span>
                 </div>
               </div>
-            </div>
+            </motion.div>
 
             {/* Metric 4: Active Students */}
-            <div className="relative overflow-hidden bg-white p-5 rounded-[1.75rem] border border-slate-200/80 shadow-xs flex flex-col justify-between">
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.8, delay: 0.4, ease: [0.16, 1, 0.3, 1] }}
+              whileHover={{ y: -4, transition: { duration: 0.2 } }}
+              className="relative overflow-hidden bg-white p-5 rounded-[1.75rem] border border-slate-200/80 shadow-xs flex flex-col justify-between group hover:shadow-md transition-shadow"
+            >
               {/* Subtle background wave */}
               <div className="absolute right-0 bottom-0 pointer-events-none opacity-40">
                 <svg width="130" height="60" viewBox="0 0 130 60" fill="none">
@@ -1411,7 +1436,7 @@ export default function UniAdminDashboard() {
               </div>
 
               <div className="flex items-start justify-between">
-                <div className="w-12 h-12 rounded-2xl bg-[#fdf2f8] text-[#db2777] flex items-center justify-center shrink-0">
+                <div className="w-12 h-12 rounded-2xl bg-[#fdf2f8] text-[#db2777] flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
                   <Users size={22} strokeWidth={2.2} />
                 </div>
                 <div className="w-7 h-7 rounded-full bg-slate-50 border border-slate-200/70 flex items-center justify-center text-slate-500">
@@ -1430,7 +1455,7 @@ export default function UniAdminDashboard() {
                   <span>Registered on platform</span>
                 </div>
               </div>
-            </div>
+            </motion.div>
           </div>
 
           {/* Row 2: Revenue Trend & Orders Dual Chart + Cafeterias Table */}
@@ -1716,7 +1741,13 @@ export default function UniAdminDashboard() {
           {/* Quick Hub Modules Grid matching bottom 2 cards in screenshot */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
             {/* Bottom Card 1: Canteen Admins */}
-            <div className="relative overflow-hidden bg-white border border-slate-200/80 rounded-[1.75rem] p-6 shadow-xs flex flex-col justify-between hover:shadow-md transition">
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.5, ease: [0.16, 1, 0.3, 1] }}
+              whileHover={{ y: -3, transition: { duration: 0.2 } }}
+              className="relative overflow-hidden bg-white border border-slate-200/80 rounded-[1.75rem] p-6 shadow-xs flex flex-col justify-between hover:shadow-md transition"
+            >
               {/* Background decorative users illustration */}
               <div className="absolute right-4 bottom-4 pointer-events-none opacity-20">
                 <Users size={120} className="text-blue-500" />
@@ -1741,7 +1772,7 @@ export default function UniAdminDashboard() {
               <div className="relative z-10 mt-5">
                 <Link
                   to="/uni-admin/admins"
-                  className="w-full sm:w-auto inline-flex items-center justify-between gap-3 px-4 py-2.5 bg-blue-50/70 hover:bg-blue-100/70 text-[#1d68f2] font-extrabold text-xs rounded-xl transition"
+                  className="w-full sm:w-auto inline-flex items-center justify-between gap-3 px-4 py-2.5 bg-blue-50/70 hover:bg-blue-100/70 text-[#1d68f2] font-extrabold text-xs rounded-xl transition active:scale-95"
                 >
                   <span className="flex items-center gap-2">
                     <Store size={15} />
@@ -1750,10 +1781,16 @@ export default function UniAdminDashboard() {
                   <ArrowRight size={14} />
                 </Link>
               </div>
-            </div>
+            </motion.div>
 
             {/* Bottom Card 2: Weekly Analytics */}
-            <div className="relative overflow-hidden bg-white border border-slate-200/80 rounded-[1.75rem] p-6 shadow-xs flex flex-col justify-between hover:shadow-md transition">
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.58, ease: [0.16, 1, 0.3, 1] }}
+              whileHover={{ y: -3, transition: { duration: 0.2 } }}
+              className="relative overflow-hidden bg-white border border-slate-200/80 rounded-[1.75rem] p-6 shadow-xs flex flex-col justify-between hover:shadow-md transition"
+            >
               {/* Background decorative chart wave illustration */}
               <div className="absolute right-4 bottom-2 pointer-events-none opacity-30">
                 <svg width="150" height="90" viewBox="0 0 150 90" fill="none">
@@ -1784,7 +1821,7 @@ export default function UniAdminDashboard() {
               <div className="relative z-10 mt-5">
                 <Link
                   to="/uni-admin/analytics"
-                  className="w-full sm:w-auto inline-flex items-center justify-between gap-3 px-4 py-2.5 bg-blue-50/70 hover:bg-blue-100/70 text-[#1d68f2] font-extrabold text-xs rounded-xl transition"
+                  className="w-full sm:w-auto inline-flex items-center justify-between gap-3 px-4 py-2.5 bg-blue-50/70 hover:bg-blue-100/70 text-[#1d68f2] font-extrabold text-xs rounded-xl transition active:scale-95"
                 >
                   <span className="flex items-center gap-2">
                     <Store size={15} />
@@ -1793,7 +1830,7 @@ export default function UniAdminDashboard() {
                   <ArrowRight size={14} />
                 </Link>
               </div>
-            </div>
+            </motion.div>
           </div>
         </div>
       )}
