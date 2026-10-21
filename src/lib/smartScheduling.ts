@@ -36,6 +36,7 @@ export interface OrderScheduleResult {
   isValid: boolean; // alias for isAvailable
   validationCode: ScheduleValidationCode;
   statusBadge: string; // e.g. "12:30 PM", "Too Soon", "Past Time", "Outside Hours", "Invalid Time", "Closed"
+  badge?: string; // alias for statusBadge
   error?: string;
   reason?: string; // alias for error
   
@@ -157,6 +158,7 @@ export function calculateLocalOrderSchedule(
       isValid,
       validationCode,
       statusBadge,
+      badge: statusBadge,
       error: errorMsg,
       reason: errorMsg,
       serviceDateStr: selectedDateStr,
