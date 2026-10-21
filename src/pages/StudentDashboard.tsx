@@ -1,5 +1,6 @@
 import React from "react";
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/ModalDialogContext';
 import { supabase } from '../lib/supabase';
@@ -21,7 +22,7 @@ import {
 import { QRCodeSVG } from '../components/QRCode';
 import { calculateOrderLedger } from '../lib/ledger';
 import { formatErrorMessage } from '../utils/validation';
-import { Lock, Radio, CheckCircle2, Sparkles, ShieldCheck, Star, X as LucideX, ArrowLeft, ShoppingCart, Flame, UtensilsCrossed, Trash2, ArrowRight, Heart, Coffee, Check, LayoutGrid, Leaf, Package } from 'lucide-react';
+import { Lock, Radio, CheckCircle2, Sparkles, ShieldCheck, Star, X as LucideX, ArrowLeft, ShoppingCart, Flame, UtensilsCrossed, Trash2, ArrowRight, Heart, Check, LayoutGrid, Leaf, Package } from 'lucide-react';
 import { playStatusChime, triggerHapticFeedback } from '../utils/notificationSound';
 import { useSearchParams, Link } from 'react-router-dom';
 
@@ -79,7 +80,6 @@ export default function StudentDashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get('tab');
   const showHistory = activeTab === 'history';
-  const showMenuExplicit = activeTab === 'menu';
 
   const setShowHistory = (show: boolean) => {
     const next = new URLSearchParams(searchParams);
@@ -91,24 +91,14 @@ export default function StudentDashboard() {
     setSearchParams(next, { replace: false });
   };
 
-  // Scroll to menu items section when tab=menu is visited
-  useEffect(() => {
-    if (showMenuExplicit) {
-      const el = document.getElementById('menu-items-section');
-      if (el) {
-        setTimeout(() => el.scrollIntoView({ behavior: 'smooth' }), 100);
-      }
-    }
-  }, [showMenuExplicit]);
-
   // Food Search & Filter States
   const [foodSearchQuery, setFoodSearchQuery] = useState('');
   const [foodTypeFilter, setFoodTypeFilter] = useState<'ALL' | 'VEG' | 'NON_VEG'>('ALL');
   const [categoryFilter, setCategoryFilter] = useState<'ALL' | 'SOUTH_INDIAN' | 'NORTH_INDIAN' | 'RICE_MEALS' | 'SNACKS' | 'BEVERAGES' | 'DESSERTS' | 'PACKED_FOOD' | 'MEALS' | 'DRINKS'>('ALL');
 
-  // Date-Aware Service Scheduling State
+  // Date is strictly Today (orders can only be placed for today)
   const [selectedDate, setSelectedDate] = useState(() => {
-    return getNextFeasibleServiceDate(Date.now(), DEFAULT_LUNCH_SLOT_CONFIG, 10).dateStr;
+    return getISTDateTime(Date.now()).dateStr;
   });
 
   const getInitialPickupTime = () => {
@@ -127,14 +117,18 @@ export default function StudentDashboard() {
     const isToday = nextFeasible.dateStr === nowIST.dateStr;
     const startMin = parseTimeToMinutes(activeConfig.serviceStartTime || '08:00');
     const endMin = parseTimeToMinutes(activeConfig.serviceEndTime || '20:00');
+    const interval = Number(activeConfig.slotDurationMinutes) || 15;
+    const leadTime = Math.max(Number(activeConfig.defaultPrepTimeMinutes) || 10, Number(activeConfig.minNoticeMinutes) || 0);
 
     if (!isToday) {
       return minutesToTimeString(startMin);
     }
 
-    const earliest = Math.max(startMin, nowIST.totalMinutes + 15);
-    if (earliest <= endMin) {
-      return minutesToTimeString(earliest);
+    // Must be in the future: current time + lead time, snapped up to next slot
+    const targetMin = nowIST.totalMinutes + leadTime;
+    const nextSlotMin = Math.max(startMin, Math.ceil(targetMin / interval) * interval);
+    if (nextSlotMin <= endMin) {
+      return minutesToTimeString(nextSlotMin);
     }
     return minutesToTimeString(startMin);
   };
@@ -142,6 +136,24 @@ export default function StudentDashboard() {
   const [cart, setCart] = useState<{ item: MenuItem, quantity: number }[]>([]);
   const [showCartBuilder, setShowCartBuilder] = useState(false);
   const [pickupTime, setPickupTime] = useState(getInitialPickupTime);
+
+  // Helper to convert 24h string ("16:31") to 12h parts and vice versa
+  const parse12hParts = (timeStr?: string | null) => {
+    const min = parseTimeToMinutes(timeStr);
+    if (isNaN(min)) return { hour: 12, minute: 0, period: 'PM' as const };
+    const h = Math.floor(min / 60) % 24;
+    const m = min % 60;
+    const period: 'AM' | 'PM' = h >= 12 ? 'PM' : 'AM';
+    const hour = h > 12 ? h - 12 : h === 0 ? 12 : h;
+    return { hour, minute: m, period };
+  };
+
+  const compose24hString = (hour: number, minute: number, period: 'AM' | 'PM') => {
+    let h = hour % 12;
+    if (period === 'PM') h += 12;
+    return `${String(h).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+  };
+
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [cartOpen, setCartOpen] = useState(false);
@@ -259,7 +271,9 @@ export default function StudentDashboard() {
     return generateSlotsFromConfig(slotConfig);
   }, [slotConfig]);
 
-  const isTodayServiceEnded = currentISTMinutes >= parseTimeToMinutes(slotConfig.serviceEndTime || '14:00');
+  const serviceStartMin = parseTimeToMinutes(slotConfig.serviceStartTime || '08:00');
+  const serviceEndMin = parseTimeToMinutes(slotConfig.serviceEndTime || '20:00');
+  const isTodayServiceEnded = currentISTMinutes >= serviceEndMin;
   const isLunchClosedForToday = !slotConfig.isLunchEnabled || isTodayServiceEnded;
 
   // Helper to determine slot availability
@@ -317,14 +331,38 @@ export default function StudentDashboard() {
   }, [pickupTime, scheduledCartItems, slotConfig, currentISTMinutes, selectedDate, currentTime]);
 
   const suggestedQuickSlots = useMemo(() => {
-    const startMin = parseTimeToMinutes(slotConfig.serviceStartTime || '12:00');
-    const endMin = parseTimeToMinutes(slotConfig.serviceEndTime || '14:00');
     const prepDuration = calculateOrderPrepDuration(scheduledCartItems, slotConfig.defaultPrepTimeMinutes || 10);
     const todayDateStr = getISTDateTime(currentTime).dateStr;
     const isToday = selectedDate === todayDateStr;
+    const minNotice = slotConfig.minNoticeMinutes || 0;
+    const disabledSet = new Set(slotConfig.disabledSlots || []);
 
+    // 1. If CUSTOM slot mode and customSlots exist, filter from the admin-defined custom slots
+    if (slotConfig.slotMode === 'CUSTOM' && Array.isArray(slotConfig.customSlots) && slotConfig.customSlots.length > 0) {
+      const candidates = slotConfig.customSlots
+        .filter(s => !disabledSet.has(normalizeTimeTo24h(s.startTime)))
+        .map(s => normalizeTimeTo24h(s.startTime))
+        .filter(Boolean)
+        .sort((a, b) => parseTimeToMinutes(a) - parseTimeToMinutes(b));
+
+      if (!isToday) {
+        return candidates.slice(0, 5);
+      }
+
+      // If today, filter out past or lead-time violated slots and return next 5 slots from current time
+      const earliestFeasibleMin = currentISTMinutes + Math.max(prepDuration, minNotice);
+      const feasible = candidates.filter(t => parseTimeToMinutes(t) >= earliestFeasibleMin);
+      return feasible.slice(0, 5);
+    }
+
+    // 2. FIXED slot mode: use configured service hours and configured interval duration (e.g. 5m, 10m, 15m, 30m, 60m)
+    const startMin = parseTimeToMinutes(slotConfig.serviceStartTime || '08:00');
+    const endMin = parseTimeToMinutes(slotConfig.serviceEndTime || '20:00');
+    const interval = Number(slotConfig.slotDurationMinutes) || 15;
+
+    // Strictly next slot from current time (including preparation & notice lead time)
     const earliestFeasibleMin = isToday
-      ? Math.max(startMin, currentISTMinutes + prepDuration)
+      ? Math.max(startMin, currentISTMinutes + Math.max(prepDuration, minNotice))
       : startMin;
 
     if (isToday && earliestFeasibleMin > endMin) {
@@ -332,12 +370,75 @@ export default function StudentDashboard() {
     }
 
     const list: string[] = [];
-    const firstSlot = Math.max(startMin, Math.ceil(earliestFeasibleMin / 15) * 15);
-    for (let m = firstSlot; m <= endMin && list.length < 6; m += 15) {
-      list.push(minutesToTimeString(m));
+    const firstSlot = Math.max(startMin, Math.ceil(earliestFeasibleMin / interval) * interval);
+    for (let m = firstSlot; m <= endMin && list.length < 5; m += interval) {
+      const slotStr = minutesToTimeString(m);
+      if (!disabledSet.has(slotStr)) {
+        list.push(slotStr);
+      }
     }
     return list;
   }, [slotConfig, currentISTMinutes, scheduledCartItems, selectedDate, currentTime]);
+
+  // Allowed minute dropdown options according to canteen slot strategy
+  const availableMinuteOptions = useMemo(() => {
+    if (slotConfig.slotMode === 'CUSTOM' && Array.isArray(slotConfig.customSlots) && slotConfig.customSlots.length > 0) {
+      const minutesSet = new Set<string>();
+      slotConfig.customSlots.forEach(s => {
+        const m = parseTimeToMinutes(s.startTime);
+        if (!isNaN(m)) {
+          minutesSet.add(String(m % 60).padStart(2, '0'));
+        }
+      });
+      const arr = Array.from(minutesSet).sort((a, b) => Number(a) - Number(b));
+      if (arr.length > 0) return arr;
+    }
+
+    const interval = Number(slotConfig.slotDurationMinutes) || 15;
+    const minutes: string[] = [];
+    for (let m = 0; m < 60; m += interval) {
+      minutes.push(String(m).padStart(2, '0'));
+    }
+    return minutes.length > 0 ? minutes : ['00'];
+  }, [slotConfig.slotMode, slotConfig.customSlots, slotConfig.slotDurationMinutes]);
+
+  // Snap current pickupTime to the nearest valid, future slot for today
+  useEffect(() => {
+    const todayDateStr = getISTDateTime(currentTime).dateStr;
+    if (selectedDate !== todayDateStr) {
+      setSelectedDate(todayDateStr);
+    }
+    const currentPickupMin = parseTimeToMinutes(pickupTime);
+    const prepDuration = calculateOrderPrepDuration(scheduledCartItems, slotConfig.defaultPrepTimeMinutes || 10);
+    const minNotice = slotConfig.minNoticeMinutes || 0;
+    const earliestFeasibleMin = currentISTMinutes + Math.max(prepDuration, minNotice);
+
+    // If today and pickupTime is in the past or before earliest feasible next slot, snap to the first available slot
+    if (currentPickupMin < earliestFeasibleMin) {
+      if (suggestedQuickSlots.length > 0) {
+        setPickupTime(suggestedQuickSlots[0]);
+        return;
+      }
+    }
+
+    if (availableMinuteOptions.length === 0) return;
+    const { hour, minute, period } = parse12hParts(pickupTime);
+    const minuteStr = String(minute).padStart(2, '0');
+    if (!availableMinuteOptions.includes(minuteStr)) {
+      // Find closest minute option
+      const currentMinNum = minute;
+      let closest = availableMinuteOptions[0];
+      let minDiff = 999;
+      for (const opt of availableMinuteOptions) {
+        const diff = Math.abs(Number(opt) - currentMinNum);
+        if (diff < minDiff) {
+          minDiff = diff;
+          closest = opt;
+        }
+      }
+      setPickupTime(compose24hString(hour, Number(closest), period));
+    }
+  }, [availableMinuteOptions, pickupTime, selectedDate, currentISTMinutes, currentTime, suggestedQuickSlots, scheduledCartItems, slotConfig.defaultPrepTimeMinutes, slotConfig.minNoticeMinutes]);
 
   useEffect(() => {
     if (smartSchedule.isValid && error) {
@@ -359,6 +460,19 @@ export default function StudentDashboard() {
   const [requestingOtp, setRequestingOtp] = useState(false);
   const [enteredOtp, setEnteredOtp] = useState('');
   const [otpSentMessage, setOtpSentMessage] = useState<string | null>(null);
+
+  // Authoritative active OTP with sessionStorage cache fallback
+  const currentOtp = useMemo(() => {
+    if (!activeOrder) return '';
+    const cached = (() => {
+      try {
+        return sessionStorage.getItem(`order_otp_${activeOrder.id}`) || '';
+      } catch {
+        return '';
+      }
+    })();
+    return ((activeOrder as any).otp_code || enteredOtp || (activeOrder as any).otp || cached || '').trim();
+  }, [activeOrder, enteredOtp]);
 
   const fetchActive = useCallback(async () => {
     if (!profile?.id) return;
@@ -488,6 +602,9 @@ export default function StudentDashboard() {
         console.warn('request_collection_otp RPC returned error, generating dynamic pickup OTP in memory:', error.message);
         const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
         setEnteredOtp(generatedOtp);
+        try {
+          sessionStorage.setItem(`order_otp_${activeOrder.id}`, generatedOtp);
+        } catch {}
         setChallengeData({
           expiresAt: Date.now() + 5 * 60 * 1000,
           resendAvailableAt: Date.now() + 60 * 1000,
@@ -505,6 +622,9 @@ export default function StudentDashboard() {
           // If RPC returned an OTP (for ephemeral testing or display), adopt it, else generate dynamic OTP
           const dynamicOtp = res.otp || Math.floor(100000 + Math.random() * 900000).toString();
           setEnteredOtp(dynamicOtp);
+          try {
+            sessionStorage.setItem(`order_otp_${activeOrder.id}`, dynamicOtp);
+          } catch {}
           setOtpSentMessage(res.message);
           setChallengeData({
             expiresAt: new Date(res.expires_at || Date.now() + 5 * 60 * 1000).getTime(),
@@ -526,6 +646,13 @@ export default function StudentDashboard() {
       setRequestingOtp(false);
     }
   };
+
+  // Automatically fetch / generate OTP as soon as order reaches READY status
+  useEffect(() => {
+    if (activeOrder?.status === 'READY' && !currentOtp && !requestingOtp) {
+      handleRequestOtp();
+    }
+  }, [activeOrder?.status, activeOrder?.id, currentOtp, requestingOtp]);
 
   useEffect(() => {
     fetchActive();
@@ -759,10 +886,8 @@ export default function StudentDashboard() {
       return true;
     });
 
-    // On the main Dashboard view ("Popular Sold Foods"):
-    // Strictly show ONLY items that have been sold this week (soldCount > 0), ranked by highest sold.
-    // In full Menu view (?tab=menu): Show ALL foods in the canteen catalogue.
-    if (!showMenuExplicit) {
+    // Sort items by popularity (highest sold first), then alphabetical, showing ALL foods directly on dashboard
+    return list.sort((a, b) => {
       const getCount = (item: any) => {
         const cleanName = (item.name || '').replace(/^\[(?:DELETED|ARCHIVED)\]\s*/i, '').toLowerCase().trim();
         return (
@@ -772,14 +897,12 @@ export default function StudentDashboard() {
           0
         );
       };
-
-      const soldItems = list.filter(item => getCount(item) > 0);
-
-      return soldItems.sort((a, b) => getCount(b) - getCount(a));
-    }
-
-    return list;
-  }, [menuItems, foodSearchQuery, foodTypeFilter, categoryFilter, salesCountMap, showMenuExplicit]);
+      const countA = getCount(a);
+      const countB = getCount(b);
+      if (countB !== countA) return countB - countA;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+  }, [menuItems, foodSearchQuery, foodTypeFilter, categoryFilter, salesCountMap]);
 
   const { data: pastOrdersData = [], isLoading: pastOrdersLoading } = useQuery({
     queryKey: ['pastOrders', profile?.id],
@@ -930,6 +1053,22 @@ export default function StudentDashboard() {
 
     if (isLunchClosedForToday) {
       setError(`Lunch ordering has ended for today (Service closed at ${formatSingleTime(slotConfig.serviceEndTime)}).`);
+      return;
+    }
+
+    // Authoritative check: Pickup time cannot be in the past or before required lead time
+    const nowIST = getISTDateTime(Date.now());
+    const isToday = selectedDate === nowIST.dateStr;
+    const reqMinutes = parseTimeToMinutes(smartSchedule.pickupTimeStr || pickupTime);
+    const prepDuration = calculateOrderPrepDuration(scheduledCartItems, slotConfig.defaultPrepTimeMinutes || 10);
+    const minNotice = slotConfig.minNoticeMinutes || 0;
+    const earliestAllowed = nowIST.totalMinutes + Math.max(prepDuration, minNotice);
+
+    if (isToday && (reqMinutes <= nowIST.totalMinutes || reqMinutes < earliestAllowed)) {
+      setError(`Cannot place order: selected pickup time (${formatSingleTime(smartSchedule.pickupTimeStr || pickupTime)}) has passed or is too soon. Please select the next available slot.`);
+      if (suggestedQuickSlots.length > 0) {
+        setPickupTime(suggestedQuickSlots[0]);
+      }
       return;
     }
 
@@ -1171,6 +1310,16 @@ export default function StudentDashboard() {
 
   const handleCancelOrder = async () => {
     if (!activeOrder) return;
+
+    if (activeOrder.status !== 'PLACED') {
+      showAlert({
+        title: 'Cannot Cancel Order',
+        message: 'This order has already been accepted by the kitchen staff and cannot be cancelled.',
+        type: 'error'
+      });
+      return;
+    }
+
     const confirmed = await showConfirm({
       title: 'Cancel Order',
       message: 'Are you sure you want to cancel this order? This action cannot be undone.',
@@ -1195,8 +1344,8 @@ export default function StudentDashboard() {
 
     if (error) {
       console.warn('cancel_order RPC returned error, attempting fallback update:', error.message);
-      // Fallback: If in PLACED or ACCEPTED state, attempt direct status update to REJECTED
-      if (['PLACED', 'ACCEPTED'].includes(activeOrder.status)) {
+      // Fallback: If in PLACED state, attempt direct status update to REJECTED
+      if (activeOrder.status === 'PLACED') {
         try {
           const { error: directErr } = await supabase
             .from('orders')
@@ -1571,8 +1720,13 @@ export default function StudentDashboard() {
           <div className="col-span-12 grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
             {/* Left Column (8 cols): Compact Hero Promo + Combined Menu Header & Food Grid */}
             <div className="lg:col-span-8 space-y-4">
-              {/* Compact Hero Banner */}
-              <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#002b66] via-[#023e8a] to-[#001845] text-white p-4 sm:p-5 shadow-md">
+              {/* Compact Hero Banner with Motion */}
+              <motion.div
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+                className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#002b66] via-[#023e8a] to-[#001845] text-white p-3.5 sm:p-5 shadow-md"
+              >
                 <div className="relative z-10 flex items-center justify-between gap-4">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
@@ -1595,57 +1749,40 @@ export default function StudentDashboard() {
                     </span>
                   </div>
                 </div>
-              </div>
+              </motion.div>
 
               {/* Combined Menu Card (Filter & Search Header + Grid in single cohesive section) */}
-              <div id="menu-items-section" className="bg-white/95 backdrop-blur-md border border-slate-200/90 rounded-3xl p-4 sm:p-5 shadow-sm space-y-4">
+              <div id="menu-items-section" className="bg-white/95 backdrop-blur-md border border-slate-200/90 rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 shadow-sm space-y-3 sm:space-y-4">
                 {/* Top Row: Menu Title + Subtitle on Left, Search Input on Right */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-[#1d68f2] shadow-xs shrink-0">
-                      {showMenuExplicit ? <UtensilsCrossed size={20} /> : <Flame size={20} className="text-amber-500" />}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3">
+                  <div className="flex items-center gap-2 sm:gap-2.5">
+                    <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-[#1d68f2] shadow-xs shrink-0">
+                      <UtensilsCrossed size={18} />
                     </div>
                     <div>
-                      <div className="flex items-center gap-2">
-                        <h2 className="text-xl font-black text-slate-900 tracking-tight leading-none">
-                          {showMenuExplicit ? 'All Menu Items' : 'Popular Sold Foods'}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h2 className="text-base sm:text-xl font-black text-slate-900 tracking-tight leading-none">
+                          All Menu Items
                         </h2>
-                        <span className="text-[11px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+                        <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
                           {filteredMenuItems.length} dishes
                         </span>
-                        {!showMenuExplicit ? (
-                          <Link
-                            to="/student?tab=menu"
-                            className="text-xs font-bold text-[#1d68f2] hover:underline ml-1"
-                          >
-                            View Full Menu →
-                          </Link>
-                        ) : (
-                          <Link
-                            to="/student"
-                            className="text-xs font-bold text-[#1d68f2] hover:underline ml-1"
-                          >
-                            ← Back to Popular
-                          </Link>
-                        )}
                       </div>
-                      <p className="text-xs text-slate-500 font-medium mt-0.5">
-                        {showMenuExplicit
-                          ? 'Browse all available canteen foods, meals & packed items'
-                          : 'Foods sold most this week — fresh, top-rated and popular!'}
+                      <p className="hidden sm:block text-xs text-slate-500 font-medium mt-0.5">
+                        Browse all available canteen foods, meals & packed items
                       </p>
                     </div>
                   </div>
 
                   {/* Search food items input with blue search icon */}
                   <div className="relative w-full sm:w-72">
-                    <IconSearch size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#1d68f2] pointer-events-none" />
+                    <IconSearch size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#1d68f2] pointer-events-none" />
                     <input
                       type="text"
                       placeholder="Search food items..."
                       value={foodSearchQuery}
                       onChange={e => setFoodSearchQuery(e.target.value)}
-                      className="w-full bg-slate-50/80 border border-slate-200 focus:bg-white focus:border-[#1d68f2] focus:ring-2 focus:ring-blue-100 rounded-full text-xs text-slate-800 placeholder:text-slate-400 pl-10 pr-8 py-2 outline-none transition-all"
+                      className="w-full bg-slate-50/80 border border-slate-200 focus:bg-white focus:border-[#1d68f2] focus:ring-2 focus:ring-blue-100 rounded-full text-xs text-slate-800 placeholder:text-slate-400 pl-9 pr-8 py-2 outline-none transition-all"
                     />
                     {foodSearchQuery && (
                       <button
@@ -1659,8 +1796,8 @@ export default function StudentDashboard() {
                   </div>
                 </div>
 
-                {/* Filter Pills Row */}
-                <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-slate-100">
+                {/* Filter Pills Row - Single horizontal scrollable bar on mobile, flex-wrap on desktop */}
+                <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar scrollbar-none pb-0.5 -mx-1 px-1 sm:mx-0 sm:px-0 sm:flex-wrap pt-2 border-t border-slate-100">
                   {/* All button */}
                   <button
                     type="button"
@@ -1668,7 +1805,7 @@ export default function StudentDashboard() {
                       setFoodTypeFilter('ALL');
                       setCategoryFilter('ALL');
                     }}
-                    className={`px-3.5 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
+                    className={`px-3 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all shrink-0 cursor-pointer ${
                       foodTypeFilter === 'ALL' && categoryFilter === 'ALL'
                         ? 'bg-[#1d68f2] text-white shadow-sm shadow-blue-500/25 ring-2 ring-blue-400/30'
                         : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
@@ -1681,8 +1818,8 @@ export default function StudentDashboard() {
                   {/* Veg button */}
                   <button
                     type="button"
-                    onClick={() => setFoodTypeFilter('VEG')}
-                    className={`px-3.5 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all border cursor-pointer ${
+                    onClick={() => setFoodTypeFilter(foodTypeFilter === 'VEG' ? 'ALL' : 'VEG')}
+                    className={`px-3 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all border shrink-0 cursor-pointer ${
                       foodTypeFilter === 'VEG'
                         ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm shadow-emerald-500/20'
                         : 'bg-emerald-50/80 text-emerald-700 border-emerald-200/80 hover:bg-emerald-100/60'
@@ -1695,8 +1832,8 @@ export default function StudentDashboard() {
                   {/* Non-Veg button */}
                   <button
                     type="button"
-                    onClick={() => setFoodTypeFilter('NON_VEG')}
-                    className={`px-3.5 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all border cursor-pointer ${
+                    onClick={() => setFoodTypeFilter(foodTypeFilter === 'NON_VEG' ? 'ALL' : 'NON_VEG')}
+                    className={`px-3 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all border shrink-0 cursor-pointer ${
                       foodTypeFilter === 'NON_VEG'
                         ? 'bg-rose-600 text-white border-rose-600 shadow-sm shadow-rose-500/20'
                         : 'bg-rose-50/80 text-rose-700 border-rose-200/80 hover:bg-rose-100/60'
@@ -1706,27 +1843,13 @@ export default function StudentDashboard() {
                     <span>Non-Veg</span>
                   </button>
 
-                  <div className="h-5 w-px bg-slate-200 mx-1 hidden sm:block" />
-
-                  {/* All Categories Dropdown / Pill */}
-                  <button
-                    type="button"
-                    onClick={() => setCategoryFilter('ALL')}
-                    className={`px-3.5 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
-                      categoryFilter === 'ALL'
-                        ? 'bg-[#0f172a] text-white shadow-sm'
-                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                    }`}
-                  >
-                    <LayoutGrid size={13} />
-                    <span>All Categories</span>
-                  </button>
+                  <div className="h-4 w-px bg-slate-200 shrink-0 mx-0.5" />
 
                   {/* Packed Food */}
                   <button
                     type="button"
                     onClick={() => setCategoryFilter(categoryFilter === 'SNACKS' ? 'ALL' : 'SNACKS')}
-                    className={`px-3.5 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all border cursor-pointer ${
+                    className={`px-3 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all border shrink-0 cursor-pointer ${
                       categoryFilter === 'SNACKS'
                         ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
                         : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
@@ -1735,34 +1858,6 @@ export default function StudentDashboard() {
                     <Package size={13} className="text-slate-500" />
                     <span>Packed Food</span>
                   </button>
-
-                  {/* Meals */}
-                  <button
-                    type="button"
-                    onClick={() => setCategoryFilter(categoryFilter === 'RICE_MEALS' ? 'ALL' : 'RICE_MEALS')}
-                    className={`px-3.5 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all border cursor-pointer ${
-                      categoryFilter === 'RICE_MEALS'
-                        ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    <UtensilsCrossed size={13} className="text-slate-500" />
-                    <span>Meals</span>
-                  </button>
-
-                  {/* Drinks */}
-                  <button
-                    type="button"
-                    onClick={() => setCategoryFilter(categoryFilter === 'BEVERAGES' ? 'ALL' : 'BEVERAGES')}
-                    className={`px-3.5 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all border cursor-pointer ${
-                      categoryFilter === 'BEVERAGES'
-                        ? 'bg-cyan-600 text-white border-cyan-600 shadow-sm'
-                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    <Coffee size={13} className="text-slate-500" />
-                    <span>Drinks</span>
-                  </button>
                 </div>
 
                 {/* Empty State */}
@@ -1770,12 +1865,10 @@ export default function StudentDashboard() {
                   <div className="py-8 px-4 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
                     <IconPackage size={32} className="text-slate-300 mx-auto mb-2" />
                     <h4 className="text-sm font-bold text-slate-700">
-                      {!showMenuExplicit ? 'No Popular Orders This Week' : 'No Food Items Found'}
+                      No Food Items Found
                     </h4>
                     <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1">
-                      {!showMenuExplicit
-                        ? 'Items appear here once orders are placed this week. You can browse the full menu to place an order!'
-                        : 'No items matched your search or category filter.'}
+                      No items matched your search or category filter.
                     </p>
                     <div className="flex items-center justify-center gap-2 mt-3 flex-wrap">
                       <button
@@ -1785,23 +1878,15 @@ export default function StudentDashboard() {
                           setFoodTypeFilter('ALL');
                           setCategoryFilter('ALL');
                         }}
-                        className="px-3.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold transition-all shadow-xs"
+                        className="px-3.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
                       >
                         Reset Filters
                       </button>
-                      {!showMenuExplicit && (
-                        <Link
-                          to="/student?tab=menu"
-                          className="px-3.5 py-1.5 bg-[#1d68f2] hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm"
-                        >
-                          Browse All Menu Items →
-                        </Link>
-                      )}
                     </div>
                   </div>
                 ) : (
-                  /* Food Grid Cards without Images */
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 pt-1">
+                  /* Food Grid Cards without Images - 2 in a row on mobile */
+                  <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3.5 pt-1">
                     {filteredMenuItems.map(item => {
                       const rawCat = String((item as any).category || '').toLowerCase();
                       const isPacked =
@@ -1823,161 +1908,94 @@ export default function StudentDashboard() {
                       const quantity = cartEntry?.quantity || 0;
                       const isMaxStockReached = stock !== null && quantity >= stock;
 
-                      // Determine theme accent matching user reference image
-                      // Green for Veg, Amber/Yellow for Packed Food/Snacks, Pink/Rose for Non-Veg or Meals
+                      // Clean border accent
                       const isVeg = item.veg_non_veg === 'VEG';
-                      let themeBorder = 'border-l-[6px] border-t-2 border-emerald-500 hover:border-emerald-600';
-                      let themeBg = 'bg-gradient-to-br from-emerald-50/40 via-white to-emerald-50/10';
-                      let themeTag = 'bg-emerald-100/90 text-emerald-800';
+                      let themeBorder = 'border-l-4 border-emerald-500';
+                      let themeBg = 'bg-white hover:bg-emerald-50/20';
 
                       if (isPacked) {
-                        themeBorder = 'border-l-[6px] border-t-2 border-amber-400 hover:border-amber-500';
-                        themeBg = 'bg-gradient-to-br from-amber-50/40 via-white to-amber-50/10';
-                        themeTag = 'bg-amber-100/90 text-amber-800';
+                        themeBorder = 'border-l-4 border-amber-400';
+                        themeBg = 'bg-white hover:bg-amber-50/20';
                       } else if (!isVeg) {
-                        themeBorder = 'border-l-[6px] border-t-2 border-rose-500 hover:border-rose-600';
-                        themeBg = 'bg-gradient-to-br from-rose-50/40 via-white to-rose-50/10';
-                        themeTag = 'bg-rose-100/90 text-rose-800';
+                        themeBorder = 'border-l-4 border-rose-500';
+                        themeBg = 'bg-white hover:bg-rose-50/20';
                       }
 
-                      // Dynamic appetizing descriptions matching screenshot style
-                      const itemNameLower = (item.name || '').toLowerCase();
-                      let itemDesc = (item as any).description;
-                      if (!itemDesc) {
-                        if (itemNameLower.includes('idly') || itemNameLower.includes('idli')) {
-                          itemDesc = 'Soft and fluffy idlies, perfect for a healthy start.';
-                        } else if (itemNameLower.includes('dosa')) {
-                          itemDesc = 'Crispy dosa with chutney and sambar.';
-                        } else if (itemNameLower.includes('lays') || itemNameLower.includes('chip')) {
-                          itemDesc = 'Crispy and crunchy potato chips (original).';
-                        } else if (itemNameLower.includes('biscuit') || itemNameLower.includes('cookie')) {
-                          itemDesc = 'Crispy oven baked treats, ready to snack.';
-                        } else if (itemNameLower.includes('poori') || itemNameLower.includes('puri')) {
-                          itemDesc = 'Fluffy golden fried pooris served with potato masala.';
-                        } else if (itemNameLower.includes('pongal')) {
-                          itemDesc = 'Ghee-rich ven pongal tempered with cashews & pepper.';
-                        } else if (itemNameLower.includes('vada')) {
-                          itemDesc = 'Crunchy golden medu vada with hot sambar.';
-                        } else if (itemNameLower.includes('rice') || itemNameLower.includes('meal')) {
-                          itemDesc = 'Wholesome hot meals prepared with authentic spices.';
-                        } else if (itemNameLower.includes('tea') || itemNameLower.includes('chai')) {
-                          itemDesc = 'Freshly brewed aromatic hot tea.';
-                        } else if (itemNameLower.includes('coffee')) {
-                          itemDesc = 'Traditional South Indian filter coffee.';
-                        } else if (isPacked) {
-                          itemDesc = `Ready to eat sealed pack of fresh ${item.name}.`;
-                        } else {
-                          itemDesc = `Freshly cooked delicious ${item.name.toLowerCase()} prepared on order.`;
-                        }
-                      }
+                      const soldCount = salesCountMap[item.id] || salesCountMap[`name:${(item.name || '').toLowerCase()}`] || 0;
 
                       return (
                         <div
                           key={item.id}
-                          className={`relative rounded-2xl border border-slate-200/80 p-4 flex flex-col justify-between shadow-2xs transition-all duration-200 hover:shadow-md ${themeBorder} ${themeBg} ${
+                          className={`relative rounded-xl sm:rounded-2xl border border-slate-200/90 p-2.5 sm:p-4 flex flex-col justify-between shadow-2xs transition-all duration-200 hover:shadow-sm ${themeBorder} ${themeBg} ${
                             isSoldOut ? 'opacity-60 bg-slate-50 grayscale-25' : ''
                           }`}
                         >
                           <div>
-                            {/* Badges Row */}
-                            <div className="flex items-center justify-between gap-1.5 mb-2 flex-wrap">
-                              <div className="flex items-center gap-1.5 flex-wrap">
+                            {/* Badges Row - Clean & Compact for 2-column view */}
+                            <div className="flex items-center justify-between gap-1 mb-1.5 flex-wrap">
+                              <div className="flex items-center gap-1 flex-wrap">
                                 {/* Veg/Non-Veg Badge */}
-                                <div className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-black shadow-2xs ${
+                                <div className={`flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-[11px] font-black ${
                                   isVeg ? 'bg-emerald-100/90 text-emerald-800' : 'bg-rose-100/90 text-rose-800'
                                 }`}>
                                   {isVeg ? (
-                                    <Leaf size={11} className="text-emerald-700" />
+                                    <Leaf size={9} className="text-emerald-700" />
                                   ) : (
-                                    <span className="w-1.5 h-1.5 rounded-full bg-rose-600 ring-2 ring-rose-300" />
+                                    <span className="w-1.5 h-1.5 rounded-full bg-rose-600 ring-1 ring-rose-200" />
                                   )}
                                   <span>{isVeg ? 'Veg' : 'Non-Veg'}</span>
                                 </div>
 
                                 {/* Prep Time or Category Badge */}
                                 {isPacked ? (
-                                  <div className="flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-50 text-blue-800 border border-blue-200/60">
-                                    <Package size={11} className="text-blue-600" />
+                                  <div className="flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-[11px] font-bold bg-blue-50 text-blue-800 border border-blue-200/60">
+                                    <Package size={9} className="text-blue-600" />
                                     <span>Packed</span>
                                   </div>
                                 ) : (
-                                  <div className="flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100/80 text-amber-900">
-                                    <IconClock size={11} className="text-amber-800" />
-                                    <span>{prepMinutes}m prep</span>
+                                  <div className="flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-[11px] font-bold bg-amber-100/80 text-amber-900">
+                                    <IconClock size={9} className="text-amber-800" />
+                                    <span>{prepMinutes}m</span>
                                   </div>
                                 )}
                               </div>
 
                               {/* Highlight Tag on Right */}
                               {isSoldOut ? (
-                                <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 text-[9px] font-black uppercase tracking-wider">
+                                <span className="px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700 text-[8px] sm:text-[9px] font-black uppercase tracking-wider">
                                   Sold Out
                                 </span>
-                              ) : (() => {
-                                const soldCount = salesCountMap[item.id] || salesCountMap[`name:${(item.name || '').toLowerCase()}`] || 0;
-                                if (soldCount > 0) {
-                                  return (
-                                    <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-300 text-[9px] font-black flex items-center gap-1 shadow-2xs">
-                                      🔥 {soldCount} sold today
-                                    </span>
-                                  );
-                                }
-                                if (isPacked) {
-                                  return (
-                                    <span className="px-2 py-0.5 rounded-full bg-pink-100/80 text-pink-700 text-[9px] font-extrabold flex items-center gap-1">
-                                      ★ Popular
-                                    </span>
-                                  );
-                                }
-                                if (isVeg) {
-                                  return (
-                                    <span className="px-2 py-0.5 rounded-full bg-emerald-100/70 text-emerald-700 text-[9px] font-extrabold flex items-center gap-1">
-                                      💚 Healthy
-                                    </span>
-                                  );
-                                }
-                                return (
-                                  <span className="px-2 py-0.5 rounded-full bg-blue-100/70 text-blue-700 text-[9px] font-extrabold flex items-center gap-1">
-                                    🍲 Meals
-                                  </span>
-                                );
-                              })()}
+                              ) : soldCount > 0 ? (
+                                <span className="px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-300 text-[8px] sm:text-[9px] font-black flex items-center gap-0.5 shadow-2xs">
+                                  🔥 {soldCount}
+                                </span>
+                              ) : null}
                             </div>
 
                             {/* Food Title */}
-                            <h3 className="text-lg font-black text-slate-900 tracking-tight leading-snug mt-1 truncate">
+                            <h3 className="text-xs sm:text-base font-black text-slate-900 tracking-tight leading-snug line-clamp-2">
                               {item.name}
                             </h3>
-
-                            {/* Food Description */}
-                            <p className="text-xs text-slate-500 font-medium leading-snug mt-1 line-clamp-2 min-h-[32px]">
-                              {itemDesc}
-                            </p>
                           </div>
 
                           {/* Footer: Price on Left, Pill Button on Right */}
-                          <div className="pt-2.5 border-t border-slate-200/70 flex items-center justify-between gap-2 mt-3">
-                            <div>
-                              <span className="text-[9px] tracking-wider font-extrabold text-slate-400 block uppercase">
-                                PRICE
-                              </span>
-                              <div className="text-xl font-black text-[#1d68f2] tracking-tight leading-tight">
-                                ₹{Number(item.price || 0).toFixed(2)}
-                              </div>
+                          <div className="pt-2 sm:pt-2.5 border-t border-slate-100 flex items-center justify-between gap-1 mt-2 sm:mt-3">
+                            <div className="text-sm sm:text-xl font-black text-[#1d68f2] tracking-tight leading-tight">
+                              ₹{Number(item.price || 0).toFixed(2)}
                             </div>
 
                             {!isSoldOut ? (
                               quantity > 0 ? (
-                                <div className="flex items-center bg-[#1d68f2] text-white rounded-full p-0.5 shadow-xs">
+                                <div className="flex items-center bg-[#1d68f2] text-white rounded-full p-0.5 shadow-xs shrink-0">
                                   <button
                                     type="button"
                                     onClick={() => removeFromCart(item.id)}
                                     aria-label={`Decrease quantity of ${item.name}`}
-                                    className="w-7 h-7 flex items-center justify-center hover:bg-white/20 rounded-full font-black text-sm transition-colors active:scale-90 cursor-pointer"
+                                    className="w-5 h-5 sm:w-7 sm:h-7 flex items-center justify-center hover:bg-white/20 rounded-full font-black text-xs sm:text-sm transition-colors active:scale-90 cursor-pointer"
                                   >
                                     −
                                   </button>
-                                  <span className="w-6 text-center font-black text-xs text-white tabular-nums">
+                                  <span className="w-4 sm:w-6 text-center font-black text-[10px] sm:text-xs text-white tabular-nums">
                                     {quantity}
                                   </span>
                                   <button
@@ -1985,26 +2003,26 @@ export default function StudentDashboard() {
                                     onClick={() => addToCart(item)}
                                     disabled={isSuspended || isLunchClosedForToday || cartTotalItems >= 5 || isMaxStockReached}
                                     aria-label={`Increase quantity of ${item.name}`}
-                                    className="w-7 h-7 flex items-center justify-center hover:bg-white/20 rounded-full font-black text-sm transition-colors disabled:opacity-40 active:scale-90 cursor-pointer"
+                                    className="w-5 h-5 sm:w-7 sm:h-7 flex items-center justify-center hover:bg-white/20 rounded-full font-black text-xs sm:text-sm transition-colors disabled:opacity-40 active:scale-90 cursor-pointer"
                                   >
                                     +
                                   </button>
                                 </div>
                               ) : (
-                                <div className="relative">
+                                <div className="relative shrink-0">
                                   <button
                                     type="button"
                                     onClick={() => addToCart(item)}
                                     disabled={isSuspended || isLunchClosedForToday || cartTotalItems >= 5 || isMaxStockReached}
-                                    className="px-4 py-1.5 rounded-full bg-[#1d68f2] hover:bg-blue-600 text-white font-extrabold text-xs transition-all shadow-sm shadow-blue-500/25 flex items-center gap-1 active:scale-95 disabled:opacity-40 cursor-pointer"
+                                    className="px-2.5 sm:px-4 py-1 sm:py-1.5 rounded-full bg-[#1d68f2] hover:bg-blue-600 text-white font-extrabold text-[11px] sm:text-xs transition-all shadow-sm shadow-blue-500/25 flex items-center gap-0.5 sm:gap-1 active:scale-95 disabled:opacity-40 cursor-pointer"
                                   >
-                                    <span className="text-base leading-none font-black">+</span>
+                                    <span className="text-xs sm:text-base leading-none font-black">+</span>
                                     <span>Add</span>
                                   </button>
                                 </div>
                               )
                             ) : (
-                              <span className="px-3 py-1 rounded-full bg-slate-200/70 text-slate-500 text-[11px] font-bold">
+                              <span className="px-2 py-0.5 rounded-full bg-slate-200/70 text-slate-500 text-[9px] sm:text-[10px] font-bold shrink-0">
                                 Unavailable
                               </span>
                             )}
@@ -2016,40 +2034,15 @@ export default function StudentDashboard() {
                 )}
               </div>
 
-              {/* Today's Special Bottom Strip (No food image, clean modern banner) */}
-              <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#1d68f2] to-[#0ea5e9] text-white p-4 sm:p-5 shadow-md flex flex-col sm:flex-row items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-xl bg-white/20 border border-white/30 flex items-center justify-center shrink-0 shadow-inner text-xl">
-                    <span>✨</span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] font-extrabold uppercase tracking-wider bg-white/20 px-2 py-0.5 rounded-md inline-block mb-1">
-                      Today's Special Combo
-                    </span>
-                    <h4 className="text-base font-black text-white leading-tight">
-                      Fresh Idly + Sambar & Chutney
-                    </h4>
-                    <p className="text-xs text-blue-100 font-medium">Hot South Indian breakfast combo • ₹30.00</p>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    const idlyItem = menuItems.find(m => (m.name || '').toLowerCase().includes('idly') || (m.name || '').toLowerCase().includes('idli'));
-                    if (idlyItem && !idlyItem.is_sold_out) {
-                      addToCart(idlyItem);
-                    }
-                  }}
-                  className="px-4 py-2 rounded-xl bg-white text-[#1d68f2] hover:bg-blue-50 font-black text-xs shadow-md transition-all shrink-0 active:scale-95 cursor-pointer"
-                >
-                  Quick Add ₹30 →
-                </button>
-              </div>
             </div>
 
-            {/* Right Column (4 cols): Sticky Desktop Panel (Active Order Status or Cart Builder) */}
-            <div className="hidden lg:block lg:col-span-4 sticky top-20">
+            {/* Right Column (4 cols): Sticky Desktop Panel (Active Order Status or Cart Builder) with Motion */}
+            <motion.div
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.6, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
+              className="hidden lg:block lg:col-span-4 sticky top-20"
+            >
               <div className="bg-white border border-slate-200/90 rounded-3xl p-5 sm:p-6 shadow-lg shadow-slate-100 flex flex-col justify-between max-h-[calc(100vh-6rem)] overflow-y-auto">
                 {displayOrder ? (
                   /* ================= Active Order Live Status View Inside Box ================= */
@@ -2089,8 +2082,8 @@ export default function StudentDashboard() {
                         </div>
                       </div>
 
-                      {/* Cancel button: allowed for PLACED and ACCEPTED */}
-                      {['PLACED', 'ACCEPTED'].includes(displayOrder.status) && (
+                      {/* Cancel button: allowed anytime before staff accepts order (PLACED only) */}
+                      {displayOrder.status === 'PLACED' && (
                         <button
                           type="button"
                           onClick={handleCancelOrder}
@@ -2114,13 +2107,23 @@ export default function StudentDashboard() {
                       )}
                     </div>
 
-                    {/* Progress Step Bar */}
+                    {/* Progress Step Bar with Distinct Colors per Stage */}
                     <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3">
                       <div className="flex items-center justify-between relative px-2">
                         {/* Connecting background and active progress track */}
                         <div className="absolute left-[18px] right-[18px] top-2.5 h-0.5 bg-slate-200 -z-0">
                           <div
-                            className="h-full bg-[#1d68f2] transition-all duration-500"
+                            className={`h-full transition-all duration-500 ${
+                              displayOrder.status === 'COLLECTED'
+                                ? 'bg-gradient-to-r from-blue-500 via-emerald-500 via-amber-500 via-purple-500 to-teal-500'
+                                : displayOrder.status === 'READY'
+                                ? 'bg-gradient-to-r from-blue-500 via-emerald-500 via-amber-500 to-purple-600'
+                                : displayOrder.status === 'PREPARING'
+                                ? 'bg-gradient-to-r from-blue-500 via-emerald-500 to-amber-500'
+                                : displayOrder.status === 'ACCEPTED'
+                                ? 'bg-gradient-to-r from-blue-500 to-emerald-500'
+                                : 'bg-blue-500'
+                            }`}
                             style={{
                               width:
                                 displayOrder.status === 'PLACED' ? '0%' :
@@ -2132,21 +2135,58 @@ export default function StudentDashboard() {
                         </div>
 
                         {[
-                          { label: 'Placed', done: true },
-                          { label: 'Accepted', done: ['ACCEPTED', 'PREPARING', 'READY', 'COLLECTED'].includes(displayOrder.status) },
-                          { label: 'Cooking', done: ['PREPARING', 'READY', 'COLLECTED'].includes(displayOrder.status) },
-                          { label: 'Ready', done: ['READY', 'COLLECTED'].includes(displayOrder.status) },
-                          { label: 'Collected', done: displayOrder.status === 'COLLECTED' }
+                          {
+                            key: 'PLACED',
+                            label: 'Placed',
+                            done: true,
+                            current: displayOrder.status === 'PLACED',
+                            color: 'bg-blue-600 text-white border-blue-600 shadow-blue-500/25',
+                            textColor: 'text-blue-700',
+                          },
+                          {
+                            key: 'ACCEPTED',
+                            label: 'Accepted',
+                            done: ['ACCEPTED', 'PREPARING', 'READY', 'COLLECTED'].includes(displayOrder.status),
+                            current: displayOrder.status === 'ACCEPTED',
+                            color: 'bg-emerald-600 text-white border-emerald-600 shadow-emerald-500/25',
+                            textColor: 'text-emerald-700',
+                          },
+                          {
+                            key: 'PREPARING',
+                            label: 'Cooking',
+                            done: ['PREPARING', 'READY', 'COLLECTED'].includes(displayOrder.status),
+                            current: displayOrder.status === 'PREPARING',
+                            color: 'bg-amber-500 text-white border-amber-500 shadow-amber-500/25',
+                            textColor: 'text-amber-700',
+                          },
+                          {
+                            key: 'READY',
+                            label: 'Ready',
+                            done: ['READY', 'COLLECTED'].includes(displayOrder.status),
+                            current: displayOrder.status === 'READY',
+                            color: 'bg-purple-600 text-white border-purple-600 shadow-purple-500/25',
+                            textColor: 'text-purple-700',
+                          },
+                          {
+                            key: 'COLLECTED',
+                            label: 'Collected',
+                            done: displayOrder.status === 'COLLECTED',
+                            current: displayOrder.status === 'COLLECTED',
+                            color: 'bg-teal-600 text-white border-teal-600 shadow-teal-500/25',
+                            textColor: 'text-teal-700',
+                          }
                         ].map((step, idx) => (
                           <div key={idx} className="flex flex-col items-center z-10">
                             <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black border transition-all ${
                               step.done
-                                ? 'bg-[#1d68f2] border-white text-white shadow-xs'
+                                ? `${step.color} shadow-xs scale-105`
                                 : 'bg-white border-slate-300 text-slate-400'
-                            }`}>
+                            } ${step.current ? 'ring-2 ring-offset-1 ring-slate-300 scale-110' : ''}`}>
                               {step.done ? '✓' : idx + 1}
                             </div>
-                            <span className={`text-[10px] font-bold mt-1 ${step.done ? 'text-slate-800' : 'text-slate-400'}`}>
+                            <span className={`text-[10px] font-bold mt-1 transition-colors ${
+                              step.done ? step.textColor : 'text-slate-400'
+                            }`}>
                               {step.label}
                             </span>
                           </div>
@@ -2259,7 +2299,7 @@ export default function StudentDashboard() {
                           title="Click to Enlarge QR Code"
                         >
                           <QRCodeSVG
-                            value={`SKIPTRAY:${displayOrder.id}:${((displayOrder as any).otp_code || (displayOrder as any).otp || enteredOtp || '').trim()}`}
+                            value={`SKIPTRAY:${displayOrder.id}:${currentOtp}`}
                             size={140}
                             className="rounded-lg mx-auto"
                           />
@@ -2274,26 +2314,20 @@ export default function StudentDashboard() {
                           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
                             Pickup Verification OTP
                           </p>
-                          {(() => {
-                            const displayOtp = (displayOrder as any).otp_code || enteredOtp || (displayOrder as any).otp;
-                            if (displayOtp) {
-                              return (
-                                <p className="text-2xl font-mono font-black tracking-[0.2em] text-emerald-700 my-0.5">
-                                  {displayOtp}
-                                </p>
-                              );
-                            }
-                            return (
-                              <button
-                                type="button"
-                                onClick={handleRequestOtp}
-                                disabled={requestingOtp}
-                                className="mt-1 px-3 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-lg shadow-xs hover:bg-emerald-700 disabled:opacity-50 cursor-pointer"
-                              >
-                                {requestingOtp ? 'Generating...' : 'Get OTP Code'}
-                              </button>
-                            );
-                          })()}
+                          {currentOtp ? (
+                            <p className="text-2xl font-mono font-black tracking-[0.25em] text-emerald-700 my-0.5">
+                              {currentOtp}
+                            </p>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={handleRequestOtp}
+                              disabled={requestingOtp}
+                              className="mt-1 px-3 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-lg shadow-xs hover:bg-emerald-700 disabled:opacity-50 cursor-pointer"
+                            >
+                              {requestingOtp ? 'Generating...' : 'Get OTP Code'}
+                            </button>
+                          )}
                           <p className="text-[10px] text-slate-500 mt-0.5">
                             Show OTP or scan QR at counter
                           </p>
@@ -2524,43 +2558,114 @@ export default function StudentDashboard() {
                         <label className="text-[11px] font-black uppercase tracking-wider text-slate-600">
                           Pickup Time
                         </label>
-                        <span className="text-[10px] text-[#1d68f2] font-bold bg-blue-50 px-2 py-0.5 rounded">
-                          Lunch Slots
+                        <span className="text-[10px] text-[#1d68f2] font-bold bg-blue-50 px-2 py-0.5 rounded border border-blue-100/60">
+                          {slotConfig.slotMode === 'CUSTOM'
+                            ? 'Custom Slots'
+                            : `${slotConfig.slotDurationMinutes || 15}m Fixed Slots`}
                         </span>
                       </div>
 
-                      <input
-                        type="time"
-                        step="60"
-                        value={normalizeTimeTo24h(pickupTime) || pickupTime}
-                        onChange={e => {
-                          setPickupTime(e.target.value);
-                          if (error) setError('');
-                        }}
-                        disabled={isSuspended}
-                        className="w-full bg-white border border-slate-200 text-slate-900 rounded-xl px-3 py-2 text-xs font-bold shadow-xs focus:border-[#1d68f2] focus:ring-1 focus:ring-blue-100 outline-none"
-                      />
-
-                      {/* Quick suggestion slots */}
-                      <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-                        {suggestedQuickSlots.slice(0, 4).map(t => (
-                          <button
-                            key={t}
-                            type="button"
-                            onClick={() => {
-                              setPickupTime(t);
+                      {/* 12-Hour AM/PM Selector */}
+                      <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl p-1.5 shadow-xs">
+                        {/* Hour selector */}
+                        <div className="flex-1 min-w-0">
+                          <select
+                            value={parse12hParts(pickupTime).hour}
+                            onChange={e => {
+                              const { minute, period } = parse12hParts(pickupTime);
+                              setPickupTime(compose24hString(Number(e.target.value), minute, period));
                               if (error) setError('');
                             }}
-                            className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition-all ${
-                              normalizeTimeTo24h(pickupTime) === t
-                                ? 'bg-[#1d68f2] text-white border-[#1d68f2] shadow-xs'
-                                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                            disabled={isSuspended}
+                            aria-label="Select Pickup Hour"
+                            className="w-full bg-slate-50 hover:bg-slate-100 text-slate-800 font-black text-xs rounded-lg px-2 py-1.5 outline-none cursor-pointer border border-slate-100 text-center"
+                          >
+                            {[12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(h => (
+                              <option key={h} value={h}>{String(h).padStart(2, '0')}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <span className="font-black text-slate-400 text-sm">:</span>
+
+                        {/* Minute selector */}
+                        <div className="flex-1 min-w-0">
+                          <select
+                            value={String(parse12hParts(pickupTime).minute).padStart(2, '0')}
+                            onChange={e => {
+                              const { hour, period } = parse12hParts(pickupTime);
+                              setPickupTime(compose24hString(hour, Number(e.target.value), period));
+                              if (error) setError('');
+                            }}
+                            disabled={isSuspended}
+                            aria-label="Select Pickup Minute"
+                            className="w-full bg-slate-50 hover:bg-slate-100 text-slate-800 font-black text-xs rounded-lg px-2 py-1.5 outline-none cursor-pointer border border-slate-100 text-center"
+                          >
+                            {availableMinuteOptions.map(m => (
+                              <option key={m} value={m}>{m}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* AM / PM Toggle */}
+                        <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200/60 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const { hour, minute } = parse12hParts(pickupTime);
+                              setPickupTime(compose24hString(hour, minute, 'AM'));
+                              if (error) setError('');
+                            }}
+                            disabled={isSuspended}
+                            className={`px-2.5 py-1 rounded-md text-[10px] font-black transition-all cursor-pointer ${
+                              parse12hParts(pickupTime).period === 'AM'
+                                ? 'bg-[#1d68f2] text-white shadow-xs'
+                                : 'text-slate-600 hover:text-slate-900'
                             }`}
                           >
-                            {formatSingleTime(t)}
+                            AM
                           </button>
-                        ))}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const { hour, minute } = parse12hParts(pickupTime);
+                              setPickupTime(compose24hString(hour, minute, 'PM'));
+                              if (error) setError('');
+                            }}
+                            disabled={isSuspended}
+                            className={`px-2.5 py-1 rounded-md text-[10px] font-black transition-all cursor-pointer ${
+                              parse12hParts(pickupTime).period === 'PM'
+                                ? 'bg-[#1d68f2] text-white shadow-xs'
+                                : 'text-slate-600 hover:text-slate-900'
+                            }`}
+                          >
+                            PM
+                          </button>
+                        </div>
                       </div>
+
+                      {/* Quick suggestion slots */}
+                      {suggestedQuickSlots.length > 0 && (
+                        <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                          {suggestedQuickSlots.map(t => (
+                            <button
+                              key={t}
+                              type="button"
+                              onClick={() => {
+                                setPickupTime(t);
+                                if (error) setError('');
+                              }}
+                              className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition-all ${
+                                normalizeTimeTo24h(pickupTime) === t
+                                  ? 'bg-[#1d68f2] text-white border-[#1d68f2] shadow-xs'
+                                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                              }`}
+                            >
+                              {formatSingleTime(t)}
+                            </button>
+                          ))}
+                        </div>
+                      )}
 
                       {/* Smart Kitchen schedule info */}
                       {smartSchedule.isValid && (
@@ -2606,11 +2711,13 @@ export default function StudentDashboard() {
 
                       {(() => {
                         const isSelectedSlotClosed = isLunchClosedForToday;
+                        const isScheduleInvalid = !smartSchedule.isValid;
                         const isOrderDisabled =
                           isSuspended ||
                           isSunday ||
                           isBeforeOpeningTime ||
                           isSelectedSlotClosed ||
+                          isScheduleInvalid ||
                           cart.length === 0 ||
                           !pickupTime ||
                           submitting ||
@@ -2634,6 +2741,8 @@ export default function StudentDashboard() {
                               'Lunch Booking Opens at 9:30 AM'
                             ) : isSelectedSlotClosed ? (
                               'Lunch Ordering Closed'
+                            ) : isScheduleInvalid ? (
+                              smartSchedule.badge || 'Invalid Pickup Slot'
                             ) : submitting ? (
                               'Placing Order...'
                             ) : (
@@ -2651,71 +2760,73 @@ export default function StudentDashboard() {
                   </div>
                 )}
               </div>
-            </div>
+            </motion.div>
           </div>
 
           {/* Responsive Mobile Drawer Trigger (< lg screens) */}
-          <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 p-3 bg-white/95 backdrop-blur-md border-t border-slate-200 shadow-2xl flex items-center justify-between gap-3">
-            {displayOrder ? (
-              <>
-                <div className="flex items-center gap-2">
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm ${
-                    displayOrder.status === 'COLLECTED'
-                      ? 'bg-emerald-100 text-emerald-700'
-                      : displayOrder.status === 'READY'
-                      ? 'bg-emerald-100 text-emerald-700'
-                      : 'bg-blue-100 text-[#1d68f2]'
-                  }`}>
-                    {displayOrder.status === 'COLLECTED' ? <CheckCircle2 size={18} /> : <Flame size={18} />}
-                  </div>
-                  <div>
-                    <div className="text-xs font-black text-slate-900 leading-tight flex items-center gap-1.5">
-                      <span>Order #{displayOrder.order_number}</span>
-                      <span className={`text-[10px] font-bold ${displayOrder.status === 'COLLECTED' ? 'text-emerald-700' : 'text-[#1d68f2]'}`}>
-                        ({displayOrder.status === 'COLLECTED' ? 'COLLECTED' : getOrderStatusText(displayOrder as any)})
-                      </span>
+          <div className="lg:hidden fixed bottom-2 left-2 right-2 sm:left-3 sm:right-3 z-40 pointer-events-none">
+            <div className="pointer-events-auto w-full h-15 bg-white/95 backdrop-blur-md border border-slate-200/90 rounded-2xl px-3 sm:px-4 flex items-center justify-between shadow-lg">
+              {displayOrder ? (
+                <>
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm shrink-0 ${
+                      displayOrder.status === 'COLLECTED'
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : displayOrder.status === 'READY'
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : 'bg-blue-100 text-[#1d68f2]'
+                    }`}>
+                      {displayOrder.status === 'COLLECTED' ? <CheckCircle2 size={18} /> : <Flame size={18} />}
                     </div>
-                    <div className="text-[11px] text-slate-500 font-semibold">
-                      {displayOrder.status === 'COLLECTED'
-                        ? `Collected at ${formatSingleTime((displayOrder as any).collected_at || new Date().toISOString())}`
-                        : `Pickup at ${formatSingleTime(displayOrder.pickup_time)}`}
+                    <div className="min-w-0">
+                      <div className="text-xs font-black text-slate-900 leading-tight flex items-center gap-1.5 truncate">
+                        <span>Order #{displayOrder.order_number}</span>
+                        <span className={`text-[10px] font-bold ${displayOrder.status === 'COLLECTED' ? 'text-emerald-700' : 'text-[#1d68f2]'}`}>
+                          ({displayOrder.status === 'COLLECTED' ? 'COLLECTED' : getOrderStatusText(displayOrder as any)})
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-500 font-medium truncate">
+                        {displayOrder.status === 'COLLECTED'
+                          ? `Collected at ${formatSingleTime((displayOrder as any).collected_at || new Date().toISOString())}`
+                          : `Pickup at ${formatSingleTime(displayOrder.pickup_time)}`}
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <button
-                  type="button"
-                  onClick={() => setCartOpen(true)}
-                  className="px-4 py-2 rounded-xl bg-[#1d68f2] text-white font-black text-xs shadow-md shadow-blue-500/20 flex items-center gap-1 cursor-pointer"
-                >
-                  <span>{displayOrder.status === 'COLLECTED' ? 'View Collected Order' : 'View Status & OTP'}</span>
-                  <IconChevronUp size={14} />
-                </button>
-              </>
-            ) : (
-              <>
-                <div className="flex items-center gap-2">
-                  <div className="w-10 h-10 rounded-xl bg-blue-100 text-[#1d68f2] flex items-center justify-center font-black text-sm">
-                    {cartTotalItems}
-                  </div>
-                  <div>
-                    <div className="text-xs font-black text-slate-900 leading-tight">Your Order</div>
-                    <div className="text-xs font-bold text-[#1d68f2]">
-                      ₹{ledger.gross_payable.toFixed(2)}
+                  <button
+                    type="button"
+                    onClick={() => setCartOpen(true)}
+                    className="px-3.5 py-2 rounded-xl bg-[#1d68f2] hover:bg-blue-600 active:scale-95 text-white font-bold text-xs shadow-xs transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
+                  >
+                    <span>{displayOrder.status === 'COLLECTED' ? 'View Receipt' : 'View OTP'}</span>
+                    <IconChevronUp size={14} />
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-200/80 text-[#1d68f2] flex items-center justify-center font-black text-sm shadow-2xs">
+                      {cartTotalItems}
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-slate-800 leading-tight">Your Order</div>
+                      <div className="text-xs font-black text-[#1d68f2]">
+                        ₹{ledger.gross_payable.toFixed(2)}
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <button
-                  type="button"
-                  onClick={() => setCartOpen(true)}
-                  className="px-5 py-2.5 rounded-xl bg-[#1d68f2] text-white font-black text-xs shadow-md shadow-blue-500/20 flex items-center gap-1.5"
-                >
-                  <span>View & Checkout</span>
-                  <IconChevronUp size={14} />
-                </button>
-              </>
-            )}
+                  <button
+                    type="button"
+                    onClick={() => setCartOpen(true)}
+                    className="px-4 py-2 rounded-xl bg-[#1d68f2] hover:bg-blue-600 active:scale-95 text-white font-bold text-xs shadow-xs transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
+                  >
+                    <span>View & Checkout</span>
+                    <IconChevronUp size={14} />
+                  </button>
+                </>
+              )}
+            </div>
           </div>
 
           {/* Mobile Bottom Sheet Modal when cartOpen is true on small screens */}
@@ -2744,12 +2855,22 @@ export default function StudentDashboard() {
                       </button>
                     </div>
 
-                    {/* Progress Step Bar */}
+                    {/* Progress Step Bar with Distinct Colors per Stage */}
                     <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3 mb-4">
                       <div className="flex items-center justify-between relative px-2">
                         <div className="absolute left-[18px] right-[18px] top-2.5 h-0.5 bg-slate-200 -z-0">
                           <div
-                            className="h-full bg-[#1d68f2] transition-all duration-500"
+                            className={`h-full transition-all duration-500 ${
+                              displayOrder.status === 'COLLECTED'
+                                ? 'bg-gradient-to-r from-blue-500 via-emerald-500 via-amber-500 via-purple-500 to-teal-500'
+                                : displayOrder.status === 'READY'
+                                ? 'bg-gradient-to-r from-blue-500 via-emerald-500 via-amber-500 to-purple-600'
+                                : displayOrder.status === 'PREPARING'
+                                ? 'bg-gradient-to-r from-blue-500 via-emerald-500 to-amber-500'
+                                : displayOrder.status === 'ACCEPTED'
+                                ? 'bg-gradient-to-r from-blue-500 to-emerald-500'
+                                : 'bg-blue-500'
+                            }`}
                             style={{
                               width:
                                 displayOrder.status === 'PLACED' ? '0%' :
@@ -2761,21 +2882,58 @@ export default function StudentDashboard() {
                         </div>
 
                         {[
-                          { label: 'Placed', done: true },
-                          { label: 'Accepted', done: ['ACCEPTED', 'PREPARING', 'READY', 'COLLECTED'].includes(displayOrder.status) },
-                          { label: 'Cooking', done: ['PREPARING', 'READY', 'COLLECTED'].includes(displayOrder.status) },
-                          { label: 'Ready', done: ['READY', 'COLLECTED'].includes(displayOrder.status) },
-                          { label: 'Collected', done: displayOrder.status === 'COLLECTED' }
+                          {
+                            key: 'PLACED',
+                            label: 'Placed',
+                            done: true,
+                            current: displayOrder.status === 'PLACED',
+                            color: 'bg-blue-600 text-white border-blue-600 shadow-blue-500/25',
+                            textColor: 'text-blue-700',
+                          },
+                          {
+                            key: 'ACCEPTED',
+                            label: 'Accepted',
+                            done: ['ACCEPTED', 'PREPARING', 'READY', 'COLLECTED'].includes(displayOrder.status),
+                            current: displayOrder.status === 'ACCEPTED',
+                            color: 'bg-emerald-600 text-white border-emerald-600 shadow-emerald-500/25',
+                            textColor: 'text-emerald-700',
+                          },
+                          {
+                            key: 'PREPARING',
+                            label: 'Cooking',
+                            done: ['PREPARING', 'READY', 'COLLECTED'].includes(displayOrder.status),
+                            current: displayOrder.status === 'PREPARING',
+                            color: 'bg-amber-500 text-white border-amber-500 shadow-amber-500/25',
+                            textColor: 'text-amber-700',
+                          },
+                          {
+                            key: 'READY',
+                            label: 'Ready',
+                            done: ['READY', 'COLLECTED'].includes(displayOrder.status),
+                            current: displayOrder.status === 'READY',
+                            color: 'bg-purple-600 text-white border-purple-600 shadow-purple-500/25',
+                            textColor: 'text-purple-700',
+                          },
+                          {
+                            key: 'COLLECTED',
+                            label: 'Collected',
+                            done: displayOrder.status === 'COLLECTED',
+                            current: displayOrder.status === 'COLLECTED',
+                            color: 'bg-teal-600 text-white border-teal-600 shadow-teal-500/25',
+                            textColor: 'text-teal-700',
+                          }
                         ].map((step, idx) => (
                           <div key={idx} className="flex flex-col items-center z-10">
                             <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black border transition-all ${
                               step.done
-                                ? 'bg-[#1d68f2] border-white text-white shadow-xs'
+                                ? `${step.color} shadow-xs scale-105`
                                 : 'bg-white border-slate-300 text-slate-400'
-                            }`}>
+                            } ${step.current ? 'ring-2 ring-offset-1 ring-slate-300 scale-110' : ''}`}>
                               {step.done ? '✓' : idx + 1}
                             </div>
-                            <span className={`text-[10px] font-bold mt-1 ${step.done ? 'text-slate-800' : 'text-slate-400'}`}>
+                            <span className={`text-[10px] font-bold mt-1 transition-colors ${
+                              step.done ? step.textColor : 'text-slate-400'
+                            }`}>
                               {step.label}
                             </span>
                           </div>
@@ -2851,15 +3009,36 @@ export default function StudentDashboard() {
                           className="bg-white p-3 rounded-2xl border-2 border-emerald-400 shadow-sm inline-block mx-auto cursor-pointer"
                         >
                           <QRCodeSVG
-                            value={`SKIPTRAY:${displayOrder.id}:${((displayOrder as any).otp_code || (displayOrder as any).otp || enteredOtp || '').trim()}`}
+                            value={`SKIPTRAY:${displayOrder.id}:${currentOtp}`}
                             size={160}
                           />
                         </div>
-                        <div className="bg-white py-2 rounded-xl border border-emerald-200">
-                          <span className="text-[10px] uppercase font-bold text-slate-400 block">Pickup OTP</span>
-                          <span className="text-2xl font-mono font-black text-emerald-700 tracking-[0.2em]">
-                            {(displayOrder as any).otp_code || enteredOtp || (displayOrder as any).otp || 'PENDING'}
-                          </span>
+                        <div className="bg-white py-2.5 px-3 rounded-xl border border-emerald-200">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Pickup Verification OTP</span>
+                          {currentOtp ? (
+                            <span className="text-2xl font-mono font-black text-emerald-700 tracking-[0.25em] block">
+                              {currentOtp}
+                            </span>
+                          ) : (
+                            <div className="flex flex-col items-center gap-1.5 py-1">
+                              <button
+                                type="button"
+                                onClick={handleRequestOtp}
+                                disabled={requestingOtp}
+                                className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-lg shadow-xs disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+                              >
+                                {requestingOtp ? (
+                                  <>
+                                    <IconHourglass size={12} className="animate-spin" />
+                                    <span>Generating OTP...</span>
+                                  </>
+                                ) : (
+                                  <span>Get Pickup OTP</span>
+                                )}
+                              </button>
+                              <span className="text-[10px] text-slate-400 font-medium">Tap to reveal 6-digit pickup code</span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     ) : (
@@ -2870,7 +3049,8 @@ export default function StudentDashboard() {
                       </div>
                     )}
 
-                    {['PLACED', 'ACCEPTED'].includes(displayOrder.status) && (
+                    {/* Cancel button: allowed anytime before staff accepts order (PLACED only) */}
+                    {displayOrder.status === 'PLACED' && (
                       <button
                         type="button"
                         onClick={() => { handleCancelOrder(); setCartOpen(false); }}
@@ -2922,25 +3102,136 @@ export default function StudentDashboard() {
                       ))}
                     </div>
 
-                    {/* Mobile Pickup Time Selector */}
-                    <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                      <label className="text-[11px] font-bold text-slate-700 block mb-1">Pickup Time</label>
-                      <input
-                        type="time"
-                        value={normalizeTimeTo24h(pickupTime) || pickupTime}
-                        onChange={e => setPickupTime(e.target.value)}
-                        className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-bold"
-                      />
+                    {/* Mobile Pickup Time Selector in 12h AM/PM */}
+                    <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[11px] font-bold text-slate-700">Pickup Time (12h AM/PM)</label>
+                        <span className="text-[10px] text-[#1d68f2] font-bold bg-blue-50 px-2 py-0.5 rounded border border-blue-100/60">
+                          {slotConfig.slotMode === 'CUSTOM'
+                            ? 'Custom'
+                            : `${slotConfig.slotDurationMinutes || 15}m Fixed`}
+                        </span>
+                      </div>
+
+                      {/* 12-Hour AM/PM Selector */}
+                      <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl p-1.5 shadow-xs">
+                        <div className="flex-1 min-w-0">
+                          <select
+                            value={parse12hParts(pickupTime).hour}
+                            onChange={e => {
+                              const { minute, period } = parse12hParts(pickupTime);
+                              setPickupTime(compose24hString(Number(e.target.value), minute, period));
+                              if (error) setError('');
+                            }}
+                            disabled={isSuspended}
+                            aria-label="Select Pickup Hour"
+                            className="w-full bg-slate-50 hover:bg-slate-100 text-slate-800 font-black text-xs rounded-lg px-2 py-1.5 outline-none cursor-pointer border border-slate-100 text-center"
+                          >
+                            {[12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(h => (
+                              <option key={h} value={h}>{String(h).padStart(2, '0')}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <span className="font-black text-slate-400 text-sm">:</span>
+
+                        <div className="flex-1 min-w-0">
+                          <select
+                            value={String(parse12hParts(pickupTime).minute).padStart(2, '0')}
+                            onChange={e => {
+                              const { hour, period } = parse12hParts(pickupTime);
+                              setPickupTime(compose24hString(hour, Number(e.target.value), period));
+                              if (error) setError('');
+                            }}
+                            disabled={isSuspended}
+                            aria-label="Select Pickup Minute"
+                            className="w-full bg-slate-50 hover:bg-slate-100 text-slate-800 font-black text-xs rounded-lg px-2 py-1.5 outline-none cursor-pointer border border-slate-100 text-center"
+                          >
+                            {availableMinuteOptions.map(m => (
+                              <option key={m} value={m}>{m}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* AM / PM Toggle */}
+                        <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200/60 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const { hour, minute } = parse12hParts(pickupTime);
+                              setPickupTime(compose24hString(hour, minute, 'AM'));
+                              if (error) setError('');
+                            }}
+                            disabled={isSuspended}
+                            className={`px-2.5 py-1 rounded-md text-[10px] font-black transition-all cursor-pointer ${
+                              parse12hParts(pickupTime).period === 'AM'
+                                ? 'bg-[#1d68f2] text-white shadow-xs'
+                                : 'text-slate-600 hover:text-slate-900'
+                            }`}
+                          >
+                            AM
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const { hour, minute } = parse12hParts(pickupTime);
+                              setPickupTime(compose24hString(hour, minute, 'PM'));
+                              if (error) setError('');
+                            }}
+                            disabled={isSuspended}
+                            className={`px-2.5 py-1 rounded-md text-[10px] font-black transition-all cursor-pointer ${
+                              parse12hParts(pickupTime).period === 'PM'
+                                ? 'bg-[#1d68f2] text-white shadow-xs'
+                                : 'text-slate-600 hover:text-slate-900'
+                            }`}
+                          >
+                            PM
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Quick suggestion slots */}
+                      {suggestedQuickSlots.length > 0 && (
+                        <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                          {suggestedQuickSlots.map(t => (
+                            <button
+                              key={t}
+                              type="button"
+                              onClick={() => {
+                                setPickupTime(t);
+                                if (error) setError('');
+                              }}
+                              className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition-all cursor-pointer ${
+                                normalizeTimeTo24h(pickupTime) === t
+                                  ? 'bg-[#1d68f2] text-white border-[#1d68f2] shadow-xs'
+                                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                              }`}
+                            >
+                              {formatSingleTime(t)}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Smart Kitchen schedule info */}
+                      {smartSchedule.isValid && (
+                        <div className="pt-2 border-t border-slate-200/80 flex items-center justify-between text-[10px] font-semibold text-slate-500">
+                          <span>⚡ Prep: <strong className="text-amber-600">{smartSchedule.prepStartFormatted}</strong></span>
+                          <span>Hot: <strong className="text-emerald-600">{smartSchedule.readyByFormatted}</strong></span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Mobile Place Order Button */}
                     <form onSubmit={e => { handlePlaceOrder(e); setCartOpen(false); }}>
                       <button
                         type="submit"
-                        disabled={cart.length === 0 || !pickupTime || submitting || isSuspended}
-                        className="w-full py-3 bg-[#1d68f2] text-white rounded-xl font-black text-xs shadow-md disabled:bg-slate-300"
+                        disabled={cart.length === 0 || !pickupTime || !smartSchedule.isValid || submitting || isSuspended || isLunchClosedForToday}
+                        className="w-full py-3 bg-[#1d68f2] text-white rounded-xl font-black text-xs shadow-md disabled:bg-slate-300 disabled:cursor-not-allowed"
                       >
-                        Confirm & Place Order (₹{ledger.gross_payable.toFixed(2)})
+                        {!smartSchedule.isValid
+                          ? (smartSchedule.badge || 'Invalid Pickup Slot')
+                          : `Confirm & Place Order (₹${ledger.gross_payable.toFixed(2)})`}
                       </button>
                     </form>
                   </div>
@@ -2975,15 +3266,15 @@ export default function StudentDashboard() {
 
             <div className="p-3 bg-slate-50 border-2 border-slate-100 rounded-2xl shadow-inner">
               <QRCodeSVG
-                value={`SKIPTRAY:${activeOrder.id}:${((activeOrder as any).otp_code || (activeOrder as any).otp || enteredOtp || '').trim()}`}
+                value={`SKIPTRAY:${activeOrder.id}:${currentOtp}`}
                 size={230}
               />
             </div>
 
             <div className="w-full bg-slate-900 text-white py-3 rounded-2xl">
               <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Pickup OTP</div>
-              <div className="text-2xl font-mono font-extrabold tracking-[0.2em]">
-                {(activeOrder as any).otp_code || (activeOrder as any).otp || enteredOtp || 'PENDING'}
+              <div className="text-2xl font-mono font-extrabold tracking-[0.25em] text-emerald-400 mt-0.5">
+                {currentOtp || (requestingOtp ? 'GENERATING...' : 'READY')}
               </div>
             </div>
 

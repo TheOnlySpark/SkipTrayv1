@@ -68,13 +68,6 @@ export default function SideBar({
       roles: ['STUDENT', 'TEACHER', 'SUPER_ADMIN']
     },
     {
-      name: 'Menu',
-      href: '/student?tab=menu',
-      icon: Utensils,
-      description: 'Browse all canteen food items',
-      roles: ['STUDENT', 'TEACHER', 'SUPER_ADMIN']
-    },
-    {
       name: 'Order History',
       href: '/student?tab=history',
       icon: History,

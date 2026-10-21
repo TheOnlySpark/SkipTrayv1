@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useLocation, Link } from "react-router-dom";
+import { motion } from "motion/react";
 import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/ModalDialogContext';
 import { supabase } from '../lib/supabase';
@@ -33,7 +34,8 @@ import {
   Tag,
   Store,
   ClipboardList,
-  Utensils
+  Utensils,
+  Trash2
 } from 'lucide-react';
 
 type Canteen = Database['public']['Tables']['canteens']['Row'];
@@ -169,6 +171,61 @@ export default function UniAdminDashboard() {
     await queryClient.invalidateQueries({ queryKey: ['adminCanteens', currentTenantId] });
   };
 
+  const [deletingCanteenId, setDeletingCanteenId] = useState<string | null>(null);
+
+  const handleDeleteCanteen = async (canteen: Canteen) => {
+    const confirmed = await showConfirm({
+      title: `Delete Canteen: ${canteen.name}?`,
+      message: `Are you sure you want to permanently delete "${canteen.name}"? This will remove all associated menu items, slot configurations, and records from Supabase. This action cannot be undone.`,
+      confirmText: 'Delete Permanently',
+      cancelText: 'Cancel',
+      isDangerous: true,
+    });
+    if (!confirmed) return;
+
+    setDeletingCanteenId(canteen.id);
+    try {
+      // First attempt using secure RPC function
+      const { data: rpcData, error: rpcError } = await supabase.rpc('delete_canteen', {
+        p_canteen_id: canteen.id
+      });
+
+      if (rpcError) {
+        // Fallback to direct DELETE query in case migration is still pending application
+        const { error: directError } = await supabase
+          .from('canteens')
+          .delete()
+          .eq('id', canteen.id);
+
+        if (directError) {
+          throw new Error(rpcError.message || directError.message);
+        }
+      }
+
+      showAlert({
+        title: 'Canteen Deleted',
+        message: `"${canteen.name}" has been permanently deleted from Supabase.`,
+        type: 'success'
+      });
+
+      // Clear selected canteen if it was the deleted one
+      if (selectedCanteenId === canteen.id) {
+        setSelectedCanteenId('');
+      }
+
+      await queryClient.invalidateQueries({ queryKey: ['adminCanteens', currentTenantId] });
+      await queryClient.invalidateQueries({ queryKey: ['canteenAdmins', currentTenantId] });
+    } catch (err: any) {
+      showAlert({
+        title: 'Deletion Failed',
+        message: formatErrorMessage(err, 'Could not delete canteen. Please ensure database migration 0048 is applied.'),
+        type: 'error'
+      });
+    } finally {
+      setDeletingCanteenId(null);
+    }
+  };
+
   const handleCreateCanteenAdmin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (creatingAdmin) return;
@@ -234,6 +291,56 @@ export default function UniAdminDashboard() {
       showAlert({ title: 'Error', message: formatErrorMessage(err, 'Failed to create canteen admin.'), type: 'error' });
     } finally {
       setCreatingAdmin(false);
+    }
+  };
+
+  const [deletingAdminId, setDeletingAdminId] = useState<string | null>(null);
+
+  const handleDeleteCanteenAdmin = async (admin: any) => {
+    const adminName = admin.name || admin.email || 'this admin';
+    const confirmed = await showConfirm({
+      title: `Delete Admin: ${adminName}?`,
+      message: `Are you sure you want to permanently delete "${adminName}"? They will immediately lose access to their canteen dashboard and records. This action cannot be undone.`,
+      confirmText: 'Delete Permanently',
+      cancelText: 'Cancel',
+      isDangerous: true,
+    });
+    if (!confirmed) return;
+
+    setDeletingAdminId(admin.id);
+    try {
+      // 1. Try secure RPC function
+      const { data: rpcData, error: rpcError } = await (supabase.rpc as any)('uni_admin_delete_canteen_admin', {
+        p_admin_id: admin.id
+      });
+
+      if (rpcError) {
+        // Fallback: direct profile delete
+        const { error: directError } = await supabase
+          .from('profiles')
+          .delete()
+          .eq('id', admin.id);
+
+        if (directError) {
+          throw new Error(rpcError.message || directError.message);
+        }
+      }
+
+      showAlert({
+        title: 'Admin Deleted',
+        message: `Admin account "${adminName}" has been removed.`,
+        type: 'success'
+      });
+
+      await queryClient.invalidateQueries({ queryKey: ['canteenAdmins', currentTenantId] });
+    } catch (err: any) {
+      showAlert({
+        title: 'Deletion Failed',
+        message: formatErrorMessage(err, 'Could not delete canteen admin. Please ensure migration 0049 is applied.'),
+        type: 'error'
+      });
+    } finally {
+      setDeletingAdminId(null);
     }
   };
 
@@ -687,12 +794,22 @@ export default function UniAdminDashboard() {
                         onClick={() => handleToggleCanteen(canteen)}
                         className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer active:scale-95 ${
                           canteen.is_active
-                            ? 'bg-rose-50 text-rose-700 hover:bg-rose-100 hover:text-rose-800 border border-rose-200/80'
+                            ? 'bg-amber-50 text-amber-700 hover:bg-amber-100 hover:text-amber-800 border border-amber-200/80'
                             : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800 border border-emerald-200/80'
                         }`}
                       >
                         <Power size={12} strokeWidth={2.2} />
                         <span>{canteen.is_active ? 'Deactivate' : 'Activate'}</span>
+                      </button>
+
+                      <button
+                        onClick={() => handleDeleteCanteen(canteen)}
+                        disabled={deletingCanteenId === canteen.id}
+                        title="Delete Canteen"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer active:scale-95 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:text-rose-800 border border-rose-200/80 disabled:opacity-50"
+                      >
+                        <Trash2 size={12} strokeWidth={2.2} />
+                        <span>{deletingCanteenId === canteen.id ? 'Deleting...' : 'Delete'}</span>
                       </button>
                     </div>
                   </div>
@@ -891,9 +1008,21 @@ export default function UniAdminDashboard() {
                       </div>
                     </div>
 
-                    <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/70 flex items-center gap-1 shrink-0">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Active
-                    </span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/70 flex items-center gap-1 shrink-0">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Active
+                      </span>
+
+                      <button
+                        onClick={() => handleDeleteCanteenAdmin(admin)}
+                        disabled={deletingAdminId === admin.id}
+                        title="Delete Canteen Admin"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer active:scale-95 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:text-rose-800 border border-rose-200/80 disabled:opacity-50"
+                      >
+                        <Trash2 size={12} strokeWidth={2.2} />
+                        <span>{deletingAdminId === admin.id ? 'Deleting...' : 'Delete'}</span>
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1166,10 +1295,16 @@ export default function UniAdminDashboard() {
       ) : (
         /* Executive Campus Overview Hub Matching Screenshot Exactly */
         <div className="space-y-5">
-          {/* Top 4 KPI Metrics matching screenshot exactly */}
+          {/* Top 4 KPI Metrics matching screenshot exactly with PRD motion */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* Metric 1: Total Cafeterias */}
-            <div className="relative overflow-hidden bg-white p-5 rounded-[1.75rem] border border-slate-200/80 shadow-xs flex flex-col justify-between">
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
+              whileHover={{ y: -4, transition: { duration: 0.2 } }}
+              className="relative overflow-hidden bg-white p-5 rounded-[1.75rem] border border-slate-200/80 shadow-xs flex flex-col justify-between group hover:shadow-md transition-shadow"
+            >
               {/* Subtle background wave */}
               <div className="absolute right-0 bottom-0 pointer-events-none opacity-40">
                 <svg width="130" height="60" viewBox="0 0 130 60" fill="none">
@@ -1178,12 +1313,12 @@ export default function UniAdminDashboard() {
               </div>
 
               <div className="flex items-start justify-between">
-                <div className="w-12 h-12 rounded-2xl bg-[#e0f2fe] text-[#0284c7] flex items-center justify-center shrink-0">
+                <div className="w-12 h-12 rounded-2xl bg-[#e0f2fe] text-[#0284c7] flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
                   <Store size={22} strokeWidth={2.2} />
                 </div>
                 <Link
                   to="/uni-admin/canteens"
-                  className="w-7 h-7 rounded-full bg-slate-50 border border-slate-200/70 hover:bg-slate-100 flex items-center justify-center text-slate-500 transition"
+                  className="w-7 h-7 rounded-full bg-slate-50 border border-slate-200/70 hover:bg-slate-100 flex items-center justify-center text-slate-500 transition active:scale-95"
                   title="View Cafeterias"
                 >
                   <ArrowRight size={13} />
@@ -1201,10 +1336,16 @@ export default function UniAdminDashboard() {
                   <span>↑ 1 new this month</span>
                 </div>
               </div>
-            </div>
+            </motion.div>
 
             {/* Metric 2: Total Orders */}
-            <div className="relative overflow-hidden bg-white p-5 rounded-[1.75rem] border border-slate-200/80 shadow-xs flex flex-col justify-between">
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
+              whileHover={{ y: -4, transition: { duration: 0.2 } }}
+              className="relative overflow-hidden bg-white p-5 rounded-[1.75rem] border border-slate-200/80 shadow-xs flex flex-col justify-between group hover:shadow-md transition-shadow"
+            >
               {/* Subtle background wave */}
               <div className="absolute right-0 bottom-0 pointer-events-none opacity-40">
                 <svg width="130" height="60" viewBox="0 0 130 60" fill="none">
@@ -1213,12 +1354,12 @@ export default function UniAdminDashboard() {
               </div>
 
               <div className="flex items-start justify-between">
-                <div className="w-12 h-12 rounded-2xl bg-[#ecfdf5] text-[#059669] flex items-center justify-center shrink-0">
+                <div className="w-12 h-12 rounded-2xl bg-[#ecfdf5] text-[#059669] flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
                   <ClipboardList size={22} strokeWidth={2.2} />
                 </div>
                 <Link
                   to="/uni-admin/analytics"
-                  className="w-7 h-7 rounded-full bg-slate-50 border border-slate-200/70 hover:bg-slate-100 flex items-center justify-center text-slate-500 transition"
+                  className="w-7 h-7 rounded-full bg-slate-50 border border-slate-200/70 hover:bg-slate-100 flex items-center justify-center text-slate-500 transition active:scale-95"
                   title="View Orders Analytics"
                 >
                   <ArrowRight size={13} />
@@ -1236,10 +1377,16 @@ export default function UniAdminDashboard() {
                   <span>↑ {tenantStats.weeklyOrdersChange}% from last week</span>
                 </div>
               </div>
-            </div>
+            </motion.div>
 
             {/* Metric 3: Total Revenue */}
-            <div className="relative overflow-hidden bg-white p-5 rounded-[1.75rem] border border-slate-200/80 shadow-xs flex flex-col justify-between">
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.7, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
+              whileHover={{ y: -4, transition: { duration: 0.2 } }}
+              className="relative overflow-hidden bg-white p-5 rounded-[1.75rem] border border-slate-200/80 shadow-xs flex flex-col justify-between group hover:shadow-md transition-shadow"
+            >
               {/* Subtle background wave */}
               <div className="absolute right-0 bottom-0 pointer-events-none opacity-40">
                 <svg width="130" height="60" viewBox="0 0 130 60" fill="none">
@@ -1248,12 +1395,12 @@ export default function UniAdminDashboard() {
               </div>
 
               <div className="flex items-start justify-between">
-                <div className="w-12 h-12 rounded-2xl bg-[#faf5ff] text-[#9333ea] flex items-center justify-center shrink-0">
+                <div className="w-12 h-12 rounded-2xl bg-[#faf5ff] text-[#9333ea] flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
                   <span className="text-2xl font-black">₹</span>
                 </div>
                 <Link
                   to="/uni-admin/analytics"
-                  className="w-7 h-7 rounded-full bg-slate-50 border border-slate-200/70 hover:bg-slate-100 flex items-center justify-center text-slate-500 transition"
+                  className="w-7 h-7 rounded-full bg-slate-50 border border-slate-200/70 hover:bg-slate-100 flex items-center justify-center text-slate-500 transition active:scale-95"
                   title="View Revenue Details"
                 >
                   <ArrowRight size={13} />
@@ -1271,10 +1418,16 @@ export default function UniAdminDashboard() {
                   <span>↑ {tenantStats.monthlyRevenueChange}% from last month</span>
                 </div>
               </div>
-            </div>
+            </motion.div>
 
             {/* Metric 4: Active Students */}
-            <div className="relative overflow-hidden bg-white p-5 rounded-[1.75rem] border border-slate-200/80 shadow-xs flex flex-col justify-between">
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.8, delay: 0.4, ease: [0.16, 1, 0.3, 1] }}
+              whileHover={{ y: -4, transition: { duration: 0.2 } }}
+              className="relative overflow-hidden bg-white p-5 rounded-[1.75rem] border border-slate-200/80 shadow-xs flex flex-col justify-between group hover:shadow-md transition-shadow"
+            >
               {/* Subtle background wave */}
               <div className="absolute right-0 bottom-0 pointer-events-none opacity-40">
                 <svg width="130" height="60" viewBox="0 0 130 60" fill="none">
@@ -1283,7 +1436,7 @@ export default function UniAdminDashboard() {
               </div>
 
               <div className="flex items-start justify-between">
-                <div className="w-12 h-12 rounded-2xl bg-[#fdf2f8] text-[#db2777] flex items-center justify-center shrink-0">
+                <div className="w-12 h-12 rounded-2xl bg-[#fdf2f8] text-[#db2777] flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
                   <Users size={22} strokeWidth={2.2} />
                 </div>
                 <div className="w-7 h-7 rounded-full bg-slate-50 border border-slate-200/70 flex items-center justify-center text-slate-500">
@@ -1302,7 +1455,7 @@ export default function UniAdminDashboard() {
                   <span>Registered on platform</span>
                 </div>
               </div>
-            </div>
+            </motion.div>
           </div>
 
           {/* Row 2: Revenue Trend & Orders Dual Chart + Cafeterias Table */}
@@ -1588,7 +1741,13 @@ export default function UniAdminDashboard() {
           {/* Quick Hub Modules Grid matching bottom 2 cards in screenshot */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
             {/* Bottom Card 1: Canteen Admins */}
-            <div className="relative overflow-hidden bg-white border border-slate-200/80 rounded-[1.75rem] p-6 shadow-xs flex flex-col justify-between hover:shadow-md transition">
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.5, ease: [0.16, 1, 0.3, 1] }}
+              whileHover={{ y: -3, transition: { duration: 0.2 } }}
+              className="relative overflow-hidden bg-white border border-slate-200/80 rounded-[1.75rem] p-6 shadow-xs flex flex-col justify-between hover:shadow-md transition"
+            >
               {/* Background decorative users illustration */}
               <div className="absolute right-4 bottom-4 pointer-events-none opacity-20">
                 <Users size={120} className="text-blue-500" />
@@ -1613,7 +1772,7 @@ export default function UniAdminDashboard() {
               <div className="relative z-10 mt-5">
                 <Link
                   to="/uni-admin/admins"
-                  className="w-full sm:w-auto inline-flex items-center justify-between gap-3 px-4 py-2.5 bg-blue-50/70 hover:bg-blue-100/70 text-[#1d68f2] font-extrabold text-xs rounded-xl transition"
+                  className="w-full sm:w-auto inline-flex items-center justify-between gap-3 px-4 py-2.5 bg-blue-50/70 hover:bg-blue-100/70 text-[#1d68f2] font-extrabold text-xs rounded-xl transition active:scale-95"
                 >
                   <span className="flex items-center gap-2">
                     <Store size={15} />
@@ -1622,10 +1781,16 @@ export default function UniAdminDashboard() {
                   <ArrowRight size={14} />
                 </Link>
               </div>
-            </div>
+            </motion.div>
 
             {/* Bottom Card 2: Weekly Analytics */}
-            <div className="relative overflow-hidden bg-white border border-slate-200/80 rounded-[1.75rem] p-6 shadow-xs flex flex-col justify-between hover:shadow-md transition">
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.58, ease: [0.16, 1, 0.3, 1] }}
+              whileHover={{ y: -3, transition: { duration: 0.2 } }}
+              className="relative overflow-hidden bg-white border border-slate-200/80 rounded-[1.75rem] p-6 shadow-xs flex flex-col justify-between hover:shadow-md transition"
+            >
               {/* Background decorative chart wave illustration */}
               <div className="absolute right-4 bottom-2 pointer-events-none opacity-30">
                 <svg width="150" height="90" viewBox="0 0 150 90" fill="none">
@@ -1656,7 +1821,7 @@ export default function UniAdminDashboard() {
               <div className="relative z-10 mt-5">
                 <Link
                   to="/uni-admin/analytics"
-                  className="w-full sm:w-auto inline-flex items-center justify-between gap-3 px-4 py-2.5 bg-blue-50/70 hover:bg-blue-100/70 text-[#1d68f2] font-extrabold text-xs rounded-xl transition"
+                  className="w-full sm:w-auto inline-flex items-center justify-between gap-3 px-4 py-2.5 bg-blue-50/70 hover:bg-blue-100/70 text-[#1d68f2] font-extrabold text-xs rounded-xl transition active:scale-95"
                 >
                   <span className="flex items-center gap-2">
                     <Store size={15} />
@@ -1665,7 +1830,7 @@ export default function UniAdminDashboard() {
                   <ArrowRight size={14} />
                 </Link>
               </div>
-            </div>
+            </motion.div>
           </div>
         </div>
       )}
