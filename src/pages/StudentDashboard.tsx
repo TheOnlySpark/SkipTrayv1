@@ -2680,13 +2680,17 @@ export default function StudentDashboard() {
                     {cart.length > 0 && (
                       <div className="space-y-1.5 py-3 border-t border-b border-slate-100 text-xs mb-4">
                         <div className="flex justify-between text-slate-500 font-medium">
+                          <span>Item Subtotal</span>
+                          <span className="font-bold text-slate-800">₹{ledger.food_subtotal.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between text-slate-500 font-medium">
                           <span>Payment Method</span>
                           <span className="text-emerald-600 font-bold">Pay at Counter</span>
                         </div>
                         <div className="flex justify-between items-center pt-2 border-t border-slate-100 text-sm">
                           <span className="font-black text-slate-900">Total Amount</span>
                           <span className="text-lg font-black text-[#1d68f2]">
-                            ₹{ledger.food_subtotal.toFixed(2)}
+                            ₹{ledger.gross_payable.toFixed(2)}
                           </span>
                         </div>
                       </div>
@@ -3067,32 +3071,60 @@ export default function StudentDashboard() {
 
                     {/* Cart Items list */}
                     <div className="space-y-2 mb-4">
-                      {cart.map(c => (
-                        <div key={c.item.id} className="flex items-center justify-between p-2 rounded-xl bg-slate-50 border border-slate-200">
-                          <div>
-                            <div className="text-xs font-bold text-slate-900">{c.item.name}</div>
-                            <div className="text-[11px] text-slate-500">₹{Number(c.item.price || 0).toFixed(2)} x {c.quantity}</div>
+                      {cart.map(c => {
+                        const isItemSoldOut = menuItems.find(m => m.id === c.item.id)?.is_sold_out;
+                        return (
+                          <div
+                            key={c.item.id}
+                            className={`flex items-center justify-between p-2 rounded-xl border ${
+                              isItemSoldOut ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'
+                            }`}
+                          >
+                            <div className="flex-1 min-w-0 pr-2">
+                              <div className="text-xs font-bold text-slate-900 truncate">{c.item.name}</div>
+                              <div className="text-[11px] text-slate-500 font-semibold mt-0.5">₹{Number(c.item.price || 0).toFixed(2)} × {c.quantity}</div>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => removeFromCart(c.item.id)}
+                                className="w-7 h-7 flex items-center justify-center bg-white border border-slate-200 rounded-lg font-bold text-xs text-slate-600 hover:bg-slate-100 active:scale-90"
+                              >
+                                −
+                              </button>
+                              <span className="w-5 text-center text-xs font-black text-slate-800 tabular-nums">{c.quantity}</span>
+                              <button
+                                type="button"
+                                onClick={() => addToCart(c.item)}
+                                disabled={cartTotalItems >= 5}
+                                className="w-7 h-7 flex items-center justify-center bg-white border border-slate-200 rounded-lg font-bold text-xs text-[#1d68f2] hover:bg-blue-50 disabled:opacity-30 active:scale-90"
+                              >
+                                +
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setCart(cart.filter(x => x.item.id !== c.item.id))}
+                                className="w-7 h-7 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 flex items-center justify-center ml-0.5"
+                                title="Remove item"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => removeFromCart(c.item.id)}
-                              className="w-7 h-7 flex items-center justify-center bg-white border border-slate-200 rounded-lg font-bold text-xs"
-                            >
-                              −
-                            </button>
-                            <span className="w-5 text-center text-xs font-bold">{c.quantity}</span>
-                            <button
-                              type="button"
-                              onClick={() => addToCart(c.item)}
-                              className="w-7 h-7 flex items-center justify-center bg-white border border-slate-200 rounded-lg font-bold text-xs"
-                            >
-                              +
-                            </button>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
+
+                    {/* Sold-out alert in mobile cart */}
+                    {cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out) && (
+                      <div className="mb-3 p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700">
+                        <div className="flex items-center gap-1 font-bold mb-1">
+                          <IconAlertTriangle size={14} className="text-rose-600 shrink-0" />
+                          <span>Some items are sold out</span>
+                        </div>
+                        <p className="text-[11px] text-rose-600">Please remove them to place your order.</p>
+                      </div>
+                    )}
 
                     {/* Mobile Pickup Time Selector in 12h AM/PM */}
                     <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
@@ -3214,17 +3246,77 @@ export default function StudentDashboard() {
                       )}
                     </div>
 
+                    {/* Mobile Order Bill Summary / Price Breakdown */}
+                    {cart.length > 0 && (
+                      <div className="space-y-1.5 py-3 border-t border-b border-slate-100 text-xs mb-4">
+                        <div className="flex justify-between text-slate-500 font-medium">
+                          <span>Item Subtotal</span>
+                          <span className="font-bold text-slate-800">₹{ledger.food_subtotal.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between text-slate-500 font-medium">
+                          <span>Payment Method</span>
+                          <span className="text-emerald-600 font-bold">Pay at Counter</span>
+                        </div>
+                        <div className="flex justify-between items-center pt-2 border-t border-slate-100 text-sm">
+                          <span className="font-black text-slate-900">Total Amount</span>
+                          <span className="text-lg font-black text-[#1d68f2]">
+                            ₹{ledger.gross_payable.toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Mobile Place Order Button */}
-                    <form onSubmit={e => { handlePlaceOrder(e); setCartOpen(false); }}>
-                      <button
-                        type="submit"
-                        disabled={cart.length === 0 || !pickupTime || !smartSchedule.isValid || submitting || isSuspended || isLunchClosedForToday}
-                        className="w-full py-3 bg-[#1d68f2] text-white rounded-xl font-black text-xs shadow-md disabled:bg-slate-300 disabled:cursor-not-allowed"
-                      >
-                        {!smartSchedule.isValid
-                          ? (smartSchedule.statusBadge || smartSchedule.badge || 'Invalid Pickup Slot')
-                          : `Confirm & Place Order (₹${ledger.gross_payable.toFixed(2)})`}
-                      </button>
+                    <form onSubmit={handlePlaceOrder}>
+                      {error && (
+                        <div className="mb-3 p-2 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center gap-1.5 font-bold">
+                          <IconAlertTriangle size={14} className="shrink-0 text-rose-600" />
+                          <span>{error}</span>
+                        </div>
+                      )}
+
+                      {(() => {
+                        const isSelectedSlotClosed = isLunchClosedForToday;
+                        const isScheduleInvalid = !smartSchedule.isValid;
+                        const isOrderDisabled =
+                          isSuspended ||
+                          isSunday ||
+                          isBeforeOpeningTime ||
+                          isSelectedSlotClosed ||
+                          isScheduleInvalid ||
+                          cart.length === 0 ||
+                          !pickupTime ||
+                          submitting ||
+                          cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out);
+
+                        return (
+                          <button
+                            type="submit"
+                            disabled={isOrderDisabled}
+                            className={`w-full py-3.5 px-4 rounded-xl font-black text-xs shadow-md transition-all flex items-center justify-center gap-2 ${
+                              isOrderDisabled
+                                ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
+                                : 'bg-gradient-to-r from-[#1d68f2] to-[#2563eb] text-white hover:from-blue-600 hover:to-blue-700 shadow-blue-500/20 active:scale-98 cursor-pointer'
+                            }`}
+                          >
+                            {isSuspended ? (
+                              'Account Deactivated'
+                            ) : isSunday ? (
+                              'Closed on Sundays'
+                            ) : isBeforeOpeningTime ? (
+                              'Lunch Booking Opens at 9:30 AM'
+                            ) : isSelectedSlotClosed ? (
+                              'Lunch Ordering Closed'
+                            ) : isScheduleInvalid ? (
+                              smartSchedule.statusBadge || smartSchedule.badge || 'Invalid Pickup Slot'
+                            ) : submitting ? (
+                              'Placing Order...'
+                            ) : (
+                              `Confirm & Place Order (₹${ledger.gross_payable.toFixed(2)})`
+                            )}
+                          </button>
+                        );
+                      })()}
                     </form>
                   </div>
                 )}
