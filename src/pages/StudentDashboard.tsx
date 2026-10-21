@@ -250,20 +250,10 @@ export default function StudentDashboard() {
     window.addEventListener('lunch_slot_config_updated', handleConfigUpdate);
     window.addEventListener('storage', handleStorageChange);
 
-    const slotSub = supabase
-      .channel('public:lunch_slot_configs')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'lunch_slot_configs' }, () => {
-        fetchLunchSlotConfig(cartCanteenId).then(cfg => {
-          if (isMounted) setSlotConfig(cfg);
-        });
-      })
-      .subscribe();
-
     return () => {
       isMounted = false;
       window.removeEventListener('lunch_slot_config_updated', handleConfigUpdate);
       window.removeEventListener('storage', handleStorageChange);
-      slotSub.unsubscribe();
     };
   }, [cartCanteenId]);
 
@@ -661,9 +651,9 @@ export default function StudentDashboard() {
   useEffect(() => {
     if (!profile?.id) return;
 
-    // Listen to changes on our active order and past orders
+    // Listen to changes on our active order and past orders via a single scoped channel
     const orderSub = supabase
-      .channel('public:orders')
+      .channel(`student_order_${profile.id}`)
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
@@ -686,36 +676,15 @@ export default function StudentDashboard() {
       })
       .subscribe();
 
-    // Listen to changes on menu items (e.g. sold out status)
-    const menuSub = supabase
-      .channel('public:menu_items')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items' }, () => {
-        queryClient.invalidateQueries({ queryKey: ['menuItems'] });
-      })
-      .subscribe();
-
-    // Listen to changes on item reviews (e.g. admin reply)
-    const reviewSub = supabase
-      .channel('public:item_reviews')
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'item_reviews',
-        filter: `user_id=eq.${profile.id}`
-      }, () => {
-        queryClient.invalidateQueries({ queryKey: ['pastOrders'] });
-      })
-      .subscribe();
-
     return () => {
       orderSub.unsubscribe();
-      menuSub.unsubscribe();
-      reviewSub.unsubscribe();
     };
   }, [profile?.id, queryClient]);
 
   const { data: menuItems = [], isLoading: menuLoading } = useQuery({
     queryKey: ['menuItems'],
+    staleTime: 30000,
+    refetchInterval: 30000,
     queryFn: async () => {
       const { data } = await supabase
         .from('menu_items')
@@ -769,7 +738,6 @@ export default function StudentDashboard() {
           return a.name.localeCompare(b.name);
         });
     },
-    staleTime: 1000 * 60 * 5, // 5 minutes
   });
 
   // Query real-time most sold food items of the week (created_at >= past 7 days)
