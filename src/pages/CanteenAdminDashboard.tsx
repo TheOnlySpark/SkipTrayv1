@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useLocation, Link } from "react-router-dom";
+import { motion, AnimatePresence } from "motion/react";
 import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/ModalDialogContext';
 import { supabase } from '../lib/supabase';
@@ -76,6 +77,7 @@ import {
   saveLunchSlotConfig,
   generateSlotsFromConfig,
   LunchSlotConfig,
+  CustomSlotItem,
   DEFAULT_LUNCH_SLOT_CONFIG
 } from '../lib/lunchSlots';
 
@@ -126,6 +128,9 @@ export default function CanteenAdminDashboard() {
   const [slotConfigLoading, setSlotConfigLoading] = useState(true);
   const [savingSlotConfig, setSavingSlotConfig] = useState(false);
   const [slotSaveSuccess, setSlotSaveSuccess] = useState(false);
+  const [newCustomStart, setNewCustomStart] = useState('12:00');
+  const [newCustomEnd, setNewCustomEnd] = useState('12:30');
+  const [newCustomLabel, setNewCustomLabel] = useState('');
 
   // Menu Search & Filter State
   const [menuSearch, setMenuSearch] = useState('');
@@ -887,6 +892,53 @@ export default function CanteenAdminDashboard() {
     return generateSlotsFromConfig(slotConfig);
   }, [slotConfig]);
 
+  const handleAddCustomSlot = () => {
+    const [startH, startM] = newCustomStart.split(':').map(Number);
+    const [endH, endM] = newCustomEnd.split(':').map(Number);
+    const startMin = (startH || 0) * 60 + (startM || 0);
+    const endMin = (endH || 0) * 60 + (endM || 0);
+
+    if (startMin >= endMin) {
+      showAlert({
+        title: 'Invalid Slot Duration',
+        message: 'The slot end time must be later than the slot start time.',
+        type: 'warning',
+      });
+      return;
+    }
+
+    const currentSlots = slotConfig.customSlots || [];
+    // Check if slot with identical start time already exists
+    if (currentSlots.some(s => s.startTime === newCustomStart && s.endTime === newCustomEnd)) {
+      showAlert({
+        title: 'Duplicate Slot',
+        message: 'A custom slot with this exact start and end time already exists.',
+        type: 'warning',
+      });
+      return;
+    }
+
+    const newSlot: CustomSlotItem = {
+      startTime: newCustomStart,
+      endTime: newCustomEnd,
+      label: newCustomLabel.trim() || undefined,
+    };
+
+    setSlotConfig(prev => ({
+      ...prev,
+      slotMode: 'CUSTOM',
+      customSlots: [...(prev.customSlots || []), newSlot],
+    }));
+    setNewCustomLabel('');
+  };
+
+  const handleRemoveCustomSlot = (indexToRemove: number) => {
+    setSlotConfig(prev => ({
+      ...prev,
+      customSlots: (prev.customSlots || []).filter((_, i) => i !== indexToRemove),
+    }));
+  };
+
   const handleToggleSlot = (slotValue: string) => {
     setSlotConfig(prev => {
       const disabled = new Set(prev.disabledSlots || []);
@@ -917,19 +969,31 @@ export default function CanteenAdminDashboard() {
     setSavingSlotConfig(true);
     setSlotSaveSuccess(false);
 
-    const [startH, startM] = slotConfig.serviceStartTime.split(':').map(Number);
-    const [endH, endM] = slotConfig.serviceEndTime.split(':').map(Number);
-    const startMinutes = (startH || 0) * 60 + (startM || 0);
-    const endMinutes = (endH || 0) * 60 + (endM || 0);
+    if (slotConfig.slotMode === 'CUSTOM') {
+      if (!slotConfig.customSlots || slotConfig.customSlots.length === 0) {
+        showAlert({
+          title: 'Custom Slots Required',
+          message: 'Please add at least one custom pickup time slot before saving.',
+          type: 'warning',
+        });
+        setSavingSlotConfig(false);
+        return;
+      }
+    } else {
+      const [startH, startM] = slotConfig.serviceStartTime.split(':').map(Number);
+      const [endH, endM] = slotConfig.serviceEndTime.split(':').map(Number);
+      const startMinutes = (startH || 0) * 60 + (startM || 0);
+      const endMinutes = (endH || 0) * 60 + (endM || 0);
 
-    if (startMinutes >= endMinutes) {
-      showAlert({
-        title: 'Invalid Timings',
-        message: 'Lunch service end time must be later than the start time.',
-        type: 'warning',
-      });
-      setSavingSlotConfig(false);
-      return;
+      if (startMinutes >= endMinutes) {
+        showAlert({
+          title: 'Invalid Timings',
+          message: 'Lunch service end time must be later than the start time.',
+          type: 'warning',
+        });
+        setSavingSlotConfig(false);
+        return;
+      }
     }
 
     const res = await saveLunchSlotConfig(slotConfig, currentCanteenId, currentTenantId);
@@ -2524,21 +2588,7 @@ export default function CanteenAdminDashboard() {
                   themeBg = 'bg-gradient-to-br from-rose-50/40 via-white to-rose-50/10';
                 }
 
-                const itemNameLower = (item.name || '').toLowerCase();
-                let itemDesc = (item as any).description;
-                if (!itemDesc) {
-                  if (itemNameLower.includes('idly') || itemNameLower.includes('idli')) {
-                    itemDesc = 'Soft and fluffy idlies, perfect for a healthy start.';
-                  } else if (itemNameLower.includes('dosa')) {
-                    itemDesc = 'Crispy dosa with chutney and sambar.';
-                  } else if (itemNameLower.includes('lays') || itemNameLower.includes('chip')) {
-                    itemDesc = 'Crispy and crunchy potato chips (original).';
-                  } else if (isPacked) {
-                    itemDesc = `Packaged sealed snack • Stock: ${stock ?? 0} pcs.`;
-                  } else {
-                    itemDesc = `Freshly cooked delicious ${item.name.toLowerCase()}.`;
-                  }
-                }
+
 
                 return (
                   <div
@@ -2598,10 +2648,7 @@ export default function CanteenAdminDashboard() {
                         {item.name}
                       </h3>
 
-                      {/* Food Description */}
-                      <p className="text-xs sm:text-sm text-slate-500 font-medium leading-relaxed mt-1.5 min-h-[38px] line-clamp-2">
-                        {itemDesc}
-                      </p>
+
                     </div>
 
                     {/* Stock counter if packed */}
@@ -3278,60 +3325,399 @@ export default function CanteenAdminDashboard() {
       <div className="text-slate-500 text-sm py-8 text-center">Loading lunch slot configuration...</div>
     ) : (
       <div className="space-y-6">
-        {/* Global Timing & Interval Settings */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 p-4 sm:p-5 bg-slate-50 border border-slate-200/80 rounded-2xl">
+        {/* Slot Mode Selection: Fixed Slot Time vs Customized Slotting */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 bg-gradient-to-r from-indigo-50/70 via-white to-slate-50 border border-indigo-100 rounded-2xl">
           <div>
-            <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-              Service Start Time
-            </label>
-            <input
-              type="time"
-              value={slotConfig.serviceStartTime}
-              onChange={e => setSlotConfig(prev => ({ ...prev, serviceStartTime: e.target.value }))}
-              className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-            <span className="text-[11px] text-slate-400 mt-1 block">
-              Current: {formatPickupTime(slotConfig.serviceStartTime)}
-            </span>
+            <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">Slotting Strategy</div>
+            <div className="text-sm font-extrabold text-slate-800">Choose Slot Generation Mode</div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Switch between automated fixed intervals across service hours or define specific customized pickup windows.
+            </p>
           </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-              Service End Time
-            </label>
-            <input
-              type="time"
-              value={slotConfig.serviceEndTime}
-              onChange={e => setSlotConfig(prev => ({ ...prev, serviceEndTime: e.target.value }))}
-              className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-            <span className="text-[11px] text-slate-400 mt-1 block">
-              Current: {formatPickupTime(slotConfig.serviceEndTime)}
-            </span>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-              Slot Interval Duration
-            </label>
-            <select
-              value={slotConfig.slotDurationMinutes}
-              onChange={e => setSlotConfig(prev => ({ ...prev, slotDurationMinutes: Number(e.target.value) }))}
-              className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          <div className="flex items-center bg-slate-100/90 p-1 rounded-xl border border-slate-200 shrink-0">
+            <button
+              type="button"
+              onClick={() => setSlotConfig(prev => ({ ...prev, slotMode: 'FIXED' }))}
+              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                (slotConfig.slotMode || 'FIXED') === 'FIXED'
+                  ? 'bg-white text-indigo-700 shadow-sm border border-slate-200/60'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
             >
-              <option value={5}>5 Minutes</option>
-              <option value={10}>10 Minutes</option>
-              <option value={15}>15 Minutes (Default)</option>
-              <option value={20}>20 Minutes</option>
-              <option value={30}>30 Minutes</option>
-              <option value={45}>45 Minutes</option>
-              <option value={60}>60 Minutes</option>
-            </select>
-            <span className="text-[11px] text-slate-400 mt-1 block">
-              Generates slots across service hours
-            </span>
+              Fixed Slot Time
+            </button>
+            <button
+              type="button"
+              onClick={() => setSlotConfig(prev => ({ ...prev, slotMode: 'CUSTOM' }))}
+              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                slotConfig.slotMode === 'CUSTOM'
+                  ? 'bg-white text-indigo-700 shadow-sm border border-slate-200/60'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Customized Slotting
+            </button>
           </div>
+        </div>
 
+        {/* Conditional Mode Settings */}
+        {(slotConfig.slotMode || 'FIXED') === 'FIXED' ? (
+          /* FIXED SLOT TIME SETTINGS */
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 p-4 sm:p-5 bg-slate-50 border border-slate-200/80 rounded-2xl">
+            <div>
+              <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+                Service Start Time
+              </label>
+              {(() => {
+                const [h24Str = '08', mStr = '00'] = (slotConfig.serviceStartTime || '08:00').split(':');
+                const h24 = parseInt(h24Str, 10) || 0;
+                const period = h24 >= 12 ? 'PM' : 'AM';
+                const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+                const minutes = mStr.padStart(2, '0');
+
+                const updateTime = (newH12: number, newMin: string, newPeriod: string) => {
+                  let hours24 = newH12 % 12;
+                  if (newPeriod === 'PM') hours24 += 12;
+                  const formatted = `${String(hours24).padStart(2, '0')}:${newMin.padStart(2, '0')}`;
+                  setSlotConfig(prev => ({ ...prev, serviceStartTime: formatted }));
+                };
+
+                return (
+                  <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl p-1.5 shadow-xs focus-within:ring-2 focus-within:ring-indigo-500">
+                    <select
+                      value={h12}
+                      onChange={e => updateTime(Number(e.target.value), minutes, period)}
+                      className="bg-transparent text-sm font-semibold text-slate-800 focus:outline-none cursor-pointer py-1 px-1 rounded hover:bg-slate-50"
+                    >
+                      {Array.from({ length: 12 }, (_, i) => i + 1).map(h => (
+                        <option key={h} value={h}>{String(h).padStart(2, '0')}</option>
+                      ))}
+                    </select>
+                    <span className="font-bold text-slate-400">:</span>
+                    <select
+                      value={minutes}
+                      onChange={e => updateTime(h12, e.target.value, period)}
+                      className="bg-transparent text-sm font-semibold text-slate-800 focus:outline-none cursor-pointer py-1 px-1 rounded hover:bg-slate-50"
+                    >
+                      {Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, '0')).map(m => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                    <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200/70 ml-auto">
+                      <button
+                        type="button"
+                        onClick={() => updateTime(h12, minutes, 'AM')}
+                        className={`px-2 py-0.5 text-xs font-bold rounded transition-colors ${period === 'AM' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}
+                      >
+                        AM
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => updateTime(h12, minutes, 'PM')}
+                        className={`px-2 py-0.5 text-xs font-bold rounded transition-colors ${period === 'PM' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}
+                      >
+                        PM
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+              <span className="text-[11px] text-slate-400 mt-1 block">
+                Current: {formatPickupTime(slotConfig.serviceStartTime)}
+              </span>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+                Service End Time
+              </label>
+              {(() => {
+                const [h24Str = '20', mStr = '00'] = (slotConfig.serviceEndTime || '20:00').split(':');
+                const h24 = parseInt(h24Str, 10) || 0;
+                const period = h24 >= 12 ? 'PM' : 'AM';
+                const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+                const minutes = mStr.padStart(2, '0');
+
+                const updateTime = (newH12: number, newMin: string, newPeriod: string) => {
+                  let hours24 = newH12 % 12;
+                  if (newPeriod === 'PM') hours24 += 12;
+                  const formatted = `${String(hours24).padStart(2, '0')}:${newMin.padStart(2, '0')}`;
+                  setSlotConfig(prev => ({ ...prev, serviceEndTime: formatted }));
+                };
+
+                return (
+                  <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl p-1.5 shadow-xs focus-within:ring-2 focus-within:ring-indigo-500">
+                    <select
+                      value={h12}
+                      onChange={e => updateTime(Number(e.target.value), minutes, period)}
+                      className="bg-transparent text-sm font-semibold text-slate-800 focus:outline-none cursor-pointer py-1 px-1 rounded hover:bg-slate-50"
+                    >
+                      {Array.from({ length: 12 }, (_, i) => i + 1).map(h => (
+                        <option key={h} value={h}>{String(h).padStart(2, '0')}</option>
+                      ))}
+                    </select>
+                    <span className="font-bold text-slate-400">:</span>
+                    <select
+                      value={minutes}
+                      onChange={e => updateTime(h12, e.target.value, period)}
+                      className="bg-transparent text-sm font-semibold text-slate-800 focus:outline-none cursor-pointer py-1 px-1 rounded hover:bg-slate-50"
+                    >
+                      {Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, '0')).map(m => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                    <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200/70 ml-auto">
+                      <button
+                        type="button"
+                        onClick={() => updateTime(h12, minutes, 'AM')}
+                        className={`px-2 py-0.5 text-xs font-bold rounded transition-colors ${period === 'AM' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}
+                      >
+                        AM
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => updateTime(h12, minutes, 'PM')}
+                        className={`px-2 py-0.5 text-xs font-bold rounded transition-colors ${period === 'PM' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}
+                      >
+                        PM
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+              <span className="text-[11px] text-slate-400 mt-1 block">
+                Current: {formatPickupTime(slotConfig.serviceEndTime)}
+              </span>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+                Slot Interval Duration
+              </label>
+              <select
+                value={slotConfig.slotDurationMinutes}
+                onChange={e => setSlotConfig(prev => ({ ...prev, slotDurationMinutes: Number(e.target.value) }))}
+                className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value={5}>5 Minutes</option>
+                <option value={10}>10 Minutes</option>
+                <option value={15}>15 Minutes (Default)</option>
+                <option value={20}>20 Minutes</option>
+                <option value={30}>30 Minutes</option>
+                <option value={45}>45 Minutes</option>
+                <option value={60}>60 Minutes</option>
+              </select>
+              <span className="text-[11px] text-slate-400 mt-1 block">
+                Generates intervals automatically across service hours
+              </span>
+            </div>
+          </div>
+        ) : (
+          /* CUSTOMIZED SLOTTING SETTINGS */
+          <div className="space-y-4 p-4 sm:p-5 bg-indigo-50/30 border border-indigo-100 rounded-2xl">
+            <div>
+              <div className="text-xs font-bold text-indigo-900 uppercase tracking-wider">Custom Slots Builder</div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Create specific pickup windows with start and end times tailored for break periods, rush hours, or custom schedules.
+              </p>
+            </div>
+
+            {/* Add Custom Slot Input Controls */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-3">
+              <div className="text-xs font-bold text-slate-700">Add New Pickup Window</div>
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+                {/* Start Time Picker */}
+                <div className="sm:col-span-4">
+                  <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">
+                    Slot Start Time
+                  </label>
+                  {(() => {
+                    const [h24Str = '12', mStr = '00'] = newCustomStart.split(':');
+                    const h24 = parseInt(h24Str, 10) || 0;
+                    const period = h24 >= 12 ? 'PM' : 'AM';
+                    const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+                    const minutes = mStr.padStart(2, '0');
+
+                    const updateTime = (newH12: number, newMin: string, newPeriod: string) => {
+                      let hours24 = newH12 % 12;
+                      if (newPeriod === 'PM') hours24 += 12;
+                      setNewCustomStart(`${String(hours24).padStart(2, '0')}:${newMin.padStart(2, '0')}`);
+                    };
+
+                    return (
+                      <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl p-1.5 focus-within:ring-2 focus-within:ring-indigo-500">
+                        <select
+                          value={h12}
+                          onChange={e => updateTime(Number(e.target.value), minutes, period)}
+                          className="bg-transparent text-xs font-semibold text-slate-800 focus:outline-none cursor-pointer py-1 px-1 rounded"
+                        >
+                          {Array.from({ length: 12 }, (_, i) => i + 1).map(h => (
+                            <option key={h} value={h}>{String(h).padStart(2, '0')}</option>
+                          ))}
+                        </select>
+                        <span className="font-bold text-slate-400">:</span>
+                        <select
+                          value={minutes}
+                          onChange={e => updateTime(h12, e.target.value, period)}
+                          className="bg-transparent text-xs font-semibold text-slate-800 focus:outline-none cursor-pointer py-1 px-1 rounded"
+                        >
+                          {Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, '0')).map(m => (
+                            <option key={m} value={m}>{m}</option>
+                          ))}
+                        </select>
+                        <div className="flex bg-white p-0.5 rounded-lg border border-slate-200/70 ml-auto">
+                          <button
+                            type="button"
+                            onClick={() => updateTime(h12, minutes, 'AM')}
+                            className={`px-1.5 py-0.5 text-[11px] font-bold rounded transition-colors ${period === 'AM' ? 'bg-indigo-600 text-white shadow-2xs' : 'text-slate-600'}`}
+                          >
+                            AM
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => updateTime(h12, minutes, 'PM')}
+                            className={`px-1.5 py-0.5 text-[11px] font-bold rounded transition-colors ${period === 'PM' ? 'bg-indigo-600 text-white shadow-2xs' : 'text-slate-600'}`}
+                          >
+                            PM
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* End Time Picker */}
+                <div className="sm:col-span-4">
+                  <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">
+                    Slot End Time
+                  </label>
+                  {(() => {
+                    const [h24Str = '12', mStr = '30'] = newCustomEnd.split(':');
+                    const h24 = parseInt(h24Str, 10) || 0;
+                    const period = h24 >= 12 ? 'PM' : 'AM';
+                    const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+                    const minutes = mStr.padStart(2, '0');
+
+                    const updateTime = (newH12: number, newMin: string, newPeriod: string) => {
+                      let hours24 = newH12 % 12;
+                      if (newPeriod === 'PM') hours24 += 12;
+                      setNewCustomEnd(`${String(hours24).padStart(2, '0')}:${newMin.padStart(2, '0')}`);
+                    };
+
+                    return (
+                      <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl p-1.5 focus-within:ring-2 focus-within:ring-indigo-500">
+                        <select
+                          value={h12}
+                          onChange={e => updateTime(Number(e.target.value), minutes, period)}
+                          className="bg-transparent text-xs font-semibold text-slate-800 focus:outline-none cursor-pointer py-1 px-1 rounded"
+                        >
+                          {Array.from({ length: 12 }, (_, i) => i + 1).map(h => (
+                            <option key={h} value={h}>{String(h).padStart(2, '0')}</option>
+                          ))}
+                        </select>
+                        <span className="font-bold text-slate-400">:</span>
+                        <select
+                          value={minutes}
+                          onChange={e => updateTime(h12, e.target.value, period)}
+                          className="bg-transparent text-xs font-semibold text-slate-800 focus:outline-none cursor-pointer py-1 px-1 rounded"
+                        >
+                          {Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, '0')).map(m => (
+                            <option key={m} value={m}>{m}</option>
+                          ))}
+                        </select>
+                        <div className="flex bg-white p-0.5 rounded-lg border border-slate-200/70 ml-auto">
+                          <button
+                            type="button"
+                            onClick={() => updateTime(h12, minutes, 'AM')}
+                            className={`px-1.5 py-0.5 text-[11px] font-bold rounded transition-colors ${period === 'AM' ? 'bg-indigo-600 text-white shadow-2xs' : 'text-slate-600'}`}
+                          >
+                            AM
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => updateTime(h12, minutes, 'PM')}
+                            className={`px-1.5 py-0.5 text-[11px] font-bold rounded transition-colors ${period === 'PM' ? 'bg-indigo-600 text-white shadow-2xs' : 'text-slate-600'}`}
+                          >
+                            PM
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* Optional Label */}
+                <div className="sm:col-span-3">
+                  <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">
+                    Label (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Lunch Break"
+                    value={newCustomLabel}
+                    onChange={e => setNewCustomLabel(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                {/* Add Button */}
+                <div className="sm:col-span-1">
+                  <button
+                    type="button"
+                    onClick={handleAddCustomSlot}
+                    className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center shadow-xs"
+                    title="Add Slot"
+                  >
+                    <Plus size={16} />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* List of Configured Custom Slots */}
+            <div>
+              <div className="text-xs font-bold text-slate-600 mb-2">
+                Configured Custom Windows ({(slotConfig.customSlots || []).length}):
+              </div>
+              {(!slotConfig.customSlots || slotConfig.customSlots.length === 0) ? (
+                <div className="p-4 text-center text-xs text-slate-500 bg-white border border-dashed border-slate-300 rounded-xl">
+                  No custom slots configured yet. Choose a start &amp; end time above and click the '+' button to add your customized slots.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+                  {slotConfig.customSlots.map((item, idx) => (
+                    <div
+                      key={`${item.startTime}-${item.endTime}-${idx}`}
+                      className="bg-white p-2.5 rounded-xl border border-slate-200 flex items-center justify-between shadow-2xs hover:border-indigo-300 transition-colors"
+                    >
+                      <div className="min-w-0 pr-2">
+                        <div className="text-xs font-bold text-slate-800 truncate font-mono">
+                          {formatPickupTime(item.startTime)} – {formatPickupTime(item.endTime)}
+                        </div>
+                        {item.label && (
+                          <div className="text-[11px] text-indigo-600 font-semibold truncate">
+                            {item.label}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveCustomSlot(idx)}
+                        className="text-slate-400 hover:text-rose-600 p-1 rounded-lg hover:bg-rose-50 transition-colors shrink-0"
+                        title="Remove custom slot"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Global Operational Rules: Advance Notice, Max Kitchen Capacity & Default Prep Time */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 p-4 sm:p-5 bg-slate-50 border border-slate-200/80 rounded-2xl">
           <div>
             <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
               Advance Notice Cutoff
@@ -3365,7 +3751,7 @@ export default function CanteenAdminDashboard() {
               className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
             <span className="text-[11px] text-slate-400 mt-1 block">
-              Max orders cooking per 15m window
+              Max orders cooking per window
             </span>
           </div>
 
@@ -3728,12 +4114,17 @@ export default function CanteenAdminDashboard() {
       </div>
     </div>
   ) : (
-    /* Executive CANTEEN OS Dashboard (Shown on main /canteen-admin) */
+    /* Executive CANTEEN OS Dashboard (Shown on main /canteen-admin) with PRD motion */
     <div className="h-full w-full flex flex-col justify-between gap-3 text-slate-900 select-none overflow-hidden">
       {/* Top Row: Welcome Banner (Left) + Date & Time Card (Right) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-stretch shrink-0">
         {/* Welcome Banner Card */}
-        <div className="lg:col-span-9 relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#060b14] via-[#0d1624] to-[#141e30] text-white p-4 sm:p-5 shadow-lg border border-slate-800/80 flex flex-col justify-between min-h-[125px]">
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
+          className="lg:col-span-9 relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#060b14] via-[#0d1624] to-[#141e30] text-white p-4 sm:p-5 shadow-lg border border-slate-800/80 flex flex-col justify-between min-h-[125px]"
+        >
           {/* Subtle dish background on the right */}
           <div className="absolute right-0 top-0 bottom-0 w-2/5 sm:w-1/2 pointer-events-none overflow-hidden hidden sm:block">
             <img
@@ -3764,9 +4155,14 @@ export default function CanteenAdminDashboard() {
               Welcome back,
             </span>
             <div className="flex items-center gap-2">
-              <h1 className="text-xl sm:text-2xl font-black tracking-tight text-white">
+              <motion.h1
+                initial={{ opacity: 0, x: -8 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.6, delay: 0.1, ease: 'easeOut' }}
+                className="text-xl sm:text-2xl font-black tracking-tight text-white"
+              >
                 {profile?.name || 'Madeshwar'}
-              </h1>
+              </motion.h1>
               <span className="text-xl sm:text-2xl animate-bounce">👋</span>
             </div>
             <p className="mt-0.5 text-xs text-slate-300 font-medium">
@@ -3783,12 +4179,20 @@ export default function CanteenAdminDashboard() {
               <span>Better Days</span>
             </div>
           </div>
-        </div>
+        </motion.div>
 
         {/* Date & Time Widgets (Matched exactly to Staff Dashboard aesthetic) */}
-        <div className="lg:col-span-3 flex flex-col justify-between gap-2.5">
+        <motion.div
+          initial={{ opacity: 0, x: 24 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.6, delay: 0.15, ease: [0.16, 1, 0.3, 1] }}
+          className="lg:col-span-3 flex flex-col justify-between gap-2.5"
+        >
           {/* Card 1: DATE */}
-          <div className="relative overflow-hidden bg-gradient-to-r from-[#ffffff] via-[#f8fbff] to-[#f0f6ff] rounded-2xl sm:rounded-3xl border border-white p-3 sm:p-3.5 shadow-[0_8px_20px_rgba(180,205,240,0.35)] flex items-center justify-between min-h-[66px]">
+          <motion.div
+            whileHover={{ y: -3, transition: { duration: 0.2 } }}
+            className="relative overflow-hidden bg-gradient-to-r from-[#ffffff] via-[#f8fbff] to-[#f0f6ff] rounded-2xl sm:rounded-3xl border border-white p-3 sm:p-3.5 shadow-[0_8px_20px_rgba(180,205,240,0.35)] flex items-center justify-between min-h-[66px]"
+          >
             {/* Right side Calendar Illustration with Leaf */}
             <div className="absolute right-1 -bottom-1 pointer-events-none w-28 h-20 opacity-90 select-none">
               <svg viewBox="0 0 140 100" fill="none" className="w-full h-full">
@@ -3857,10 +4261,13 @@ export default function CanteenAdminDashboard() {
                 </div>
               </div>
             </div>
-          </div>
+          </motion.div>
 
           {/* Card 2: TIME */}
-          <div className="relative overflow-hidden bg-gradient-to-r from-[#ffffff] via-[#f9faff] to-[#eef4ff] rounded-2xl sm:rounded-3xl border border-white p-3 sm:p-3.5 shadow-[0_8px_20px_rgba(180,205,240,0.35)] flex items-center justify-between min-h-[66px]">
+          <motion.div
+            whileHover={{ y: -3, transition: { duration: 0.2 } }}
+            className="relative overflow-hidden bg-gradient-to-r from-[#ffffff] via-[#f9faff] to-[#eef4ff] rounded-2xl sm:rounded-3xl border border-white p-3 sm:p-3.5 shadow-[0_8px_20px_rgba(180,205,240,0.35)] flex items-center justify-between min-h-[66px]"
+          >
             {/* Right side Clock & Moon Illustration */}
             <div className="absolute right-1 -bottom-1 pointer-events-none w-28 h-20 opacity-90 select-none">
               <svg viewBox="0 0 140 100" fill="none" className="w-full h-full">
@@ -3929,14 +4336,20 @@ export default function CanteenAdminDashboard() {
                 </div>
               </div>
             </div>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       </div>
 
-      {/* 4 KPI Metric Cards - Exact Match to Design */}
+      {/* 4 KPI Metric Cards - Exact Match to Design with Motion */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 shrink-0">
         {/* Card 1: Today's Orders */}
-        <div className="relative overflow-hidden bg-gradient-to-br from-[#f8faff] via-[#f1f6ff] to-[#e4efff] p-3.5 sm:p-4 rounded-2xl border border-[#d8e7ff] shadow-xs flex flex-col justify-between min-h-[110px]">
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
+          whileHover={{ y: -4, transition: { duration: 0.2 } }}
+          className="relative overflow-hidden bg-gradient-to-br from-[#f8faff] via-[#f1f6ff] to-[#e4efff] p-3.5 sm:p-4 rounded-2xl border border-[#d8e7ff] shadow-xs flex flex-col justify-between min-h-[110px] group"
+        >
           {/* Blue mountain wave graphic from reference */}
           <div className="absolute right-0 bottom-0 pointer-events-none w-32 h-20 overflow-hidden">
             <svg viewBox="0 0 140 90" fill="none" className="w-full h-full opacity-80" preserveAspectRatio="none">
@@ -3960,7 +4373,7 @@ export default function CanteenAdminDashboard() {
 
           <div>
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-gradient-to-b from-[#1e69ff] to-[#0051e8] text-white flex items-center justify-center shadow-md shadow-blue-500/25 shrink-0">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-b from-[#1e69ff] to-[#0051e8] text-white flex items-center justify-center shadow-md shadow-blue-500/25 shrink-0 group-hover:scale-105 transition-transform duration-200">
                 <ChefHat size={17} strokeWidth={2.2} />
               </div>
               <span className="text-xs font-extrabold text-[#1e293b] tracking-tight">Today's Orders</span>
@@ -3973,10 +4386,16 @@ export default function CanteenAdminDashboard() {
             <span className="font-extrabold text-[11px]">↗ 100%</span>
             <span className="text-[#64748b] font-medium text-[10px]">vs yesterday</span>
           </div>
-        </div>
+        </motion.div>
 
         {/* Card 2: Revenue */}
-        <div className="relative overflow-hidden bg-gradient-to-br from-[#f6fcf8] via-[#effaf2] to-[#e1f7e7] p-3.5 sm:p-4 rounded-2xl border border-[#cbf0d5] shadow-xs flex flex-col justify-between min-h-[110px]">
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 0.28, ease: [0.16, 1, 0.3, 1] }}
+          whileHover={{ y: -4, transition: { duration: 0.2 } }}
+          className="relative overflow-hidden bg-gradient-to-br from-[#f6fcf8] via-[#effaf2] to-[#e1f7e7] p-3.5 sm:p-4 rounded-2xl border border-[#cbf0d5] shadow-xs flex flex-col justify-between min-h-[110px] group"
+        >
           {/* Green smooth rolling hill wave graphic */}
           <div className="absolute right-0 bottom-0 pointer-events-none w-32 h-20 overflow-hidden">
             <svg viewBox="0 0 140 90" fill="none" className="w-full h-full opacity-80" preserveAspectRatio="none">
@@ -3994,7 +4413,7 @@ export default function CanteenAdminDashboard() {
 
           <div>
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-gradient-to-b from-[#00aa63] to-[#00894f] text-white flex items-center justify-center shadow-md shadow-emerald-500/25 shrink-0">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-b from-[#00aa63] to-[#00894f] text-white flex items-center justify-center shadow-md shadow-emerald-500/25 shrink-0 group-hover:scale-105 group-hover:shadow-emerald-500/40 transition-all duration-200">
                 <span className="font-black text-lg leading-none">₹</span>
               </div>
               <span className="text-xs font-extrabold text-[#00874e] tracking-tight">Revenue</span>
@@ -4008,10 +4427,16 @@ export default function CanteenAdminDashboard() {
             <span className="font-extrabold text-[11px]">↗ 100%</span>
             <span className="text-[#64748b] font-medium text-[10px]">today collected</span>
           </div>
-        </div>
+        </motion.div>
 
         {/* Card 3: Avg. Prep Time */}
-        <div className="relative overflow-hidden bg-gradient-to-br from-[#fffdf7] via-[#fff8eb] to-[#ffeed0] p-3.5 sm:p-4 rounded-2xl border border-[#fde4b8] shadow-xs flex flex-col justify-between min-h-[110px]">
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.7, delay: 0.36, ease: [0.16, 1, 0.3, 1] }}
+          whileHover={{ y: -4, transition: { duration: 0.2 } }}
+          className="relative overflow-hidden bg-gradient-to-br from-[#fffdf7] via-[#fff8eb] to-[#ffeed0] p-3.5 sm:p-4 rounded-2xl border border-[#fde4b8] shadow-xs flex flex-col justify-between min-h-[110px] group"
+        >
           {/* Subtle amber watermarked clock dial illustration */}
           <div className="absolute -right-2 -bottom-2 pointer-events-none opacity-25 text-[#f59e0b]">
             <svg width="85" height="85" viewBox="0 0 100 100" fill="none" stroke="currentColor" strokeWidth="6">
@@ -4022,7 +4447,7 @@ export default function CanteenAdminDashboard() {
 
           <div>
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-gradient-to-b from-[#f29400] to-[#d97c00] text-white flex items-center justify-center shadow-md shadow-amber-500/25 shrink-0">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-b from-[#f29400] to-[#d97c00] text-white flex items-center justify-center shadow-md shadow-amber-500/25 shrink-0 group-hover:scale-105 transition-transform duration-200">
                 <Clock size={17} strokeWidth={2.4} />
               </div>
               <span className="text-xs font-extrabold text-[#1e293b] tracking-tight">Avg. Prep Time</span>
@@ -4036,10 +4461,16 @@ export default function CanteenAdminDashboard() {
             <span className="text-[11px]">🎯</span>
             <span className="text-[#475569] font-medium text-[10px]">Standard kitchen target</span>
           </div>
-        </div>
+        </motion.div>
 
         {/* Card 4: Active Orders */}
-        <div className="relative overflow-hidden bg-gradient-to-br from-[#faf7ff] via-[#f4edff] to-[#e8dafe] p-3.5 sm:p-4 rounded-2xl border border-[#e2d0fd] shadow-xs flex flex-col justify-between min-h-[110px]">
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.8, delay: 0.44, ease: [0.16, 1, 0.3, 1] }}
+          whileHover={{ y: -4, transition: { duration: 0.2 } }}
+          className="relative overflow-hidden bg-gradient-to-br from-[#faf7ff] via-[#f4edff] to-[#e8dafe] p-3.5 sm:p-4 rounded-2xl border border-[#e2d0fd] shadow-xs flex flex-col justify-between min-h-[110px] group"
+        >
           {/* Subtle document page icon watermark in top/bottom right */}
           <div className="absolute right-2 bottom-2 pointer-events-none opacity-25 text-[#9333ea]">
             <svg width="45" height="55" viewBox="0 0 24 28" fill="currentColor">
@@ -4055,7 +4486,7 @@ export default function CanteenAdminDashboard() {
 
           <div>
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-gradient-to-b from-[#8739f9] to-[#6d20e3] text-white flex items-center justify-center shadow-md shadow-purple-500/25 shrink-0">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-b from-[#8739f9] to-[#6d20e3] text-white flex items-center justify-center shadow-md shadow-purple-500/25 shrink-0 group-hover:scale-105 group-hover:shadow-purple-500/40 transition-all duration-200">
                 <ClipboardList size={17} strokeWidth={2.2} />
               </div>
               <span className="text-xs font-extrabold text-[#1e293b] tracking-tight">Active Orders</span>
@@ -4067,7 +4498,7 @@ export default function CanteenAdminDashboard() {
           <div className="mt-1.5 text-[10px] font-medium text-[#64748b] z-10">
             {liveActiveOrders.length > 0 ? `${liveActiveOrders.length} active orders right now` : 'No active orders right now'}
           </div>
-        </div>
+        </motion.div>
       </div>
 
       {/* Main 2-Column Split: Left (Live Orders + Quick Actions + Order List) & Right (Popular Items + Promo Card) */}
@@ -4075,7 +4506,13 @@ export default function CanteenAdminDashboard() {
         {/* Left Column (8 cols on lg) */}
         <div className="lg:col-span-8 flex flex-col justify-between gap-3 min-h-0">
           {/* 1. Order List Table Card (Moved to the Top) */}
-          <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-xs flex flex-col justify-between flex-1">
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.45, ease: [0.16, 1, 0.3, 1] }}
+            whileHover={{ y: -2, transition: { duration: 0.2 } }}
+            className="bg-white rounded-2xl border border-slate-100 p-4 shadow-xs flex flex-col justify-between flex-1 transition-shadow hover:shadow-md"
+          >
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
                 <div className="w-6 h-6 rounded-lg bg-blue-50 text-[#1d68f2] flex items-center justify-center">
@@ -4085,7 +4522,7 @@ export default function CanteenAdminDashboard() {
               </div>
               <Link
                 to="/canteen-admin/orders"
-                className="text-[11px] font-bold text-[#1d68f2] hover:underline flex items-center gap-1"
+                className="text-[11px] font-bold text-[#1d68f2] hover:underline flex items-center gap-1 active:scale-95 transition-transform"
               >
                 <span>View All</span>
                 <span>→</span>
@@ -4105,7 +4542,7 @@ export default function CanteenAdminDashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {allOrders.slice(0, 4).map((ord) => {
+                  {allOrders.slice(0, 4).map((ord, rIdx) => {
                     const custName = (ord.profiles as any)?.name || 'Guest User';
                     const itemsSummary = ord.order_items?.map((i: any) => `${i.menu_items?.name || 'Item'} (${i.quantity})`).join(', ') || '1 Item';
                     const amount = calculateOrderTotal(ord).totalAmount;
@@ -4115,7 +4552,13 @@ export default function CanteenAdminDashboard() {
                     const isPrep = ord.status === 'PREPARING';
 
                     return (
-                      <tr key={ord.id} className="hover:bg-slate-50/80 transition-colors">
+                      <motion.tr
+                        key={ord.id}
+                        initial={{ opacity: 0, x: -8 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ duration: 0.35, delay: 0.5 + rIdx * 0.08, ease: 'easeOut' }}
+                        className="hover:bg-slate-50/80 transition-colors"
+                      >
                         <td className="py-1.5 px-2.5 font-mono font-semibold text-slate-400 text-[10px]">
                           #{String(ord.order_number || ord.id.slice(0, 4)).padStart(4, '0')}
                         </td>
@@ -4145,16 +4588,22 @@ export default function CanteenAdminDashboard() {
                         <td className="py-1.5 px-2.5 text-right font-medium text-slate-400 text-[10px] whitespace-nowrap">
                           {timeStr}
                         </td>
-                      </tr>
+                      </motion.tr>
                     );
                   })}
                 </tbody>
               </table>
             </div>
-          </div>
+          </motion.div>
 
           {/* 2. Live Orders Card (Moved Down) */}
-          <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-xs flex flex-col justify-between flex-1">
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.55, ease: [0.16, 1, 0.3, 1] }}
+            whileHover={{ y: -2, transition: { duration: 0.2 } }}
+            className="bg-white rounded-2xl border border-slate-100 p-4 shadow-xs flex flex-col justify-between flex-1 transition-shadow hover:shadow-md"
+          >
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
@@ -4165,7 +4614,7 @@ export default function CanteenAdminDashboard() {
               </div>
               <Link
                 to="/canteen-admin/orders"
-                className="text-[11px] font-bold text-[#1d68f2] hover:underline flex items-center gap-1"
+                className="text-[11px] font-bold text-[#1d68f2] hover:underline flex items-center gap-1 active:scale-95 transition-transform"
               >
                 <span>View All Orders</span>
                 <span>→</span>
@@ -4173,22 +4622,31 @@ export default function CanteenAdminDashboard() {
             </div>
 
             {liveActiveOrders.length === 0 ? (
-              /* Cloche Empty State matching screenshot */
-              <div className="py-2.5 flex flex-col items-center justify-center text-center my-auto">
-                <div className="w-12 h-12 rounded-full bg-blue-50/70 border border-blue-100/60 flex items-center justify-center text-blue-400 mb-1.5">
+              /* Cloche Empty State matching PRD motion */
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4 }}
+                className="py-2.5 flex flex-col items-center justify-center text-center my-auto"
+              >
+                <motion.div
+                  animate={{ y: [0, -3, 0] }}
+                  transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+                  className="w-12 h-12 rounded-full bg-blue-50/70 border border-blue-100/60 flex items-center justify-center text-blue-400 mb-1.5"
+                >
                   <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
                     <path d="M4 18h16" />
                     <path d="M4 18a8 8 0 0 1 16 0" />
                     <path d="M12 6a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z" />
                   </svg>
-                </div>
+                </motion.div>
                 <div className="text-xs font-extrabold text-slate-800">
                   No live active orders right now.
                 </div>
                 <p className="text-[10px] text-slate-400 mt-0.5">
                   New customer orders will show here in real time.
                 </p>
-              </div>
+              </motion.div>
             ) : (
               <div className="overflow-x-auto my-auto">
                 <table className="w-full text-left text-[11px]">
@@ -4238,42 +4696,48 @@ export default function CanteenAdminDashboard() {
               <div className="flex flex-wrap items-center gap-2">
                 <Link
                   to="/canteen-admin/menu"
-                  className="px-3 py-1 bg-[#fff8f2] hover:bg-[#ffeedd] text-[#c25e1a] border border-[#fbd3b6] rounded-xl text-[11px] font-bold transition flex items-center gap-1.5 shadow-2xs"
+                  className="px-3 py-1 bg-[#fff8f2] hover:bg-[#ffeedd] text-[#c25e1a] border border-[#fbd3b6] rounded-xl text-[11px] font-bold transition flex items-center gap-1.5 shadow-2xs active:scale-95"
                 >
                   <Utensils size={12} className="text-[#c25e1a]" />
                   <span>Mark Sold Out</span>
                 </Link>
                 <Link
                   to="/canteen-admin/menu"
-                  className="px-3 py-1 bg-[#f0f6ff] hover:bg-[#e0edff] text-[#1d68f2] border border-[#bfdbfe] rounded-xl text-[11px] font-bold transition flex items-center gap-1.5 shadow-2xs"
+                  className="px-3 py-1 bg-[#f0f6ff] hover:bg-[#e0edff] text-[#1d68f2] border border-[#bfdbfe] rounded-xl text-[11px] font-bold transition flex items-center gap-1.5 shadow-2xs active:scale-95"
                 >
                   <Clock size={12} className="text-[#1d68f2]" />
                   <span>Toggle Slot</span>
                 </Link>
                 <Link
                   to="/canteen-admin/analytics"
-                  className="px-3 py-1 bg-[#f0fdf4] hover:bg-[#dcfce7] text-emerald-700 border border-[#bbf7d0] rounded-xl text-[11px] font-bold transition flex items-center gap-1.5 shadow-2xs"
+                  className="px-3 py-1 bg-[#f0fdf4] hover:bg-[#dcfce7] text-emerald-700 border border-[#bbf7d0] rounded-xl text-[11px] font-bold transition flex items-center gap-1.5 shadow-2xs active:scale-95"
                 >
                   <BarChart3 size={12} className="text-emerald-700" />
                   <span>View Reports</span>
                 </Link>
               </div>
             </div>
-          </div>
+          </motion.div>
         </div>
 
         {/* Right Column (4 cols on lg): Popular Items + Promo Card */}
         <div className="lg:col-span-4 flex flex-col justify-between gap-3 min-h-0">
           {/* Popular Items Card */}
-          <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-xs flex flex-col justify-between flex-1">
+          <motion.div
+            initial={{ opacity: 0, x: 24 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.8, delay: 0.5, ease: [0.16, 1, 0.3, 1] }}
+            whileHover={{ y: -2, transition: { duration: 0.2 } }}
+            className="bg-white rounded-2xl border border-slate-100 p-4 shadow-xs flex flex-col justify-between flex-1 transition-shadow hover:shadow-md"
+          >
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-1.5">
-                <span className="text-orange-500 text-sm">🔥</span>
+                <span className="text-orange-500 text-sm animate-pulse">🔥</span>
                 <h2 className="text-xs sm:text-sm font-extrabold text-slate-800">Popular Items</h2>
               </div>
               <Link
                 to="/canteen-admin/menu"
-                className="text-[11px] font-bold text-[#1d68f2] hover:underline flex items-center gap-1"
+                className="text-[11px] font-bold text-[#1d68f2] hover:underline flex items-center gap-1 active:scale-95 transition-transform"
               >
                 <span>View All</span>
                 <span>→</span>
@@ -4297,7 +4761,14 @@ export default function CanteenAdminDashboard() {
                 const picUrl = (item as any).image_url || foodPics[idx % foodPics.length];
 
                 return (
-                  <div key={item.id} className="flex items-center justify-between p-1.5 rounded-xl hover:bg-slate-50 transition">
+                  <motion.div
+                    key={item.id}
+                    initial={{ opacity: 0, x: 12 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.35, delay: 0.6 + idx * 0.08, ease: 'easeOut' }}
+                    whileHover={{ x: 3, transition: { duration: 0.15 } }}
+                    className="flex items-center justify-between p-1.5 rounded-xl hover:bg-slate-50 transition"
+                  >
                     <div className="flex items-center gap-2.5 min-w-0">
                       <img
                         src={picUrl}
@@ -4327,20 +4798,26 @@ export default function CanteenAdminDashboard() {
                       }`} />
                       {!item.is_sold_out ? 'Available' : 'Sold Out'}
                     </span>
-                  </div>
+                  </motion.div>
                 );
               })}
             </div>
-          </div>
+          </motion.div>
 
-          {/* Delicious Food Promo Card (Bottom Right) */}
-          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#0d131f] via-[#111a2c] to-[#18233c] text-white p-3.5 shadow-md border border-slate-800 shrink-0">
+          {/* Kitchen Terminal / Delicious Food Promo Card (Bottom Right) */}
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.9, delay: 0.6, ease: [0.16, 1, 0.3, 1] }}
+            whileHover={{ y: -3, transition: { duration: 0.2 } }}
+            className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#0d131f] via-[#111a2c] to-[#18233c] text-white p-3.5 shadow-md border border-slate-800 shrink-0 group hover:shadow-xl hover:border-slate-700 transition-all duration-300"
+          >
             {/* Food Platter Right Half */}
             <div className="absolute right-0 top-0 bottom-0 w-1/2 pointer-events-none overflow-hidden">
               <img
                 src="https://images.unsplash.com/photo-1610057099443-fde8c4d50f91?auto=format&fit=crop&w=500&q=80"
                 alt="Delicious Food"
-                className="w-full h-full object-cover object-center opacity-85"
+                className="w-full h-full object-cover object-center opacity-85 group-hover:scale-105 transition-transform duration-300"
                 style={{
                   maskImage: 'linear-gradient(to left, rgba(0,0,0,1) 50%, rgba(0,0,0,0) 100%)',
                   WebkitMaskImage: 'linear-gradient(to left, rgba(0,0,0,1) 50%, rgba(0,0,0,0) 100%)'
@@ -4363,7 +4840,7 @@ export default function CanteenAdminDashboard() {
                 <span>→</span>
               </Link>
             </div>
-          </div>
+          </motion.div>
         </div>
       </div>
     </div>

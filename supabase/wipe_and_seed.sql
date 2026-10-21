@@ -25,6 +25,8 @@ ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS preparation_started_at TIMEST
 ALTER TABLE public.lunch_slot_configs ADD COLUMN IF NOT EXISTS max_concurrent_orders INTEGER DEFAULT 15;
 ALTER TABLE public.lunch_slot_configs ADD COLUMN IF NOT EXISTS default_prep_time_minutes INTEGER DEFAULT 10;
 ALTER TABLE public.lunch_slot_configs ADD COLUMN IF NOT EXISTS order_cutoff_minutes INTEGER DEFAULT 15;
+ALTER TABLE public.lunch_slot_configs ADD COLUMN IF NOT EXISTS slot_mode TEXT DEFAULT 'FIXED';
+ALTER TABLE public.lunch_slot_configs ADD COLUMN IF NOT EXISTS custom_slots JSONB DEFAULT '[]'::jsonb;
 NOTIFY pgrst, 'reload schema';
 
 -- 2. Ensure the System Tenant exists (Required for Super Admins)
