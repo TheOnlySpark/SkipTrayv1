@@ -84,7 +84,7 @@ export function NotificationBell() {
   useEffect(() => {
     if (!isDrawerOpen) return;
 
-    function handleClickOutside(event: MouseEvent) {
+    function handleClickOutside(event: MouseEvent | TouchEvent) {
       const target = event.target as HTMLElement | null;
       if (target?.closest?.('[role="dialog"]')) return;
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
@@ -100,10 +100,12 @@ export function NotificationBell() {
     }
 
     document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
     document.addEventListener('keydown', handleKeyDown);
 
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [isDrawerOpen, setIsDrawerOpen]);
@@ -212,10 +214,10 @@ export function NotificationBell() {
         <div
           role="region"
           aria-label="Notification Center"
-          className="absolute right-0 top-full mt-2 w-80 sm:w-96 max-w-[calc(100vw-1.5rem)] bg-white rounded-3xl shadow-2xl border border-slate-200 z-[160] overflow-hidden flex flex-col max-h-[78vh] sm:max-h-[32rem] animate-in fade-in zoom-in-95 duration-200"
+          className="fixed inset-x-3 top-[4.5rem] sm:inset-x-auto sm:absolute sm:right-0 sm:top-full sm:mt-2 w-auto sm:w-96 max-w-full sm:max-w-none bg-white rounded-3xl shadow-2xl border border-slate-200 z-[160] overflow-hidden flex flex-col max-h-[80vh] sm:max-h-[32rem] animate-in fade-in zoom-in-95 duration-200"
         >
           {/* Header */}
-          <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/70 backdrop-blur-xs">
+          <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
             <div className="flex items-center gap-2">
               <h3 className="font-extrabold text-sm text-slate-900 tracking-tight">Notifications</h3>
               {unreadCount > 0 ? (
@@ -234,11 +236,12 @@ export function NotificationBell() {
                 <button
                   type="button"
                   onClick={markAllAsRead}
-                  className="px-2 py-1 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-lg transition-colors flex items-center gap-1"
+                  className="p-1.5 min-[380px]:px-2 min-[380px]:py-1 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-lg transition-colors flex items-center gap-1"
                   title="Mark all as read"
+                  aria-label="Mark all notifications as read"
                 >
-                  <CheckCheck size={14} />
-                  <span>Mark read</span>
+                  <CheckCheck size={14} className="shrink-0" />
+                  <span className="hidden min-[380px]:inline">Mark read</span>
                 </button>
               )}
               {notifications.length > 0 && (
@@ -246,12 +249,12 @@ export function NotificationBell() {
                   type="button"
                   onClick={handleDeleteAll}
                   disabled={isDeleting}
-                  className="px-2 py-1 text-[11px] font-bold text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="p-1.5 min-[380px]:px-2 min-[380px]:py-1 text-[11px] font-bold text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Delete all notifications"
                   aria-label="Delete all notifications"
                 >
-                  <Trash2 size={13} />
-                  <span>Delete All</span>
+                  <Trash2 size={13} className="shrink-0" />
+                  <span className="hidden min-[380px]:inline">Delete All</span>
                 </button>
               )}
               <button
@@ -372,8 +375,8 @@ export function NotificationBell() {
                         </div>
                         <div className="text-[10px] text-slate-400 font-medium text-right whitespace-nowrap">
                           <span>{relative}</span>
-                          <span className="mx-1">•</span>
-                          <span>{exact}</span>
+                          <span className="hidden min-[380px]:inline mx-1">•</span>
+                          <span className="hidden min-[380px]:inline">{exact}</span>
                         </div>
                       </div>
 

@@ -2734,7 +2734,7 @@ export default function StudentDashboard() {
                             ) : isSelectedSlotClosed ? (
                               'Lunch Ordering Closed'
                             ) : isScheduleInvalid ? (
-                              smartSchedule.badge || 'Invalid Pickup Slot'
+                              smartSchedule.statusBadge || smartSchedule.badge || 'Invalid Pickup Slot'
                             ) : submitting ? (
                               'Placing Order...'
                             ) : (
@@ -3222,7 +3222,7 @@ export default function StudentDashboard() {
                         className="w-full py-3 bg-[#1d68f2] text-white rounded-xl font-black text-xs shadow-md disabled:bg-slate-300 disabled:cursor-not-allowed"
                       >
                         {!smartSchedule.isValid
-                          ? (smartSchedule.badge || 'Invalid Pickup Slot')
+                          ? (smartSchedule.statusBadge || smartSchedule.badge || 'Invalid Pickup Slot')
                           : `Confirm & Place Order (₹${ledger.gross_payable.toFixed(2)})`}
                       </button>
                     </form>
