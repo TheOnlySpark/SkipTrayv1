@@ -1245,7 +1245,7 @@ export default function StudentDashboard() {
             canteen_id: canteenId,
             tenant_id: tenantId,
             food_subtotal: ledger.food_subtotal,
-            commission_fee: ledger.commission_fee,
+            commission_fee: 0,
             target_net: ledger.target_net,
             gross_payable: ledger.food_subtotal, // Cash on collection
             gateway_fee: 0,
@@ -2680,21 +2680,13 @@ export default function StudentDashboard() {
                     {cart.length > 0 && (
                       <div className="space-y-1.5 py-3 border-t border-b border-slate-100 text-xs mb-4">
                         <div className="flex justify-between text-slate-500 font-medium">
-                          <span>Subtotal</span>
-                          <span className="text-slate-800 font-bold">₹{ledger.food_subtotal.toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between text-slate-500 font-medium">
-                          <span>Platform Fee (3%)</span>
-                          <span className="text-slate-800 font-bold">₹{ledger.commission_fee.toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between text-slate-500 font-medium">
                           <span>Payment Method</span>
                           <span className="text-emerald-600 font-bold">Pay at Counter</span>
                         </div>
                         <div className="flex justify-between items-center pt-2 border-t border-slate-100 text-sm">
                           <span className="font-black text-slate-900">Total Amount</span>
                           <span className="text-lg font-black text-[#1d68f2]">
-                            ₹{(ledger.food_subtotal + ledger.commission_fee).toFixed(2)}
+                            ₹{ledger.food_subtotal.toFixed(2)}
                           </span>
                         </div>
                       </div>

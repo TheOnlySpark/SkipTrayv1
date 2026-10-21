@@ -191,7 +191,7 @@ class CartManager {
 }
 
 // -----------------------------------------------------------------------------
-// Test 7: Subtotal, fees, and grand total recalculate dynamically
+// Test 7: Subtotal and grand total recalculate dynamically with zero platform fee (Cash only)
 // -----------------------------------------------------------------------------
 {
   const cm = new CartManager();
@@ -201,15 +201,15 @@ class CartManager {
   cm.addToCart(item);
   const ledger1 = calculateOrderLedger(cm.getTotalPrice());
   assert(ledger1.food_subtotal === 80.0, 'Test 7.1: 1 item subtotal is ₹80.00');
-  assert(ledger1.commission_fee === 2.40, 'Test 7.2: Platform fee is 3% = ₹2.40');
-  assert(ledger1.gross_payable === 82.89, 'Test 7.3: 1 item grand total is ₹82.89');
+  assert(ledger1.commission_fee === 0, 'Test 7.2: Platform fee is ₹0 for cash orders');
+  assert(ledger1.gross_payable === 80.0, 'Test 7.3: 1 item grand total is ₹80.00');
 
   // Qty: 2
   cm.addToCart(item);
   const ledger2 = calculateOrderLedger(cm.getTotalPrice());
   assert(ledger2.food_subtotal === 160.0, 'Test 7.4: 2 items subtotal dynamically updates to ₹160.00');
-  assert(ledger2.commission_fee === 4.80, 'Test 7.5: 2 items platform fee is ₹4.80');
-  assert(ledger2.gross_payable === 165.78, `Test 7.6: 2 items grand total updates to ₹165.78 (got ${ledger2.gross_payable})`);
+  assert(ledger2.commission_fee === 0, 'Test 7.5: 2 items platform fee is ₹0');
+  assert(ledger2.gross_payable === 160.0, `Test 7.6: 2 items grand total updates to ₹160.00 (got ${ledger2.gross_payable})`);
 }
 
 // -----------------------------------------------------------------------------
