@@ -28,14 +28,14 @@ export function calculateOrderLedger(foodSubtotal: number): OrderLedger {
     };
   }
 
-  const commission_fee = round2(food_subtotal * 0.03);
-  const target_net = round2(food_subtotal + commission_fee);
-  const gross_payable = round2(target_net / 0.9941);
-  const gateway_fee = round2(gross_payable - target_net);
-  const gw_deduction = round2(gross_payable * 0.0059);
-  const net_settled = round2(gross_payable - gw_deduction);
+  const commission_fee = 0;
+  const target_net = food_subtotal;
+  const gross_payable = food_subtotal;
+  const gateway_fee = 0;
+  const gw_deduction = 0;
+  const net_settled = food_subtotal;
   const canteen_payable = food_subtotal;
-  const platform_net = round2(net_settled - canteen_payable);
+  const platform_net = 0;
 
   return {
     food_subtotal,
