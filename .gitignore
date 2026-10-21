@@ -2,6 +2,7 @@ node_modules/
 bun.lock
 build/
 dist/
+.wrangler/
 coverage/
 .DS_Store
 *.log
