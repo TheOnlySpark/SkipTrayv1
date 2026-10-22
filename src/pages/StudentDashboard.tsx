@@ -218,7 +218,7 @@ export default function StudentDashboard() {
     try {
       const local = localStorage.getItem('skiptray_lunch_slot_config_default');
       if (local) return JSON.parse(local);
-    } catch {}
+    } catch { }
     return DEFAULT_LUNCH_SLOT_CONFIG;
   });
 
@@ -539,7 +539,7 @@ export default function StudentDashboard() {
       if (orderId) {
         sessionStorage.setItem(`dismissed_collected_${orderId}`, 'true');
       }
-    } catch {}
+    } catch { }
     setCollectedDismissed(true);
     setActiveOrder(null);
     setShowCartBuilder(true);
@@ -594,7 +594,7 @@ export default function StudentDashboard() {
         setEnteredOtp(generatedOtp);
         try {
           sessionStorage.setItem(`order_otp_${activeOrder.id}`, generatedOtp);
-        } catch {}
+        } catch { }
         setChallengeData({
           expiresAt: Date.now() + 5 * 60 * 1000,
           resendAvailableAt: Date.now() + 60 * 1000,
@@ -614,7 +614,7 @@ export default function StudentDashboard() {
           setEnteredOtp(dynamicOtp);
           try {
             sessionStorage.setItem(`order_otp_${activeOrder.id}`, dynamicOtp);
-          } catch {}
+          } catch { }
           setOtpSentMessage(res.message);
           setChallengeData({
             expiresAt: new Date(res.expires_at || Date.now() + 5 * 60 * 1000).getTime(),
@@ -696,7 +696,7 @@ export default function StudentDashboard() {
       try {
         const globalMeta = localStorage.getItem('skiptray_menu_meta_global');
         if (globalMeta) metaMap = JSON.parse(globalMeta);
-      } catch {}
+      } catch { }
 
       return (data || [])
         .filter(item => !item.name.startsWith('[DELETED]') && !item.name.startsWith('[ARCHIVED]'))
@@ -1197,7 +1197,7 @@ export default function StudentDashboard() {
               if (canteenId) {
                 updateLocalMeta(`canteen_menu_meta_${canteenId}`);
               }
-            } catch {}
+            } catch { }
           }
         }
         // Invalidate menu items query to refresh stock and sold out state immediately
@@ -1349,7 +1349,7 @@ export default function StudentDashboard() {
       try {
         sessionStorage.setItem(`cancelled_order_${activeOrder.id}`, 'true');
         localStorage.setItem(`cancelled_order_${activeOrder.id}`, 'true');
-      } catch {}
+      } catch { }
       setActiveOrder(null);
       queryClient.invalidateQueries({ queryKey: ['pastOrders'] });
       showAlert({
@@ -1396,8 +1396,8 @@ export default function StudentDashboard() {
 
   const getOrderStatusText = (order: { id: string; status: string; cancellation_reason?: string | null }) => {
     if (order.status === 'REJECTED') {
-      const isUserCancelled = 
-        order.cancellation_reason === 'USER_CANCELLED' || 
+      const isUserCancelled =
+        order.cancellation_reason === 'USER_CANCELLED' ||
         order.cancellation_reason?.toLowerCase().includes('cancel') ||
         sessionStorage.getItem(`cancelled_order_${order.id}`) === 'true' ||
         localStorage.getItem(`cancelled_order_${order.id}`) === 'true';
@@ -1426,7 +1426,7 @@ export default function StudentDashboard() {
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight flex items-center gap-2">
-              <span>Hello, {profile?.name || 'Madeshwar'}</span>
+              <span>Hello, {profile?.name || 'spark'}</span>
               <span className="text-2xl">👋</span>
             </h1>
             <span className="px-2.5 py-0.5 rounded-full bg-blue-100 text-[#1d68f2] text-xs font-black uppercase tracking-wider">
@@ -1458,1843 +1458,1815 @@ export default function StudentDashboard() {
       {/* Main Content (Cols 12 or 8 when on menu) + Sticky Cart Sidebar (Col 4) */}
       <div className="grid grid-cols-12 gap-6">
 
-      {/* Deactivation Banner */}
-      {isSuspended && (
-        <div className="col-span-12 bg-red-50 border-2 border-red-200 rounded-[2rem] p-6 sm:p-8 text-center flex flex-col items-center justify-center gap-3 mb-2 shadow-sm">
-          <div className="w-12 h-12 rounded-2xl bg-red-100 border border-red-200 flex items-center justify-center text-red-600">
-            <IconBan size={28} className="w-7 h-7 text-red-600" />
-          </div>
-          <div>
-            <h2 className="text-xl sm:text-2xl font-black text-red-800">Account Temporarily Deactivated</h2>
-            <p className="text-sm text-slate-600 max-w-lg mt-1.5 leading-relaxed">
-              Your ordering privileges are suspended for <strong>3 days</strong> due to repeated uncollected orders (2 no-show strikes).
-            </p>
-          </div>
-          <div className="bg-white px-4 py-2 rounded-xl border border-red-200 text-xs font-bold text-red-700 font-mono mt-1">
-            Reactivates on: {new Date(profile!.suspended_until!).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short', hour12: true })}
-          </div>
-        </div>
-      )}
-
-      {menuLoading ? (
-        <div className="col-span-12 text-center text-slate-500">Loading...</div>
-      ) : showHistory ? (
-        <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-6 sm:p-8 shadow-sm">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 pb-4 border-b border-slate-100">
-            <div>
-              <h2 className="text-xl font-bold text-slate-800">Past Orders & Receipts</h2>
-              <p className="text-xs text-slate-500 mt-0.5">Review collected meals, verification records, and rate your dishes</p>
+        {/* Deactivation Banner */}
+        {isSuspended && (
+          <div className="col-span-12 bg-red-50 border-2 border-red-200 rounded-[2rem] p-6 sm:p-8 text-center flex flex-col items-center justify-center gap-3 mb-2 shadow-sm">
+            <div className="w-12 h-12 rounded-2xl bg-red-100 border border-red-200 flex items-center justify-center text-red-600">
+              <IconBan size={28} className="w-7 h-7 text-red-600" />
             </div>
-            <button
-              type="button"
-              onClick={() => setShowHistory(false)}
-              className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-4 py-2.5 rounded-xl border border-indigo-100 transition-colors shadow-2xs self-start sm:self-auto"
-            >
-              <ArrowLeft size={14} />
-              <span>Back to Food Menu</span>
-            </button>
+            <div>
+              <h2 className="text-xl sm:text-2xl font-black text-red-800">Account Temporarily Deactivated</h2>
+              <p className="text-sm text-slate-600 max-w-lg mt-1.5 leading-relaxed">
+                Your ordering privileges are suspended for <strong>3 days</strong> due to repeated uncollected orders (2 no-show strikes).
+              </p>
+            </div>
+            <div className="bg-white px-4 py-2 rounded-xl border border-red-200 text-xs font-bold text-red-700 font-mono mt-1">
+              Reactivates on: {new Date(profile!.suspended_until!).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short', hour12: true })}
+            </div>
           </div>
-          {pastOrders.length === 0 ? (
-            <div className="text-slate-500">No past orders found.</div>
-          ) : (
-            <div className="space-y-4">
-              {pastOrders.map(o => {
-                const totalAmount = (o.order_items || []).reduce((sum, oi) => {
-                  const price = Number(oi.menu_items?.price ?? 0);
-                  const qty = Number(oi.quantity) > 0 ? Number(oi.quantity) : 1;
-                  return sum + (price * qty);
-                }, 0);
+        )}
 
-                return (
-                  <div key={o.id} className="p-4 rounded-xl border border-slate-200 flex flex-col gap-4 shadow-sm">
-                    <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-                      <div>
-                        <div className="font-bold text-slate-800 text-lg">Order #{o.order_number}</div>
-                        <div className="text-xs text-slate-500 font-mono font-medium mb-1">ID: {o.id.split('-')[0].toUpperCase()}</div>
-                        <div className="text-xs text-slate-500 font-medium mb-1">Placed on: {new Date(o.created_at).toLocaleDateString()}</div>
-                        <div className="text-sm text-slate-600 mt-1">
-                          Pickup: {formatPickupTime((o as any).requested_pickup_time || o.pickup_time)} (Lunch)
-                          {(o as any).estimated_prep_duration_minutes && (
-                            <span className="text-xs text-slate-400 ml-2">
-                              • Prep: {(o as any).estimated_prep_duration_minutes}m
-                            </span>
+        {menuLoading ? (
+          <div className="col-span-12 text-center text-slate-500">Loading...</div>
+        ) : showHistory ? (
+          <div className="col-span-12 bg-white border border-slate-200 rounded-[2rem] p-6 sm:p-8 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 pb-4 border-b border-slate-100">
+              <div>
+                <h2 className="text-xl font-bold text-slate-800">Past Orders & Receipts</h2>
+                <p className="text-xs text-slate-500 mt-0.5">Review collected meals, verification records, and rate your dishes</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowHistory(false)}
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-4 py-2.5 rounded-xl border border-indigo-100 transition-colors shadow-2xs self-start sm:self-auto"
+              >
+                <ArrowLeft size={14} />
+                <span>Back to Food Menu</span>
+              </button>
+            </div>
+            {pastOrders.length === 0 ? (
+              <div className="text-slate-500">No past orders found.</div>
+            ) : (
+              <div className="space-y-4">
+                {pastOrders.map(o => {
+                  const totalAmount = (o.order_items || []).reduce((sum, oi) => {
+                    const price = Number(oi.menu_items?.price ?? 0);
+                    const qty = Number(oi.quantity) > 0 ? Number(oi.quantity) : 1;
+                    return sum + (price * qty);
+                  }, 0);
+
+                  return (
+                    <div key={o.id} className="p-4 rounded-xl border border-slate-200 flex flex-col gap-4 shadow-sm">
+                      <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                        <div>
+                          <div className="font-bold text-slate-800 text-lg">Order #{o.order_number}</div>
+                          <div className="text-xs text-slate-500 font-mono font-medium mb-1">ID: {o.id.split('-')[0].toUpperCase()}</div>
+                          <div className="text-xs text-slate-500 font-medium mb-1">Placed on: {new Date(o.created_at).toLocaleDateString()}</div>
+                          <div className="text-sm text-slate-600 mt-1">
+                            Pickup: {formatPickupTime((o as any).requested_pickup_time || o.pickup_time)} (Lunch)
+                            {(o as any).estimated_prep_duration_minutes && (
+                              <span className="text-xs text-slate-400 ml-2">
+                                • Prep: {(o as any).estimated_prep_duration_minutes}m
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {o.status === 'COLLECTED' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCollectedOrderConfirmation({
+                                  order: o as any,
+                                  items: (o.order_items || []).map(oi => ({
+                                    menuItemId: oi.menu_items?.id,
+                                    name: oi.menu_items?.name || 'Meal Item',
+                                    quantity: Number(oi.quantity) || 1,
+                                    price: Number(oi.menu_items?.price ?? 0)
+                                  }))
+                                });
+                              }}
+                              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 text-xs font-bold transition-all shadow-2xs cursor-pointer active:scale-95"
+                              title="View official collected receipt"
+                            >
+                              <CheckCircle2 size={13} className="text-emerald-600" />
+                              <span>View Receipt</span>
+                            </button>
                           )}
+                          <div className={`px-3 py-1 rounded-full text-xs font-bold border shrink-0 ${o.status === 'COLLECTED' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+                            {getOrderStatusText(o as any)}
+                          </div>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {o.status === 'COLLECTED' && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setCollectedOrderConfirmation({
-                                order: o as any,
-                                items: (o.order_items || []).map(oi => ({
-                                  menuItemId: oi.menu_items?.id,
-                                  name: oi.menu_items?.name || 'Meal Item',
-                                  quantity: Number(oi.quantity) || 1,
-                                  price: Number(oi.menu_items?.price ?? 0)
-                                }))
-                              });
-                            }}
-                            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 text-xs font-bold transition-all shadow-2xs cursor-pointer active:scale-95"
-                            title="View official collected receipt"
-                          >
-                            <CheckCircle2 size={13} className="text-emerald-600" />
-                            <span>View Receipt</span>
-                          </button>
-                        )}
-                        <div className={`px-3 py-1 rounded-full text-xs font-bold border shrink-0 ${o.status === 'COLLECTED' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
-                          {getOrderStatusText(o as any)}
+
+                      {o.order_items && o.order_items.length > 0 && (
+                        <div className="space-y-3">
+                          {o.order_items.map((oi, idx) => {
+                            const menuItem = oi.menu_items;
+                            if (!menuItem) return null;
+                            const existingReview = o.item_reviews?.find(r => r.menu_item_id === menuItem.id);
+                            const qty = Number(oi.quantity) > 0 ? Number(oi.quantity) : 1;
+                            const unitPrice = Number(menuItem.price ?? 0);
+                            const itemTotal = unitPrice * qty;
+
+                            return (
+                              <div key={idx} className="flex flex-col gap-2 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                                <div className="flex justify-between items-center gap-2">
+                                  <div className="flex items-baseline gap-2 flex-wrap">
+                                    <span className="font-semibold text-slate-800 text-sm">
+                                      {menuItem.name} *{qty}
+                                    </span>
+                                    {qty > 1 && (
+                                      <span className="text-xs text-slate-400 font-normal">
+                                        (@₹{unitPrice.toFixed(2)})
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-3 shrink-0">
+                                    <span className="text-sm font-bold text-indigo-600 font-mono">
+                                      ₹{itemTotal.toFixed(2)}
+                                    </span>
+                                    {o.status === 'COLLECTED' && !existingReview && reviewingItem?.menuItemId !== menuItem.id && (
+                                      <button
+                                        onClick={() => setReviewingItem({ orderId: o.id, menuItemId: menuItem.id, itemName: menuItem.name })}
+                                        className="text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors"
+                                      >
+                                        Leave Review
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Existing Review Display */}
+                                {existingReview && (
+                                  <div className="mt-1 bg-white p-3 rounded-lg border border-indigo-100 shadow-sm">
+                                    <div className="flex items-center gap-1 mb-1">
+                                      {Array.from({ length: 5 }).map((_, i) => (
+                                        <IconStar
+                                          key={i}
+                                          size={14}
+                                          className={`w-3.5 h-3.5 ${i < existingReview.rating ? 'text-yellow-400 fill-yellow-400' : 'text-slate-200'}`}
+                                          filled={i < existingReview.rating}
+                                        />
+                                      ))}
+                                    </div>
+                                    {existingReview.feedback_text && (
+                                      <p className="text-sm text-slate-600 italic">"{existingReview.feedback_text}"</p>
+                                    )}
+                                    {existingReview.admin_reply && (
+                                      <div className="mt-2 pl-3 border-l-2 border-indigo-300">
+                                        <span className="text-xs font-bold text-indigo-600 uppercase tracking-wider">Admin Reply</span>
+                                        <p className="text-sm text-slate-700 mt-0.5">{existingReview.admin_reply}</p>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+
+                                {/* Review Form */}
+                                {reviewingItem?.orderId === o.id && reviewingItem?.menuItemId === menuItem.id && (
+                                  <form onSubmit={handleSubmitReview} className="mt-2 bg-white p-4 rounded-xl border border-indigo-200 shadow-sm animate-in fade-in slide-in-from-top-2">
+                                    <div className="flex justify-between items-center mb-3">
+                                      <h4 className="font-bold text-slate-800 text-sm">Reviewing {reviewingItem.itemName}</h4>
+                                      <button type="button" onClick={() => setReviewingItem(null)} className="text-slate-400 hover:text-slate-600 p-1">
+                                        <IconX size={14} className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                    <div className="mb-3">
+                                      <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Rating</label>
+                                      <div className="flex gap-2">
+                                        {[1, 2, 3, 4, 5].map(star => (
+                                          <button
+                                            key={star}
+                                            type="button"
+                                            onClick={() => setReviewRating(star)}
+                                            className="p-0.5 transition-transform hover:scale-110 focus:outline-none"
+                                          >
+                                            <IconStar
+                                              size={22}
+                                              className={`w-5.5 h-5.5 ${star <= reviewRating ? 'text-yellow-400 fill-yellow-400' : 'text-slate-200'}`}
+                                              filled={star <= reviewRating}
+                                            />
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </div>
+                                    <div className="mb-3">
+                                      <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Feedback (Optional)</label>
+                                      <textarea
+                                        value={reviewText}
+                                        onChange={(e) => setReviewText(e.target.value)}
+                                        placeholder="How was the food?"
+                                        maxLength={1000}
+                                        className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                        rows={2}
+                                      />
+                                    </div>
+                                    <button
+                                      type="submit"
+                                      disabled={submittingReview}
+                                      className="w-full bg-indigo-600 text-white font-semibold py-2 rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                                    >
+                                      {submittingReview ? 'Submitting...' : 'Submit Review'}
+                                    </button>
+                                  </form>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
+                      )}
+
+                      {/* Order Total Summary Footer */}
+                      {o.order_items && o.order_items.length > 0 && (
+                        <div className="flex justify-between items-center pt-2 px-1 border-t border-slate-100">
+                          <span className="text-xs text-slate-500 font-medium">
+                            {o.order_items.reduce((s, i) => s + (Number(i.quantity) > 0 ? Number(i.quantity) : 1), 0)} items
+                          </span>
+                          <div className="text-right">
+                            <span className="text-xs text-slate-500 font-medium">Total: </span>
+                            <span className="text-base font-extrabold text-slate-900 font-mono">₹{totalAmount.toFixed(2)}</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ) : (
+          <>
+            {/* Main 2-Column Canteen OS Layout */}
+            <div className="col-span-12 grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+              {/* Left Column (8 cols): Compact Hero Promo + Combined Menu Header & Food Grid */}
+              <div className="lg:col-span-8 space-y-4">
+                {/* Compact Hero Banner with Motion */}
+                <motion.div
+                  initial={{ opacity: 0, y: 16 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+                  className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#002b66] via-[#023e8a] to-[#001845] text-white p-3.5 sm:p-5 shadow-md"
+                >
+                  <div className="relative z-10 flex items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-blue-500/30 border border-blue-400/30 text-blue-200 text-[10px] font-black uppercase tracking-wider">
+                          <Sparkles size={11} className="text-amber-300" />
+                          Fresh • Fast • Hygienic
+                        </span>
+                        <span className="text-[11px] text-blue-200/80 font-medium hidden sm:inline">
+                          ⚡ Skip the canteen line
+                        </span>
+                      </div>
+                      <h2 className="text-lg sm:text-xl font-black text-white tracking-tight">
+                        Order Your <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-300 to-yellow-400">Favourite Food</span>
+                      </h2>
+                    </div>
+
+                    <div className="hidden sm:flex items-center gap-2 shrink-0">
+                      <span className="px-3 py-1 rounded-full bg-white/10 text-blue-100 text-xs font-bold border border-white/15">
+                        Hot & Fresh 🔥
+                      </span>
+                    </div>
+                  </div>
+                </motion.div>
+
+                {/* Combined Menu Card (Filter & Search Header + Grid in single cohesive section) */}
+                <div id="menu-items-section" className="bg-white/95 backdrop-blur-md border border-slate-200/90 rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 shadow-sm space-y-3 sm:space-y-4">
+                  {/* Top Row: Menu Title + Subtitle on Left, Search Input on Right */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3">
+                    <div className="flex items-center gap-2 sm:gap-2.5">
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-[#1d68f2] shadow-xs shrink-0">
+                        <UtensilsCrossed size={18} />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h2 className="text-base sm:text-xl font-black text-slate-900 tracking-tight leading-none">
+                            All Menu Items
+                          </h2>
+                          <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+                            {filteredMenuItems.length} dishes
+                          </span>
+                        </div>
+                        <p className="hidden sm:block text-xs text-slate-500 font-medium mt-0.5">
+                          Browse all available canteen foods, meals & packed items
+                        </p>
                       </div>
                     </div>
 
-                    {o.order_items && o.order_items.length > 0 && (
-                      <div className="space-y-3">
-                        {o.order_items.map((oi, idx) => {
-                          const menuItem = oi.menu_items;
-                          if (!menuItem) return null;
-                          const existingReview = o.item_reviews?.find(r => r.menu_item_id === menuItem.id);
-                          const qty = Number(oi.quantity) > 0 ? Number(oi.quantity) : 1;
-                          const unitPrice = Number(menuItem.price ?? 0);
-                          const itemTotal = unitPrice * qty;
+                    {/* Search food items input with blue search icon */}
+                    <div className="relative w-full sm:w-72">
+                      <IconSearch size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#1d68f2] pointer-events-none" />
+                      <input
+                        type="text"
+                        placeholder="Search food items..."
+                        value={foodSearchQuery}
+                        onChange={e => setFoodSearchQuery(e.target.value)}
+                        className="w-full bg-slate-50/80 border border-slate-200 focus:bg-white focus:border-[#1d68f2] focus:ring-2 focus:ring-blue-100 rounded-full text-xs text-slate-800 placeholder:text-slate-400 pl-9 pr-8 py-2 outline-none transition-all"
+                      />
+                      {foodSearchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setFoodSearchQuery('')}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 rounded-full"
+                        >
+                          <IconX size={13} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
 
-                          return (
-                            <div key={idx} className="flex flex-col gap-2 p-3 bg-slate-50 rounded-xl border border-slate-100">
-                              <div className="flex justify-between items-center gap-2">
-                                <div className="flex items-baseline gap-2 flex-wrap">
-                                  <span className="font-semibold text-slate-800 text-sm">
-                                    {menuItem.name} *{qty}
-                                  </span>
-                                  {qty > 1 && (
-                                    <span className="text-xs text-slate-400 font-normal">
-                                      (@₹{unitPrice.toFixed(2)})
-                                    </span>
+                  {/* Filter Pills Row - Single horizontal scrollable bar on mobile, flex-wrap on desktop */}
+                  <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar scrollbar-none pb-0.5 -mx-1 px-1 sm:mx-0 sm:px-0 sm:flex-wrap pt-2 border-t border-slate-100">
+                    {/* All button */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFoodTypeFilter('ALL');
+                        setCategoryFilter('ALL');
+                      }}
+                      className={`px-3 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all shrink-0 cursor-pointer ${foodTypeFilter === 'ALL' && categoryFilter === 'ALL'
+                          ? 'bg-[#1d68f2] text-white shadow-sm shadow-blue-500/25 ring-2 ring-blue-400/30'
+                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                        }`}
+                    >
+                      <LayoutGrid size={13} />
+                      <span>All</span>
+                    </button>
+
+                    {/* Veg button */}
+                    <button
+                      type="button"
+                      onClick={() => setFoodTypeFilter(foodTypeFilter === 'VEG' ? 'ALL' : 'VEG')}
+                      className={`px-3 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all border shrink-0 cursor-pointer ${foodTypeFilter === 'VEG'
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm shadow-emerald-500/20'
+                          : 'bg-emerald-50/80 text-emerald-700 border-emerald-200/80 hover:bg-emerald-100/60'
+                        }`}
+                    >
+                      <Leaf size={13} className={foodTypeFilter === 'VEG' ? 'text-white' : 'text-emerald-600'} />
+                      <span>Veg</span>
+                    </button>
+
+                    {/* Non-Veg button */}
+                    <button
+                      type="button"
+                      onClick={() => setFoodTypeFilter(foodTypeFilter === 'NON_VEG' ? 'ALL' : 'NON_VEG')}
+                      className={`px-3 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all border shrink-0 cursor-pointer ${foodTypeFilter === 'NON_VEG'
+                          ? 'bg-rose-600 text-white border-rose-600 shadow-sm shadow-rose-500/20'
+                          : 'bg-rose-50/80 text-rose-700 border-rose-200/80 hover:bg-rose-100/60'
+                        }`}
+                    >
+                      <span className="w-2 h-2 rounded-full bg-rose-500 ring-2 ring-rose-200" />
+                      <span>Non-Veg</span>
+                    </button>
+
+                    <div className="h-4 w-px bg-slate-200 shrink-0 mx-0.5" />
+
+                    {/* Packed Food */}
+                    <button
+                      type="button"
+                      onClick={() => setCategoryFilter(categoryFilter === 'SNACKS' ? 'ALL' : 'SNACKS')}
+                      className={`px-3 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all border shrink-0 cursor-pointer ${categoryFilter === 'SNACKS'
+                          ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                    >
+                      <Package size={13} className="text-slate-500" />
+                      <span>Packed Food</span>
+                    </button>
+                  </div>
+
+                  {/* Empty State */}
+                  {filteredMenuItems.length === 0 ? (
+                    <div className="py-8 px-4 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                      <IconPackage size={32} className="text-slate-300 mx-auto mb-2" />
+                      <h4 className="text-sm font-bold text-slate-700">
+                        No Food Items Found
+                      </h4>
+                      <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1">
+                        No items matched your search or category filter.
+                      </p>
+                      <div className="flex items-center justify-center gap-2 mt-3 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFoodSearchQuery('');
+                            setFoodTypeFilter('ALL');
+                            setCategoryFilter('ALL');
+                          }}
+                          className="px-3.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
+                        >
+                          Reset Filters
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Food Grid Cards without Images - 2 in a row on mobile */
+                    <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3.5 pt-1">
+                      {filteredMenuItems.map(item => {
+                        const rawCat = String((item as any).category || '').toLowerCase();
+                        const isPacked =
+                          rawCat === 'packed food' ||
+                          rawCat === 'packed' ||
+                          rawCat === 'packaged' ||
+                          rawCat === 'snacks' ||
+                          rawCat === 'snack' ||
+                          rawCat.includes('pack') ||
+                          (item as any).stock_quantity != null ||
+                          (item as any).prep_time_minutes === 0 ||
+                          (item.name || '').toLowerCase().includes('packed') ||
+                          getItemCategory(item) === 'Packed Food';
+                        const stock = (item as any).stock_quantity ?? null;
+                        const prepMinutes = (item as any).prep_time_minutes ?? (isPacked ? 0 : 10);
+                        const isSoldOut = item.is_sold_out || (isPacked && stock !== null && stock <= 0);
+
+                        const cartEntry = cart.find(c => c.item.id === item.id);
+                        const quantity = cartEntry?.quantity || 0;
+                        const isMaxStockReached = stock !== null && quantity >= stock;
+
+                        // Clean border accent
+                        const isVeg = item.veg_non_veg === 'VEG';
+                        let themeBorder = 'border-l-4 border-emerald-500';
+                        let themeBg = 'bg-white hover:bg-emerald-50/20';
+
+                        if (isPacked) {
+                          themeBorder = 'border-l-4 border-amber-400';
+                          themeBg = 'bg-white hover:bg-amber-50/20';
+                        } else if (!isVeg) {
+                          themeBorder = 'border-l-4 border-rose-500';
+                          themeBg = 'bg-white hover:bg-rose-50/20';
+                        }
+
+                        const soldCount = salesCountMap[item.id] || salesCountMap[`name:${(item.name || '').toLowerCase()}`] || 0;
+
+                        return (
+                          <div
+                            key={item.id}
+                            className={`relative rounded-xl sm:rounded-2xl border border-slate-200/90 p-2.5 sm:p-4 flex flex-col justify-between shadow-2xs transition-all duration-200 hover:shadow-sm ${themeBorder} ${themeBg} ${isSoldOut ? 'opacity-60 bg-slate-50 grayscale-25' : ''
+                              }`}
+                          >
+                            <div>
+                              {/* Badges Row - Clean & Compact for 2-column view */}
+                              <div className="flex items-center justify-between gap-1 mb-1.5 flex-wrap">
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  {/* Veg/Non-Veg Badge */}
+                                  <div className={`flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-[11px] font-black ${isVeg ? 'bg-emerald-100/90 text-emerald-800' : 'bg-rose-100/90 text-rose-800'
+                                    }`}>
+                                    {isVeg ? (
+                                      <Leaf size={9} className="text-emerald-700" />
+                                    ) : (
+                                      <span className="w-1.5 h-1.5 rounded-full bg-rose-600 ring-1 ring-rose-200" />
+                                    )}
+                                    <span>{isVeg ? 'Veg' : 'Non-Veg'}</span>
+                                  </div>
+
+                                  {/* Prep Time or Category Badge */}
+                                  {isPacked ? (
+                                    <div className="flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-[11px] font-bold bg-blue-50 text-blue-800 border border-blue-200/60">
+                                      <Package size={9} className="text-blue-600" />
+                                      <span>Packed</span>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-[11px] font-bold bg-amber-100/80 text-amber-900">
+                                      <IconClock size={9} className="text-amber-800" />
+                                      <span>{prepMinutes}m</span>
+                                    </div>
                                   )}
                                 </div>
-                                <div className="flex items-center gap-3 shrink-0">
-                                  <span className="text-sm font-bold text-indigo-600 font-mono">
-                                    ₹{itemTotal.toFixed(2)}
+
+                                {/* Highlight Tag on Right */}
+                                {isSoldOut ? (
+                                  <span className="px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700 text-[8px] sm:text-[9px] font-black uppercase tracking-wider">
+                                    Sold Out
                                   </span>
-                                  {o.status === 'COLLECTED' && !existingReview && reviewingItem?.menuItemId !== menuItem.id && (
+                                ) : soldCount > 0 ? (
+                                  <span className="px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-300 text-[8px] sm:text-[9px] font-black flex items-center gap-0.5 shadow-2xs">
+                                    🔥 {soldCount}
+                                  </span>
+                                ) : null}
+                              </div>
+
+                              {/* Food Title */}
+                              <h3 className="text-xs sm:text-base font-black text-slate-900 tracking-tight leading-snug line-clamp-2">
+                                {item.name}
+                              </h3>
+                            </div>
+
+                            {/* Footer: Price on Left, Pill Button on Right */}
+                            <div className="pt-2 sm:pt-2.5 border-t border-slate-100 flex items-center justify-between gap-1 mt-2 sm:mt-3">
+                              <div className="text-sm sm:text-xl font-black text-[#1d68f2] tracking-tight leading-tight">
+                                ₹{Number(item.price || 0).toFixed(2)}
+                              </div>
+
+                              {!isSoldOut ? (
+                                quantity > 0 ? (
+                                  <div className="flex items-center bg-[#1d68f2] text-white rounded-full p-0.5 shadow-xs shrink-0">
                                     <button
-                                      onClick={() => setReviewingItem({ orderId: o.id, menuItemId: menuItem.id, itemName: menuItem.name })}
-                                      className="text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors"
+                                      type="button"
+                                      onClick={() => removeFromCart(item.id)}
+                                      aria-label={`Decrease quantity of ${item.name}`}
+                                      className="w-5 h-5 sm:w-7 sm:h-7 flex items-center justify-center hover:bg-white/20 rounded-full font-black text-xs sm:text-sm transition-colors active:scale-90 cursor-pointer"
                                     >
-                                      Leave Review
+                                      −
                                     </button>
-                                  )}
-                                </div>
-                              </div>
-
-                            {/* Existing Review Display */}
-                            {existingReview && (
-                              <div className="mt-1 bg-white p-3 rounded-lg border border-indigo-100 shadow-sm">
-                                <div className="flex items-center gap-1 mb-1">
-                                  {Array.from({ length: 5 }).map((_, i) => (
-                                    <IconStar
-                                      key={i}
-                                      size={14}
-                                      className={`w-3.5 h-3.5 ${i < existingReview.rating ? 'text-yellow-400 fill-yellow-400' : 'text-slate-200'}`}
-                                      filled={i < existingReview.rating}
-                                    />
-                                  ))}
-                                </div>
-                                {existingReview.feedback_text && (
-                                  <p className="text-sm text-slate-600 italic">"{existingReview.feedback_text}"</p>
-                                )}
-                                {existingReview.admin_reply && (
-                                  <div className="mt-2 pl-3 border-l-2 border-indigo-300">
-                                    <span className="text-xs font-bold text-indigo-600 uppercase tracking-wider">Admin Reply</span>
-                                    <p className="text-sm text-slate-700 mt-0.5">{existingReview.admin_reply}</p>
+                                    <span className="w-4 sm:w-6 text-center font-black text-[10px] sm:text-xs text-white tabular-nums">
+                                      {quantity}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => addToCart(item)}
+                                      disabled={isSuspended || isLunchClosedForToday || cartTotalItems >= 5 || isMaxStockReached}
+                                      aria-label={`Increase quantity of ${item.name}`}
+                                      className="w-5 h-5 sm:w-7 sm:h-7 flex items-center justify-center hover:bg-white/20 rounded-full font-black text-xs sm:text-sm transition-colors disabled:opacity-40 active:scale-90 cursor-pointer"
+                                    >
+                                      +
+                                    </button>
                                   </div>
-                                )}
-                              </div>
-                            )}
-
-                            {/* Review Form */}
-                            {reviewingItem?.orderId === o.id && reviewingItem?.menuItemId === menuItem.id && (
-                              <form onSubmit={handleSubmitReview} className="mt-2 bg-white p-4 rounded-xl border border-indigo-200 shadow-sm animate-in fade-in slide-in-from-top-2">
-                                <div className="flex justify-between items-center mb-3">
-                                  <h4 className="font-bold text-slate-800 text-sm">Reviewing {reviewingItem.itemName}</h4>
-                                  <button type="button" onClick={() => setReviewingItem(null)} className="text-slate-400 hover:text-slate-600 p-1">
-                                    <IconX size={14} className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                                <div className="mb-3">
-                                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Rating</label>
-                                  <div className="flex gap-2">
-                                    {[1, 2, 3, 4, 5].map(star => (
-                                      <button
-                                        key={star}
-                                        type="button"
-                                        onClick={() => setReviewRating(star)}
-                                        className="p-0.5 transition-transform hover:scale-110 focus:outline-none"
-                                      >
-                                        <IconStar
-                                          size={22}
-                                          className={`w-5.5 h-5.5 ${star <= reviewRating ? 'text-yellow-400 fill-yellow-400' : 'text-slate-200'}`}
-                                          filled={star <= reviewRating}
-                                        />
-                                      </button>
-                                    ))}
+                                ) : (
+                                  <div className="relative shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => addToCart(item)}
+                                      disabled={isSuspended || isLunchClosedForToday || cartTotalItems >= 5 || isMaxStockReached}
+                                      className="px-2.5 sm:px-4 py-1 sm:py-1.5 rounded-full bg-[#1d68f2] hover:bg-blue-600 text-white font-extrabold text-[11px] sm:text-xs transition-all shadow-sm shadow-blue-500/25 flex items-center gap-0.5 sm:gap-1 active:scale-95 disabled:opacity-40 cursor-pointer"
+                                    >
+                                      <span className="text-xs sm:text-base leading-none font-black">+</span>
+                                      <span>Add</span>
+                                    </button>
                                   </div>
-                                </div>
-                                <div className="mb-3">
-                                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Feedback (Optional)</label>
-                                  <textarea
-                                    value={reviewText}
-                                    onChange={(e) => setReviewText(e.target.value)}
-                                    placeholder="How was the food?"
-                                    maxLength={1000}
-                                    className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                    rows={2}
-                                  />
-                                </div>
-                                <button
-                                  type="submit"
-                                  disabled={submittingReview}
-                                  className="w-full bg-indigo-600 text-white font-semibold py-2 rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-                                >
-                                  {submittingReview ? 'Submitting...' : 'Submit Review'}
-                                </button>
-                              </form>
-                            )}
+                                )
+                              ) : (
+                                <span className="px-2 py-0.5 rounded-full bg-slate-200/70 text-slate-500 text-[9px] sm:text-[10px] font-bold shrink-0">
+                                  Unavailable
+                                </span>
+                              )}
+                            </div>
                           </div>
                         );
                       })}
                     </div>
                   )}
+                </div>
 
-                  {/* Order Total Summary Footer */}
-                  {o.order_items && o.order_items.length > 0 && (
-                    <div className="flex justify-between items-center pt-2 px-1 border-t border-slate-100">
-                      <span className="text-xs text-slate-500 font-medium">
-                        {o.order_items.reduce((s, i) => s + (Number(i.quantity) > 0 ? Number(i.quantity) : 1), 0)} items
-                      </span>
-                      <div className="text-right">
-                        <span className="text-xs text-slate-500 font-medium">Total: </span>
-                        <span className="text-base font-extrabold text-slate-900 font-mono">₹{totalAmount.toFixed(2)}</span>
+              </div>
+
+              {/* Right Column (4 cols): Sticky Desktop Panel (Active Order Status or Cart Builder) with Motion */}
+              <motion.div
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.6, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                className="hidden lg:block lg:col-span-4 sticky top-20"
+              >
+                <div className="bg-white border border-slate-200/90 rounded-3xl p-5 sm:p-6 shadow-lg shadow-slate-100 flex flex-col justify-between max-h-[calc(100vh-6rem)] overflow-y-auto">
+                  {displayOrder ? (
+                    /* ================= Active Order Live Status View Inside Box ================= */
+                    <div className="space-y-4">
+                      {/* Header */}
+                      <div className="flex items-center justify-between pb-3.5 border-b border-slate-100">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs ${displayOrder.status === 'COLLECTED'
+                              ? 'bg-emerald-100 text-emerald-600'
+                              : 'bg-blue-100 text-[#1d68f2]'
+                            }`}>
+                            {displayOrder.status === 'COLLECTED' ? <CheckCircle2 size={16} /> : <Flame size={16} />}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <h3 className="font-black text-slate-900 text-sm leading-tight">
+                                Order #{displayOrder.order_number}
+                              </h3>
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${displayOrder.status === 'COLLECTED'
+                                  ? 'bg-emerald-100 text-emerald-700 border border-emerald-300'
+                                  : displayOrder.status === 'READY'
+                                    ? 'bg-emerald-100 text-emerald-700 border border-emerald-300'
+                                    : displayOrder.status === 'PREPARING'
+                                      ? 'bg-amber-100 text-amber-700 border border-amber-300'
+                                      : 'bg-blue-100 text-blue-700 border border-blue-200'
+                                }`}>
+                                {displayOrder.status === 'COLLECTED' ? 'COLLECTED' : getOrderStatusText(displayOrder as any)}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 font-medium">
+                              {displayOrder.status === 'COLLECTED'
+                                ? `Collected at ${formatSingleTime((displayOrder as any).collected_at || new Date().toISOString())}`
+                                : `Pickup at ${formatSingleTime(displayOrder.pickup_time)}`}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Cancel button: allowed anytime before staff accepts order (PLACED only) */}
+                        {displayOrder.status === 'PLACED' && (
+                          <button
+                            type="button"
+                            onClick={handleCancelOrder}
+                            className="text-[11px] text-rose-500 hover:text-rose-700 font-bold bg-rose-50 hover:bg-rose-100 px-2.5 py-1 rounded-lg border border-rose-200 transition-colors cursor-pointer"
+                            title="Cancel Order"
+                          >
+                            Cancel
+                          </button>
+                        )}
+
+                        {/* Dismiss button when COLLECTED */}
+                        {displayOrder.status === 'COLLECTED' && (
+                          <button
+                            type="button"
+                            onClick={() => handleDismissCollectedOrder(displayOrder.id)}
+                            className="text-[11px] text-slate-400 hover:text-slate-700 font-bold bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded-lg transition-colors cursor-pointer"
+                            title="Dismiss and Order Again"
+                          >
+                            ✕ Done
+                          </button>
+                        )}
                       </div>
+
+                      {/* Progress Step Bar with Distinct Colors per Stage */}
+                      <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3">
+                        <div className="flex items-center justify-between relative px-2">
+                          {/* Connecting background and active progress track */}
+                          <div className="absolute left-[18px] right-[18px] top-2.5 h-0.5 bg-slate-200 -z-0">
+                            <div
+                              className={`h-full transition-all duration-500 ${displayOrder.status === 'COLLECTED'
+                                  ? 'bg-gradient-to-r from-blue-500 via-emerald-500 via-amber-500 via-purple-500 to-teal-500'
+                                  : displayOrder.status === 'READY'
+                                    ? 'bg-gradient-to-r from-blue-500 via-emerald-500 via-amber-500 to-purple-600'
+                                    : displayOrder.status === 'PREPARING'
+                                      ? 'bg-gradient-to-r from-blue-500 via-emerald-500 to-amber-500'
+                                      : displayOrder.status === 'ACCEPTED'
+                                        ? 'bg-gradient-to-r from-blue-500 to-emerald-500'
+                                        : 'bg-blue-500'
+                                }`}
+                              style={{
+                                width:
+                                  displayOrder.status === 'PLACED' ? '0%' :
+                                    displayOrder.status === 'ACCEPTED' ? '25%' :
+                                      displayOrder.status === 'PREPARING' ? '50%' :
+                                        displayOrder.status === 'READY' ? '75%' : '100%'
+                              }}
+                            />
+                          </div>
+
+                          {[
+                            {
+                              key: 'PLACED',
+                              label: 'Placed',
+                              done: true,
+                              current: displayOrder.status === 'PLACED',
+                              color: 'bg-blue-600 text-white border-blue-600 shadow-blue-500/25',
+                              textColor: 'text-blue-700',
+                            },
+                            {
+                              key: 'ACCEPTED',
+                              label: 'Accepted',
+                              done: ['ACCEPTED', 'PREPARING', 'READY', 'COLLECTED'].includes(displayOrder.status),
+                              current: displayOrder.status === 'ACCEPTED',
+                              color: 'bg-emerald-600 text-white border-emerald-600 shadow-emerald-500/25',
+                              textColor: 'text-emerald-700',
+                            },
+                            {
+                              key: 'PREPARING',
+                              label: 'Cooking',
+                              done: ['PREPARING', 'READY', 'COLLECTED'].includes(displayOrder.status),
+                              current: displayOrder.status === 'PREPARING',
+                              color: 'bg-amber-500 text-white border-amber-500 shadow-amber-500/25',
+                              textColor: 'text-amber-700',
+                            },
+                            {
+                              key: 'READY',
+                              label: 'Ready',
+                              done: ['READY', 'COLLECTED'].includes(displayOrder.status),
+                              current: displayOrder.status === 'READY',
+                              color: 'bg-purple-600 text-white border-purple-600 shadow-purple-500/25',
+                              textColor: 'text-purple-700',
+                            },
+                            {
+                              key: 'COLLECTED',
+                              label: 'Collected',
+                              done: displayOrder.status === 'COLLECTED',
+                              current: displayOrder.status === 'COLLECTED',
+                              color: 'bg-teal-600 text-white border-teal-600 shadow-teal-500/25',
+                              textColor: 'text-teal-700',
+                            }
+                          ].map((step, idx) => (
+                            <div key={idx} className="flex flex-col items-center z-10">
+                              <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black border transition-all ${step.done
+                                  ? `${step.color} shadow-xs scale-105`
+                                  : 'bg-white border-slate-300 text-slate-400'
+                                } ${step.current ? 'ring-2 ring-offset-1 ring-slate-300 scale-110' : ''}`}>
+                                {step.done ? '✓' : idx + 1}
+                              </div>
+                              <span className={`text-[10px] font-bold mt-1 transition-colors ${step.done ? step.textColor : 'text-slate-400'
+                                }`}>
+                                {step.label}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Status Highlights & Pass / QR Code / Collected View */}
+                      {displayOrder.status === 'COLLECTED' ? (
+                        /* ================= ORDER COLLECTED SUCCESSFULLY PAGE ================= */
+                        <div className="relative overflow-hidden bg-gradient-to-b from-emerald-50 via-teal-50/50 to-emerald-100/30 border border-emerald-200 rounded-2xl p-4 sm:p-5 text-center space-y-3.5 shadow-xs">
+                          {/* Soft celebratory decorative stars */}
+                          <div className="absolute top-2.5 left-3 text-emerald-400 opacity-60 text-xs select-none">✨</div>
+                          <div className="absolute top-3.5 right-4 text-emerald-400 opacity-60 text-sm select-none">🎉</div>
+                          <div className="absolute bottom-3 left-4 text-emerald-400 opacity-40 text-xs select-none">🌟</div>
+
+                          {/* Animated 3D Success Icon Badge */}
+                          <div className="relative mx-auto w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-400 p-[1.5px] shadow-lg shadow-emerald-500/25 flex items-center justify-center">
+                            <div className="w-full h-full rounded-[14px] bg-gradient-to-b from-emerald-500 to-teal-600 flex items-center justify-center text-white relative overflow-hidden">
+                              <div className="absolute top-0 inset-x-0 h-1/2 bg-white/30 rounded-t-[14px]" />
+                              <CheckCircle2 size={28} className="relative z-10 drop-shadow-sm text-white" strokeWidth={2.6} />
+                            </div>
+                          </div>
+
+                          {/* Heading & description */}
+                          <div>
+                            <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-100 border border-emerald-300/80 text-emerald-800 text-[10px] font-black uppercase tracking-wider mb-1">
+                              <span>Order Handed Over</span>
+                              <span>✓</span>
+                            </div>
+                            <h4 className="font-black text-slate-900 text-base sm:text-lg tracking-tight">
+                              Order Collected Successfully! 🎉
+                            </h4>
+                            <p className="text-xs text-slate-600 mt-1 max-w-xs mx-auto leading-relaxed">
+                              Your food has been handed over at the counter. Enjoy your hot & fresh meal!
+                            </p>
+                          </div>
+
+                          {/* Verified Pickup Details Pill */}
+                          <div className="bg-white/95 border border-emerald-200/90 rounded-xl py-2 px-3 flex items-center justify-around text-center shadow-2xs">
+                            <div>
+                              <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Canteen</span>
+                              <span className="text-xs font-black text-slate-800 truncate max-w-[90px] block">
+                                {(displayOrder as any).canteens?.name || 'Main Canteen'}
+                              </span>
+                            </div>
+                            <div className="w-px h-6 bg-slate-200" />
+                            <div>
+                              <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Verification</span>
+                              <span className="text-xs font-black text-emerald-600 flex items-center justify-center gap-0.5">
+                                <span>Verified</span> ✓
+                              </span>
+                            </div>
+                            <div className="w-px h-6 bg-slate-200" />
+                            <div>
+                              <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Time</span>
+                              <span className="text-xs font-black text-slate-800 font-mono">
+                                {formatSingleTime((displayOrder as any).collected_at || new Date().toISOString())}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Action Buttons: Leave Review & Order More */}
+                          <div className="pt-1 flex flex-col sm:flex-row gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowHistory(true);
+                                setTimeout(() => {
+                                  const el = document.getElementById(`order-${displayOrder.id}`);
+                                  if (el) el.scrollIntoView({ behavior: 'smooth' });
+                                }, 150);
+                              }}
+                              className="flex-1 py-2 px-3 rounded-xl bg-white border border-emerald-300 hover:bg-emerald-50 text-emerald-700 font-bold text-xs shadow-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                            >
+                              <Star size={13} className="text-amber-500 fill-amber-500" />
+                              <span>Rate Meal</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDismissCollectedOrder(displayOrder.id)}
+                              className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-md shadow-emerald-600/20 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                            >
+                              <span>Order More Food →</span>
+                              {autoCloseCountdown > 0 && (
+                                <span className="px-1.5 py-0.5 rounded-full bg-emerald-800/50 text-[10px] font-mono">
+                                  {autoCloseCountdown}s
+                                </span>
+                              )}
+                            </button>
+                          </div>
+                          <p className="text-[10px] text-slate-400 font-medium">
+                            Auto-closing and returning to menu in <span className="font-bold text-emerald-600">{autoCloseCountdown}s</span>
+                          </p>
+                        </div>
+                      ) : displayOrder.status === 'READY' ? (
+                        <div className="bg-gradient-to-b from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl p-4 text-center space-y-3">
+                          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-600 text-white text-[11px] font-black shadow-xs">
+                            <span className="relative flex h-2 w-2">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
+                            </span>
+                            <span>READY FOR PICKUP • {liveTickerTime}</span>
+                          </div>
+
+                          {/* QR Code */}
+                          <div
+                            onClick={() => setShowQrModal(true)}
+                            className="bg-white p-3 rounded-2xl border-2 border-emerald-400 shadow-md inline-block cursor-pointer hover:scale-105 transition-transform group relative"
+                            title="Click to Enlarge QR Code"
+                          >
+                            <QRCodeSVG
+                              value={`SKIPTRAY:${displayOrder.id}:${currentOtp}`}
+                              size={140}
+                              className="rounded-lg mx-auto"
+                            />
+                            <div className="absolute inset-0 bg-slate-900/60 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[11px] font-bold gap-1">
+                              <IconMaximize size={16} />
+                              <span>Enlarge</span>
+                            </div>
+                          </div>
+
+                          {/* OTP Display */}
+                          <div className="bg-white px-3 py-2.5 rounded-xl border border-emerald-200">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                              Pickup Verification OTP
+                            </p>
+                            {currentOtp ? (
+                              <p className="text-2xl font-mono font-black tracking-[0.25em] text-emerald-700 my-0.5">
+                                {currentOtp}
+                              </p>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={handleRequestOtp}
+                                disabled={requestingOtp}
+                                className="mt-1 px-3 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-lg shadow-xs hover:bg-emerald-700 disabled:opacity-50 cursor-pointer"
+                              >
+                                {requestingOtp ? 'Generating...' : 'Get OTP Code'}
+                              </button>
+                            )}
+                            <p className="text-[10px] text-slate-500 mt-0.5">
+                              Show OTP or scan QR at counter
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        /* Preparing / In-progress notice */
+                        <div className="bg-blue-50/70 border border-blue-200/80 rounded-2xl p-4 text-center space-y-2">
+                          <div className="w-10 h-10 rounded-full bg-blue-100 text-[#1d68f2] flex items-center justify-center mx-auto">
+                            <IconHourglass size={20} className="animate-spin" style={{ animationDuration: '4s' }} />
+                          </div>
+                          <div>
+                            <h4 className="font-black text-slate-900 text-sm">
+                              {displayOrder.status === 'PLACED' && 'Order Received'}
+                              {displayOrder.status === 'ACCEPTED' && 'Order Accepted'}
+                              {displayOrder.status === 'PREPARING' && 'Preparing Your Meal'}
+                            </h4>
+                            <p className="text-[11px] text-slate-500 mt-0.5">
+                              {displayOrder.status === 'PLACED' && 'Sent to kitchen staff. Awaiting confirmation.'}
+                              {displayOrder.status === 'ACCEPTED' && 'Kitchen accepted and will cook your meal on schedule.'}
+                              {displayOrder.status === 'PREPARING' && 'Food is being freshly cooked right now!'}
+                            </p>
+                          </div>
+                          <div className="pt-2 border-t border-blue-100 flex items-center justify-center gap-1.5 text-[10px] text-blue-700 font-bold">
+                            <Lock size={11} />
+                            <span>QR & OTP unlock automatically when READY</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Items List inside Active Order */}
+                      <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">
+                            Ordered Items
+                          </span>
+                          <span className="text-[11px] font-bold text-slate-500">
+                            {(displayOrder as any).canteens?.name || 'Main Canteen'}
+                          </span>
+                        </div>
+
+                        <div className="space-y-1.5 divide-y divide-slate-100">
+                          {(displayOrder as any).order_items && (displayOrder as any).order_items.length > 0 ? (
+                            (displayOrder as any).order_items.map((oi: any, idx: number) => {
+                              const itemName = oi.menu_items?.name || oi.name || 'Meal Item';
+                              const itemPrice = Number(oi.menu_items?.price ?? oi.price ?? 0);
+                              const itemQty = Number(oi.quantity) || 1;
+                              return (
+                                <div key={idx} className="pt-1.5 first:pt-0 flex items-center justify-between text-xs">
+                                  <div>
+                                    <span className="font-bold text-slate-800">{itemName}</span>
+                                    <span className="text-[10px] text-slate-400 block font-medium">Qty: {itemQty}</span>
+                                  </div>
+                                  <span className="font-black text-slate-900 font-mono">
+                                    ₹{(itemPrice * itemQty).toFixed(2)}
+                                  </span>
+                                </div>
+                              );
+                            })
+                          ) : (
+                            <div className="text-xs text-slate-400 italic">Order details loaded</div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Order Meta Badges */}
+                      <div className="grid grid-cols-2 gap-2 text-center text-xs">
+                        <div className="bg-slate-50 border border-slate-200/70 p-2 rounded-xl">
+                          <span className="text-[9px] text-slate-400 uppercase font-black block">Mode</span>
+                          <span className="font-bold text-slate-800 text-xs mt-0.5 block">
+                            {displayOrder.is_takeaway ? 'Takeaway' : 'Dine-In'}
+                          </span>
+                        </div>
+                        <div className="bg-slate-50 border border-slate-200/70 p-2 rounded-xl">
+                          <span className="text-[9px] text-slate-400 uppercase font-black block">Scheduled Pickup</span>
+                          <span className="font-bold text-slate-800 text-xs mt-0.5 block">
+                            {formatSingleTime(displayOrder.pickup_time)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    /* ================= Default Cart & Order Placement Builder ================= */
+                    <div>
+                      {/* Cart Header */}
+                      <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-xl bg-blue-100 text-[#1d68f2] flex items-center justify-center font-black text-xs">
+                            <ShoppingCart size={16} />
+                          </div>
+                          <div>
+                            <h3 className="font-black text-slate-900 text-base leading-tight">Your Order</h3>
+                            <p className="text-[11px] text-slate-400 font-medium">
+                              {cartTotalItems} item{cartTotalItems === 1 ? '' : 's'} (Max 5)
+                            </p>
+                          </div>
+                        </div>
+
+                        {cart.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setCart([])}
+                            className="text-xs text-rose-500 hover:text-rose-700 font-bold transition-colors cursor-pointer"
+                          >
+                            Clear All
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Operational Warnings */}
+                      {isSunday && (
+                        <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-2 text-xs text-amber-800 font-medium">
+                          <IconBan size={16} className="text-amber-600 shrink-0" />
+                          <span>Canteen closed on Sundays.</span>
+                        </div>
+                      )}
+
+                      {!isSunday && isBeforeOpeningTime && (
+                        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center gap-2 text-xs text-blue-800 font-medium">
+                          <IconClock size={16} className="text-blue-600 shrink-0" />
+                          <span>Lunch booking opens at 9:30 AM today.</span>
+                        </div>
+                      )}
+
+                      {!isSunday && isLunchClosedForToday && (
+                        <div className="mb-4 p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-center gap-2 text-xs text-rose-800 font-medium">
+                          <IconClock size={16} className="text-rose-600 shrink-0" />
+                          <span>Lunch ordering closed for today.</span>
+                        </div>
+                      )}
+
+                      {/* Cart Items List without food images */}
+                      <div className="space-y-3 mb-4 max-h-60 overflow-y-auto pr-1">
+                        {cart.length === 0 ? (
+                          <div className="text-center py-8 px-3 bg-slate-50/70 rounded-2xl border border-dashed border-slate-200">
+                            <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-2 text-slate-300">
+                              <ShoppingCart size={22} />
+                            </div>
+                            <p className="text-xs font-bold text-slate-600">No items selected</p>
+                            <p className="text-[11px] text-slate-400 mt-0.5">
+                              Click "+ Add" on any menu item to build your lunch order.
+                            </p>
+                          </div>
+                        ) : (
+                          cart.map(c => {
+                            const liveItem = menuItems.find(m => m.id === c.item.id);
+                            const isSoldOut = liveItem?.is_sold_out ?? false;
+
+                            return (
+                              <div
+                                key={c.item.id}
+                                className={`flex items-center justify-between gap-2 p-2.5 rounded-xl border transition-all ${isSoldOut ? 'bg-rose-50/50 border-rose-200' : 'bg-slate-50/70 border-slate-200/70'
+                                  }`}
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span
+                                    className={`w-2 h-2 rounded-full shrink-0 ${liveItem?.veg_non_veg === 'VEG' ? 'bg-emerald-500' : 'bg-rose-500'
+                                      }`}
+                                  />
+                                  <div className="min-w-0">
+                                    <h4
+                                      className={`text-xs font-bold truncate leading-tight ${isSoldOut ? 'text-rose-600 line-through' : 'text-slate-800'
+                                        }`}
+                                    >
+                                      {c.item.name}
+                                    </h4>
+                                    <div className="text-[11px] text-slate-500 font-semibold mt-0.5">
+                                      ₹{Number(c.item.price || 0).toFixed(2)}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Qty controller */}
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <div className="flex items-center bg-white border border-slate-200 rounded-lg shadow-xs overflow-hidden">
+                                    <button
+                                      type="button"
+                                      onClick={() => removeFromCart(c.item.id)}
+                                      className="w-6 h-6 flex items-center justify-center text-slate-500 hover:bg-slate-100 font-bold text-xs"
+                                    >
+                                      −
+                                    </button>
+                                    <span className="w-5 text-center text-xs font-black text-slate-800 tabular-nums">
+                                      {c.quantity}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => addToCart(c.item)}
+                                      disabled={cartTotalItems >= 5}
+                                      className="w-6 h-6 flex items-center justify-center text-[#1d68f2] hover:bg-blue-50 font-bold text-xs disabled:opacity-30"
+                                    >
+                                      +
+                                    </button>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => setCart(cart.filter(x => x.item.id !== c.item.id))}
+                                    className="p-1 text-slate-400 hover:text-rose-600 rounded-md transition-colors"
+                                    title="Remove"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+
+                      {/* Sold-out alert in cart */}
+                      {cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out) && (
+                        <div className="mb-3 p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700">
+                          <div className="flex items-center gap-1 font-bold mb-1">
+                            <IconAlertTriangle size={14} className="text-rose-600" />
+                            <span>Some items are sold out</span>
+                          </div>
+                          <p className="text-[11px] text-rose-600">Please remove them to place your order.</p>
+                        </div>
+                      )}
+
+                      {/* Pickup Time Selector */}
+                      <div className="mb-4 p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <label className="text-[11px] font-black uppercase tracking-wider text-slate-600">
+                            Pickup Time
+                          </label>
+                          <span className="text-[10px] text-[#1d68f2] font-bold bg-blue-50 px-2 py-0.5 rounded border border-blue-100/60">
+                            {slotConfig.slotMode === 'CUSTOM'
+                              ? 'Custom Slots'
+                              : `${slotConfig.slotDurationMinutes || 15}m Fixed Slots`}
+                          </span>
+                        </div>
+
+                        {/* 12-Hour AM/PM Selector */}
+                        <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl p-1.5 shadow-xs">
+                          {/* Hour selector */}
+                          <div className="flex-1 min-w-0">
+                            <select
+                              value={parse12hParts(pickupTime).hour}
+                              onChange={e => {
+                                const { minute, period } = parse12hParts(pickupTime);
+                                setPickupTime(compose24hString(Number(e.target.value), minute, period));
+                                if (error) setError('');
+                              }}
+                              disabled={isSuspended}
+                              aria-label="Select Pickup Hour"
+                              className="w-full bg-slate-50 hover:bg-slate-100 text-slate-800 font-black text-xs rounded-lg px-2 py-1.5 outline-none cursor-pointer border border-slate-100 text-center"
+                            >
+                              {[12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(h => (
+                                <option key={h} value={h}>{String(h).padStart(2, '0')}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <span className="font-black text-slate-400 text-sm">:</span>
+
+                          {/* Minute selector */}
+                          <div className="flex-1 min-w-0">
+                            <select
+                              value={String(parse12hParts(pickupTime).minute).padStart(2, '0')}
+                              onChange={e => {
+                                const { hour, period } = parse12hParts(pickupTime);
+                                setPickupTime(compose24hString(hour, Number(e.target.value), period));
+                                if (error) setError('');
+                              }}
+                              disabled={isSuspended}
+                              aria-label="Select Pickup Minute"
+                              className="w-full bg-slate-50 hover:bg-slate-100 text-slate-800 font-black text-xs rounded-lg px-2 py-1.5 outline-none cursor-pointer border border-slate-100 text-center"
+                            >
+                              {availableMinuteOptions.map(m => (
+                                <option key={m} value={m}>{m}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* AM / PM Toggle */}
+                          <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200/60 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const { hour, minute } = parse12hParts(pickupTime);
+                                setPickupTime(compose24hString(hour, minute, 'AM'));
+                                if (error) setError('');
+                              }}
+                              disabled={isSuspended}
+                              className={`px-2.5 py-1 rounded-md text-[10px] font-black transition-all cursor-pointer ${parse12hParts(pickupTime).period === 'AM'
+                                  ? 'bg-[#1d68f2] text-white shadow-xs'
+                                  : 'text-slate-600 hover:text-slate-900'
+                                }`}
+                            >
+                              AM
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const { hour, minute } = parse12hParts(pickupTime);
+                                setPickupTime(compose24hString(hour, minute, 'PM'));
+                                if (error) setError('');
+                              }}
+                              disabled={isSuspended}
+                              className={`px-2.5 py-1 rounded-md text-[10px] font-black transition-all cursor-pointer ${parse12hParts(pickupTime).period === 'PM'
+                                  ? 'bg-[#1d68f2] text-white shadow-xs'
+                                  : 'text-slate-600 hover:text-slate-900'
+                                }`}
+                            >
+                              PM
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Quick suggestion slots */}
+                        {suggestedQuickSlots.length > 0 && (
+                          <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                            {suggestedQuickSlots.map(t => (
+                              <button
+                                key={t}
+                                type="button"
+                                onClick={() => {
+                                  setPickupTime(t);
+                                  if (error) setError('');
+                                }}
+                                className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition-all ${normalizeTimeTo24h(pickupTime) === t
+                                    ? 'bg-[#1d68f2] text-white border-[#1d68f2] shadow-xs'
+                                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                                  }`}
+                              >
+                                {formatSingleTime(t)}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Smart Kitchen schedule info */}
+                        {smartSchedule.isValid && (
+                          <div className="mt-2.5 pt-2 border-t border-slate-200/80 flex items-center justify-between text-[10px] font-semibold text-slate-500">
+                            <span>⚡ Prep starts: <strong className="text-amber-600">{smartSchedule.prepStartFormatted}</strong></span>
+                            <span>Hot by: <strong className="text-emerald-600">{smartSchedule.readyByFormatted}</strong></span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Order Bill Summary */}
+                      {cart.length > 0 && (
+                        <div className="space-y-1.5 py-3 border-t border-b border-slate-100 text-xs mb-4">
+                          <div className="flex justify-between text-slate-500 font-medium">
+                            <span>Item Subtotal</span>
+                            <span className="font-bold text-slate-800">₹{ledger.food_subtotal.toFixed(2)}</span>
+                          </div>
+                          <div className="flex justify-between text-slate-500 font-medium">
+                            <span>Payment Method</span>
+                            <span className="text-emerald-600 font-bold">Pay at Counter</span>
+                          </div>
+                          <div className="flex justify-between items-center pt-2 border-t border-slate-100 text-sm">
+                            <span className="font-black text-slate-900">Total Amount</span>
+                            <span className="text-lg font-black text-[#1d68f2]">
+                              ₹{ledger.gross_payable.toFixed(2)}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Checkout Submit Button */}
+                      <form onSubmit={handlePlaceOrder}>
+                        {error && (
+                          <div className="mb-3 p-2 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center gap-1.5 font-bold">
+                            <IconAlertTriangle size={14} className="shrink-0 text-rose-600" />
+                            <span>{error}</span>
+                          </div>
+                        )}
+
+                        {(() => {
+                          const isSelectedSlotClosed = isLunchClosedForToday;
+                          const isScheduleInvalid = !smartSchedule.isValid;
+                          const isOrderDisabled =
+                            isSuspended ||
+                            isSunday ||
+                            isBeforeOpeningTime ||
+                            isSelectedSlotClosed ||
+                            isScheduleInvalid ||
+                            cart.length === 0 ||
+                            !pickupTime ||
+                            submitting ||
+                            cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out);
+
+                          return (
+                            <button
+                              type="submit"
+                              disabled={isOrderDisabled}
+                              className={`w-full py-3.5 px-4 rounded-2xl font-black text-xs sm:text-sm shadow-lg transition-all flex items-center justify-center gap-2 ${isOrderDisabled
+                                  ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
+                                  : 'bg-gradient-to-r from-[#1d68f2] to-[#2563eb] text-white hover:from-blue-600 hover:to-blue-700 shadow-blue-500/30 active:scale-98'
+                                }`}
+                            >
+                              {isSuspended ? (
+                                'Account Deactivated'
+                              ) : isSunday ? (
+                                'Closed on Sundays'
+                              ) : isBeforeOpeningTime ? (
+                                'Lunch Booking Opens at 9:30 AM'
+                              ) : isSelectedSlotClosed ? (
+                                'Lunch Ordering Closed'
+                              ) : isScheduleInvalid ? (
+                                smartSchedule.statusBadge || smartSchedule.badge || 'Invalid Pickup Slot'
+                              ) : submitting ? (
+                                'Placing Order...'
+                              ) : (
+                                <>
+                                  <span>Place Order</span>
+                                  <span>•</span>
+                                  <span>₹{ledger.gross_payable.toFixed(2)}</span>
+                                  <ArrowRight size={16} />
+                                </>
+                              )}
+                            </button>
+                          );
+                        })()}
+                      </form>
                     </div>
                   )}
                 </div>
-              );
-            })}
-            </div>
-          )}
-        </div>
-      ) : (
-        <>
-          {/* Main 2-Column Canteen OS Layout */}
-          <div className="col-span-12 grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-            {/* Left Column (8 cols): Compact Hero Promo + Combined Menu Header & Food Grid */}
-            <div className="lg:col-span-8 space-y-4">
-              {/* Compact Hero Banner with Motion */}
-              <motion.div
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
-                className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#002b66] via-[#023e8a] to-[#001845] text-white p-3.5 sm:p-5 shadow-md"
-              >
-                <div className="relative z-10 flex items-center justify-between gap-4">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-blue-500/30 border border-blue-400/30 text-blue-200 text-[10px] font-black uppercase tracking-wider">
-                        <Sparkles size={11} className="text-amber-300" />
-                        Fresh • Fast • Hygienic
-                      </span>
-                      <span className="text-[11px] text-blue-200/80 font-medium hidden sm:inline">
-                        ⚡ Skip the canteen line
-                      </span>
-                    </div>
-                    <h2 className="text-lg sm:text-xl font-black text-white tracking-tight">
-                      Order Your <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-300 to-yellow-400">Favourite Food</span>
-                    </h2>
-                  </div>
-
-                  <div className="hidden sm:flex items-center gap-2 shrink-0">
-                    <span className="px-3 py-1 rounded-full bg-white/10 text-blue-100 text-xs font-bold border border-white/15">
-                      Hot & Fresh 🔥
-                    </span>
-                  </div>
-                </div>
               </motion.div>
+            </div>
 
-              {/* Combined Menu Card (Filter & Search Header + Grid in single cohesive section) */}
-              <div id="menu-items-section" className="bg-white/95 backdrop-blur-md border border-slate-200/90 rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 shadow-sm space-y-3 sm:space-y-4">
-                {/* Top Row: Menu Title + Subtitle on Left, Search Input on Right */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3">
-                  <div className="flex items-center gap-2 sm:gap-2.5">
-                    <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-[#1d68f2] shadow-xs shrink-0">
-                      <UtensilsCrossed size={18} />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h2 className="text-base sm:text-xl font-black text-slate-900 tracking-tight leading-none">
-                          All Menu Items
-                        </h2>
-                        <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
-                          {filteredMenuItems.length} dishes
-                        </span>
+            {/* Responsive Mobile Drawer Trigger (< lg screens) */}
+            <div className="lg:hidden fixed bottom-2 left-2 right-2 sm:left-3 sm:right-3 z-40 pointer-events-none">
+              <div className="pointer-events-auto w-full h-15 bg-white/95 backdrop-blur-md border border-slate-200/90 rounded-2xl px-3 sm:px-4 flex items-center justify-between shadow-lg">
+                {displayOrder ? (
+                  <>
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm shrink-0 ${displayOrder.status === 'COLLECTED'
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : displayOrder.status === 'READY'
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : 'bg-blue-100 text-[#1d68f2]'
+                        }`}>
+                        {displayOrder.status === 'COLLECTED' ? <CheckCircle2 size={18} /> : <Flame size={18} />}
                       </div>
-                      <p className="hidden sm:block text-xs text-slate-500 font-medium mt-0.5">
-                        Browse all available canteen foods, meals & packed items
-                      </p>
+                      <div className="min-w-0">
+                        <div className="text-xs font-black text-slate-900 leading-tight flex items-center gap-1.5 truncate">
+                          <span>Order #{displayOrder.order_number}</span>
+                          <span className={`text-[10px] font-bold ${displayOrder.status === 'COLLECTED' ? 'text-emerald-700' : 'text-[#1d68f2]'}`}>
+                            ({displayOrder.status === 'COLLECTED' ? 'COLLECTED' : getOrderStatusText(displayOrder as any)})
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-500 font-medium truncate">
+                          {displayOrder.status === 'COLLECTED'
+                            ? `Collected at ${formatSingleTime((displayOrder as any).collected_at || new Date().toISOString())}`
+                            : `Pickup at ${formatSingleTime(displayOrder.pickup_time)}`}
+                        </div>
+                      </div>
                     </div>
-                  </div>
 
-                  {/* Search food items input with blue search icon */}
-                  <div className="relative w-full sm:w-72">
-                    <IconSearch size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#1d68f2] pointer-events-none" />
-                    <input
-                      type="text"
-                      placeholder="Search food items..."
-                      value={foodSearchQuery}
-                      onChange={e => setFoodSearchQuery(e.target.value)}
-                      className="w-full bg-slate-50/80 border border-slate-200 focus:bg-white focus:border-[#1d68f2] focus:ring-2 focus:ring-blue-100 rounded-full text-xs text-slate-800 placeholder:text-slate-400 pl-9 pr-8 py-2 outline-none transition-all"
-                    />
-                    {foodSearchQuery && (
-                      <button
-                        type="button"
-                        onClick={() => setFoodSearchQuery('')}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 rounded-full"
-                      >
-                        <IconX size={13} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Filter Pills Row - Single horizontal scrollable bar on mobile, flex-wrap on desktop */}
-                <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar scrollbar-none pb-0.5 -mx-1 px-1 sm:mx-0 sm:px-0 sm:flex-wrap pt-2 border-t border-slate-100">
-                  {/* All button */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setFoodTypeFilter('ALL');
-                      setCategoryFilter('ALL');
-                    }}
-                    className={`px-3 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all shrink-0 cursor-pointer ${
-                      foodTypeFilter === 'ALL' && categoryFilter === 'ALL'
-                        ? 'bg-[#1d68f2] text-white shadow-sm shadow-blue-500/25 ring-2 ring-blue-400/30'
-                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                    }`}
-                  >
-                    <LayoutGrid size={13} />
-                    <span>All</span>
-                  </button>
-
-                  {/* Veg button */}
-                  <button
-                    type="button"
-                    onClick={() => setFoodTypeFilter(foodTypeFilter === 'VEG' ? 'ALL' : 'VEG')}
-                    className={`px-3 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all border shrink-0 cursor-pointer ${
-                      foodTypeFilter === 'VEG'
-                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm shadow-emerald-500/20'
-                        : 'bg-emerald-50/80 text-emerald-700 border-emerald-200/80 hover:bg-emerald-100/60'
-                    }`}
-                  >
-                    <Leaf size={13} className={foodTypeFilter === 'VEG' ? 'text-white' : 'text-emerald-600'} />
-                    <span>Veg</span>
-                  </button>
-
-                  {/* Non-Veg button */}
-                  <button
-                    type="button"
-                    onClick={() => setFoodTypeFilter(foodTypeFilter === 'NON_VEG' ? 'ALL' : 'NON_VEG')}
-                    className={`px-3 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all border shrink-0 cursor-pointer ${
-                      foodTypeFilter === 'NON_VEG'
-                        ? 'bg-rose-600 text-white border-rose-600 shadow-sm shadow-rose-500/20'
-                        : 'bg-rose-50/80 text-rose-700 border-rose-200/80 hover:bg-rose-100/60'
-                    }`}
-                  >
-                    <span className="w-2 h-2 rounded-full bg-rose-500 ring-2 ring-rose-200" />
-                    <span>Non-Veg</span>
-                  </button>
-
-                  <div className="h-4 w-px bg-slate-200 shrink-0 mx-0.5" />
-
-                  {/* Packed Food */}
-                  <button
-                    type="button"
-                    onClick={() => setCategoryFilter(categoryFilter === 'SNACKS' ? 'ALL' : 'SNACKS')}
-                    className={`px-3 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all border shrink-0 cursor-pointer ${
-                      categoryFilter === 'SNACKS'
-                        ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
-                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    <Package size={13} className="text-slate-500" />
-                    <span>Packed Food</span>
-                  </button>
-                </div>
-
-                {/* Empty State */}
-                {filteredMenuItems.length === 0 ? (
-                  <div className="py-8 px-4 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                    <IconPackage size={32} className="text-slate-300 mx-auto mb-2" />
-                    <h4 className="text-sm font-bold text-slate-700">
-                      No Food Items Found
-                    </h4>
-                    <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1">
-                      No items matched your search or category filter.
-                    </p>
-                    <div className="flex items-center justify-center gap-2 mt-3 flex-wrap">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFoodSearchQuery('');
-                          setFoodTypeFilter('ALL');
-                          setCategoryFilter('ALL');
-                        }}
-                        className="px-3.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
-                      >
-                        Reset Filters
-                      </button>
-                    </div>
-                  </div>
+                    <button
+                      type="button"
+                      onClick={() => setCartOpen(true)}
+                      className="px-3.5 py-2 rounded-xl bg-[#1d68f2] hover:bg-blue-600 active:scale-95 text-white font-bold text-xs shadow-xs transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
+                    >
+                      <span>{displayOrder.status === 'COLLECTED' ? 'View Receipt' : 'View OTP'}</span>
+                      <IconChevronUp size={14} />
+                    </button>
+                  </>
                 ) : (
-                  /* Food Grid Cards without Images - 2 in a row on mobile */
-                  <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3.5 pt-1">
-                    {filteredMenuItems.map(item => {
-                      const rawCat = String((item as any).category || '').toLowerCase();
-                      const isPacked =
-                        rawCat === 'packed food' ||
-                        rawCat === 'packed' ||
-                        rawCat === 'packaged' ||
-                        rawCat === 'snacks' ||
-                        rawCat === 'snack' ||
-                        rawCat.includes('pack') ||
-                        (item as any).stock_quantity != null ||
-                        (item as any).prep_time_minutes === 0 ||
-                        (item.name || '').toLowerCase().includes('packed') ||
-                        getItemCategory(item) === 'Packed Food';
-                      const stock = (item as any).stock_quantity ?? null;
-                      const prepMinutes = (item as any).prep_time_minutes ?? (isPacked ? 0 : 10);
-                      const isSoldOut = item.is_sold_out || (isPacked && stock !== null && stock <= 0);
+                  <>
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-200/80 text-[#1d68f2] flex items-center justify-center font-black text-sm shadow-2xs">
+                        {cartTotalItems}
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-slate-800 leading-tight">Your Order</div>
+                        <div className="text-xs font-black text-[#1d68f2]">
+                          ₹{ledger.gross_payable.toFixed(2)}
+                        </div>
+                      </div>
+                    </div>
 
-                      const cartEntry = cart.find(c => c.item.id === item.id);
-                      const quantity = cartEntry?.quantity || 0;
-                      const isMaxStockReached = stock !== null && quantity >= stock;
+                    <button
+                      type="button"
+                      onClick={() => setCartOpen(true)}
+                      className="px-4 py-2 rounded-xl bg-[#1d68f2] hover:bg-blue-600 active:scale-95 text-white font-bold text-xs shadow-xs transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
+                    >
+                      <span>View & Checkout</span>
+                      <IconChevronUp size={14} />
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
 
-                      // Clean border accent
-                      const isVeg = item.veg_non_veg === 'VEG';
-                      let themeBorder = 'border-l-4 border-emerald-500';
-                      let themeBg = 'bg-white hover:bg-emerald-50/20';
-
-                      if (isPacked) {
-                        themeBorder = 'border-l-4 border-amber-400';
-                        themeBg = 'bg-white hover:bg-amber-50/20';
-                      } else if (!isVeg) {
-                        themeBorder = 'border-l-4 border-rose-500';
-                        themeBg = 'bg-white hover:bg-rose-50/20';
-                      }
-
-                      const soldCount = salesCountMap[item.id] || salesCountMap[`name:${(item.name || '').toLowerCase()}`] || 0;
-
-                      return (
-                        <div
-                          key={item.id}
-                          className={`relative rounded-xl sm:rounded-2xl border border-slate-200/90 p-2.5 sm:p-4 flex flex-col justify-between shadow-2xs transition-all duration-200 hover:shadow-sm ${themeBorder} ${themeBg} ${
-                            isSoldOut ? 'opacity-60 bg-slate-50 grayscale-25' : ''
-                          }`}
+            {/* Mobile Bottom Sheet Modal when cartOpen is true on small screens */}
+            {cartOpen && (
+              <div className="lg:hidden fixed inset-0 z-50 flex flex-col justify-end bg-slate-950/50 backdrop-blur-sm animate-in fade-in">
+                <div className="bg-white rounded-t-3xl max-h-[85vh] overflow-y-auto p-5 shadow-2xl flex flex-col justify-between">
+                  {displayOrder ? (
+                    <div>
+                      <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-base font-black text-slate-900">Order #{displayOrder.order_number}</h3>
+                          <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${displayOrder.status === 'COLLECTED'
+                              ? 'bg-emerald-100 text-emerald-700 border border-emerald-300'
+                              : 'bg-blue-100 text-[#1d68f2]'
+                            }`}>
+                            {displayOrder.status === 'COLLECTED' ? 'COLLECTED' : getOrderStatusText(displayOrder as any)}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setCartOpen(false)}
+                          className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100"
                         >
-                          <div>
-                            {/* Badges Row - Clean & Compact for 2-column view */}
-                            <div className="flex items-center justify-between gap-1 mb-1.5 flex-wrap">
-                              <div className="flex items-center gap-1 flex-wrap">
-                                {/* Veg/Non-Veg Badge */}
-                                <div className={`flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-[11px] font-black ${
-                                  isVeg ? 'bg-emerald-100/90 text-emerald-800' : 'bg-rose-100/90 text-rose-800'
-                                }`}>
-                                  {isVeg ? (
-                                    <Leaf size={9} className="text-emerald-700" />
-                                  ) : (
-                                    <span className="w-1.5 h-1.5 rounded-full bg-rose-600 ring-1 ring-rose-200" />
-                                  )}
-                                  <span>{isVeg ? 'Veg' : 'Non-Veg'}</span>
-                                </div>
+                          <IconX size={18} />
+                        </button>
+                      </div>
 
-                                {/* Prep Time or Category Badge */}
-                                {isPacked ? (
-                                  <div className="flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-[11px] font-bold bg-blue-50 text-blue-800 border border-blue-200/60">
-                                    <Package size={9} className="text-blue-600" />
-                                    <span>Packed</span>
-                                  </div>
-                                ) : (
-                                  <div className="flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-[11px] font-bold bg-amber-100/80 text-amber-900">
-                                    <IconClock size={9} className="text-amber-800" />
-                                    <span>{prepMinutes}m</span>
-                                  </div>
-                                )}
-                              </div>
-
-                              {/* Highlight Tag on Right */}
-                              {isSoldOut ? (
-                                <span className="px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700 text-[8px] sm:text-[9px] font-black uppercase tracking-wider">
-                                  Sold Out
-                                </span>
-                              ) : soldCount > 0 ? (
-                                <span className="px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-300 text-[8px] sm:text-[9px] font-black flex items-center gap-0.5 shadow-2xs">
-                                  🔥 {soldCount}
-                                </span>
-                              ) : null}
-                            </div>
-
-                            {/* Food Title */}
-                            <h3 className="text-xs sm:text-base font-black text-slate-900 tracking-tight leading-snug line-clamp-2">
-                              {item.name}
-                            </h3>
+                      {/* Progress Step Bar with Distinct Colors per Stage */}
+                      <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3 mb-4">
+                        <div className="flex items-center justify-between relative px-2">
+                          <div className="absolute left-[18px] right-[18px] top-2.5 h-0.5 bg-slate-200 -z-0">
+                            <div
+                              className={`h-full transition-all duration-500 ${displayOrder.status === 'COLLECTED'
+                                  ? 'bg-gradient-to-r from-blue-500 via-emerald-500 via-amber-500 via-purple-500 to-teal-500'
+                                  : displayOrder.status === 'READY'
+                                    ? 'bg-gradient-to-r from-blue-500 via-emerald-500 via-amber-500 to-purple-600'
+                                    : displayOrder.status === 'PREPARING'
+                                      ? 'bg-gradient-to-r from-blue-500 via-emerald-500 to-amber-500'
+                                      : displayOrder.status === 'ACCEPTED'
+                                        ? 'bg-gradient-to-r from-blue-500 to-emerald-500'
+                                        : 'bg-blue-500'
+                                }`}
+                              style={{
+                                width:
+                                  displayOrder.status === 'PLACED' ? '0%' :
+                                    displayOrder.status === 'ACCEPTED' ? '25%' :
+                                      displayOrder.status === 'PREPARING' ? '50%' :
+                                        displayOrder.status === 'READY' ? '75%' : '100%'
+                              }}
+                            />
                           </div>
 
-                          {/* Footer: Price on Left, Pill Button on Right */}
-                          <div className="pt-2 sm:pt-2.5 border-t border-slate-100 flex items-center justify-between gap-1 mt-2 sm:mt-3">
-                            <div className="text-sm sm:text-xl font-black text-[#1d68f2] tracking-tight leading-tight">
-                              ₹{Number(item.price || 0).toFixed(2)}
-                            </div>
-
-                            {!isSoldOut ? (
-                              quantity > 0 ? (
-                                <div className="flex items-center bg-[#1d68f2] text-white rounded-full p-0.5 shadow-xs shrink-0">
-                                  <button
-                                    type="button"
-                                    onClick={() => removeFromCart(item.id)}
-                                    aria-label={`Decrease quantity of ${item.name}`}
-                                    className="w-5 h-5 sm:w-7 sm:h-7 flex items-center justify-center hover:bg-white/20 rounded-full font-black text-xs sm:text-sm transition-colors active:scale-90 cursor-pointer"
-                                  >
-                                    −
-                                  </button>
-                                  <span className="w-4 sm:w-6 text-center font-black text-[10px] sm:text-xs text-white tabular-nums">
-                                    {quantity}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => addToCart(item)}
-                                    disabled={isSuspended || isLunchClosedForToday || cartTotalItems >= 5 || isMaxStockReached}
-                                    aria-label={`Increase quantity of ${item.name}`}
-                                    className="w-5 h-5 sm:w-7 sm:h-7 flex items-center justify-center hover:bg-white/20 rounded-full font-black text-xs sm:text-sm transition-colors disabled:opacity-40 active:scale-90 cursor-pointer"
-                                  >
-                                    +
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="relative shrink-0">
-                                  <button
-                                    type="button"
-                                    onClick={() => addToCart(item)}
-                                    disabled={isSuspended || isLunchClosedForToday || cartTotalItems >= 5 || isMaxStockReached}
-                                    className="px-2.5 sm:px-4 py-1 sm:py-1.5 rounded-full bg-[#1d68f2] hover:bg-blue-600 text-white font-extrabold text-[11px] sm:text-xs transition-all shadow-sm shadow-blue-500/25 flex items-center gap-0.5 sm:gap-1 active:scale-95 disabled:opacity-40 cursor-pointer"
-                                  >
-                                    <span className="text-xs sm:text-base leading-none font-black">+</span>
-                                    <span>Add</span>
-                                  </button>
-                                </div>
-                              )
-                            ) : (
-                              <span className="px-2 py-0.5 rounded-full bg-slate-200/70 text-slate-500 text-[9px] sm:text-[10px] font-bold shrink-0">
-                                Unavailable
+                          {[
+                            {
+                              key: 'PLACED',
+                              label: 'Placed',
+                              done: true,
+                              current: displayOrder.status === 'PLACED',
+                              color: 'bg-blue-600 text-white border-blue-600 shadow-blue-500/25',
+                              textColor: 'text-blue-700',
+                            },
+                            {
+                              key: 'ACCEPTED',
+                              label: 'Accepted',
+                              done: ['ACCEPTED', 'PREPARING', 'READY', 'COLLECTED'].includes(displayOrder.status),
+                              current: displayOrder.status === 'ACCEPTED',
+                              color: 'bg-emerald-600 text-white border-emerald-600 shadow-emerald-500/25',
+                              textColor: 'text-emerald-700',
+                            },
+                            {
+                              key: 'PREPARING',
+                              label: 'Cooking',
+                              done: ['PREPARING', 'READY', 'COLLECTED'].includes(displayOrder.status),
+                              current: displayOrder.status === 'PREPARING',
+                              color: 'bg-amber-500 text-white border-amber-500 shadow-amber-500/25',
+                              textColor: 'text-amber-700',
+                            },
+                            {
+                              key: 'READY',
+                              label: 'Ready',
+                              done: ['READY', 'COLLECTED'].includes(displayOrder.status),
+                              current: displayOrder.status === 'READY',
+                              color: 'bg-purple-600 text-white border-purple-600 shadow-purple-500/25',
+                              textColor: 'text-purple-700',
+                            },
+                            {
+                              key: 'COLLECTED',
+                              label: 'Collected',
+                              done: displayOrder.status === 'COLLECTED',
+                              current: displayOrder.status === 'COLLECTED',
+                              color: 'bg-teal-600 text-white border-teal-600 shadow-teal-500/25',
+                              textColor: 'text-teal-700',
+                            }
+                          ].map((step, idx) => (
+                            <div key={idx} className="flex flex-col items-center z-10">
+                              <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black border transition-all ${step.done
+                                  ? `${step.color} shadow-xs scale-105`
+                                  : 'bg-white border-slate-300 text-slate-400'
+                                } ${step.current ? 'ring-2 ring-offset-1 ring-slate-300 scale-110' : ''}`}>
+                                {step.done ? '✓' : idx + 1}
+                              </div>
+                              <span className={`text-[10px] font-bold mt-1 transition-colors ${step.done ? step.textColor : 'text-slate-400'
+                                }`}>
+                                {step.label}
                               </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* QR Code / Ready State / Collected State */}
+                      {displayOrder.status === 'COLLECTED' ? (
+                        <div className="relative overflow-hidden bg-gradient-to-b from-emerald-50 via-teal-50/50 to-emerald-100/30 border border-emerald-200 rounded-2xl p-4 text-center space-y-3 mb-4 shadow-xs">
+                          <div className="relative mx-auto w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-400 p-[1.5px] shadow-md shadow-emerald-500/25 flex items-center justify-center">
+                            <div className="w-full h-full rounded-[14px] bg-gradient-to-b from-emerald-500 to-teal-600 flex items-center justify-center text-white relative overflow-hidden">
+                              <div className="absolute top-0 inset-x-0 h-1/2 bg-white/30 rounded-t-[14px]" />
+                              <CheckCircle2 size={24} className="relative z-10 text-white" strokeWidth={2.6} />
+                            </div>
+                          </div>
+
+                          <div>
+                            <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-100 border border-emerald-300/80 text-emerald-800 text-[10px] font-black uppercase tracking-wider mb-1">
+                              <span>Order Handed Over</span> ✓
+                            </div>
+                            <h4 className="font-black text-slate-900 text-base">
+                              Order Collected Successfully! 🎉
+                            </h4>
+                            <p className="text-xs text-slate-600 mt-0.5">
+                              Your food has been handed over at the counter. Enjoy your meal!
+                            </p>
+                          </div>
+
+                          <div className="pt-1 flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCartOpen(false);
+                                setShowHistory(true);
+                                setTimeout(() => {
+                                  const el = document.getElementById(`order-${displayOrder.id}`);
+                                  if (el) el.scrollIntoView({ behavior: 'smooth' });
+                                }, 150);
+                              }}
+                              className="flex-1 py-2 px-3 rounded-xl bg-white border border-emerald-300 text-emerald-700 font-bold text-xs flex items-center justify-center gap-1 cursor-pointer"
+                            >
+                              <Star size={12} className="text-amber-500 fill-amber-500" />
+                              <span>Rate Meal</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handleDismissCollectedOrder(displayOrder.id);
+                                setCartOpen(false);
+                              }}
+                              className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-md shadow-emerald-600/20 cursor-pointer flex items-center justify-center gap-1"
+                            >
+                              <span>Order More →</span>
+                              {autoCloseCountdown > 0 && (
+                                <span className="px-1.5 py-0.2 rounded-full bg-emerald-800/50 text-[10px] font-mono">
+                                  {autoCloseCountdown}s
+                                </span>
+                              )}
+                            </button>
+                          </div>
+                          <p className="text-[10px] text-slate-400 font-medium text-center">
+                            Auto-closing and returning to menu in <span className="font-bold text-emerald-600">{autoCloseCountdown}s</span>
+                          </p>
+                        </div>
+                      ) : displayOrder.status === 'READY' ? (
+                        <div className="text-center p-4 bg-emerald-50 border border-emerald-200 rounded-2xl mb-4 space-y-3">
+                          <span className="text-xs font-black text-emerald-700 uppercase tracking-wider block">
+                            Ready For Pickup!
+                          </span>
+                          <div
+                            onClick={() => setShowQrModal(true)}
+                            className="bg-white p-3 rounded-2xl border-2 border-emerald-400 shadow-sm inline-block mx-auto cursor-pointer"
+                          >
+                            <QRCodeSVG
+                              value={`SKIPTRAY:${displayOrder.id}:${currentOtp}`}
+                              size={160}
+                            />
+                          </div>
+                          <div className="bg-white py-2.5 px-3 rounded-xl border border-emerald-200">
+                            <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Pickup Verification OTP</span>
+                            {currentOtp ? (
+                              <span className="text-2xl font-mono font-black text-emerald-700 tracking-[0.25em] block">
+                                {currentOtp}
+                              </span>
+                            ) : (
+                              <div className="flex flex-col items-center gap-1.5 py-1">
+                                <button
+                                  type="button"
+                                  onClick={handleRequestOtp}
+                                  disabled={requestingOtp}
+                                  className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-lg shadow-xs disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+                                >
+                                  {requestingOtp ? (
+                                    <>
+                                      <IconHourglass size={12} className="animate-spin" />
+                                      <span>Generating OTP...</span>
+                                    </>
+                                  ) : (
+                                    <span>Get Pickup OTP</span>
+                                  )}
+                                </button>
+                                <span className="text-[10px] text-slate-400 font-medium">Tap to reveal 6-digit pickup code</span>
+                              </div>
                             )}
                           </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-            </div>
-
-            {/* Right Column (4 cols): Sticky Desktop Panel (Active Order Status or Cart Builder) with Motion */}
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.6, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
-              className="hidden lg:block lg:col-span-4 sticky top-20"
-            >
-              <div className="bg-white border border-slate-200/90 rounded-3xl p-5 sm:p-6 shadow-lg shadow-slate-100 flex flex-col justify-between max-h-[calc(100vh-6rem)] overflow-y-auto">
-                {displayOrder ? (
-                  /* ================= Active Order Live Status View Inside Box ================= */
-                  <div className="space-y-4">
-                    {/* Header */}
-                    <div className="flex items-center justify-between pb-3.5 border-b border-slate-100">
-                      <div className="flex items-center gap-2">
-                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs ${
-                          displayOrder.status === 'COLLECTED'
-                            ? 'bg-emerald-100 text-emerald-600'
-                            : 'bg-blue-100 text-[#1d68f2]'
-                        }`}>
-                          {displayOrder.status === 'COLLECTED' ? <CheckCircle2 size={16} /> : <Flame size={16} />}
+                      ) : (
+                        <div className="text-center p-4 bg-blue-50 border border-blue-200 rounded-2xl mb-4">
+                          <IconHourglass size={24} className="animate-spin text-[#1d68f2] mx-auto mb-2" />
+                          <h4 className="font-black text-slate-900 text-sm">Kitchen is preparing your meal</h4>
+                          <p className="text-xs text-slate-500 mt-1">Scheduled for pickup at {formatSingleTime(displayOrder.pickup_time)}</p>
                         </div>
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <h3 className="font-black text-slate-900 text-sm leading-tight">
-                              Order #{displayOrder.order_number}
-                            </h3>
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                              displayOrder.status === 'COLLECTED'
-                                ? 'bg-emerald-100 text-emerald-700 border border-emerald-300'
-                                : displayOrder.status === 'READY'
-                                ? 'bg-emerald-100 text-emerald-700 border border-emerald-300'
-                                : displayOrder.status === 'PREPARING'
-                                ? 'bg-amber-100 text-amber-700 border border-amber-300'
-                                : 'bg-blue-100 text-blue-700 border border-blue-200'
-                            }`}>
-                              {displayOrder.status === 'COLLECTED' ? 'COLLECTED' : getOrderStatusText(displayOrder as any)}
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-slate-400 font-medium">
-                            {displayOrder.status === 'COLLECTED'
-                              ? `Collected at ${formatSingleTime((displayOrder as any).collected_at || new Date().toISOString())}`
-                              : `Pickup at ${formatSingleTime(displayOrder.pickup_time)}`}
-                          </p>
-                        </div>
-                      </div>
+                      )}
 
                       {/* Cancel button: allowed anytime before staff accepts order (PLACED only) */}
                       {displayOrder.status === 'PLACED' && (
                         <button
                           type="button"
-                          onClick={handleCancelOrder}
-                          className="text-[11px] text-rose-500 hover:text-rose-700 font-bold bg-rose-50 hover:bg-rose-100 px-2.5 py-1 rounded-lg border border-rose-200 transition-colors cursor-pointer"
-                          title="Cancel Order"
+                          onClick={() => { handleCancelOrder(); setCartOpen(false); }}
+                          className="w-full py-2.5 text-rose-600 bg-rose-50 border border-rose-200 font-bold text-xs rounded-xl hover:bg-rose-100"
                         >
-                          Cancel
+                          Cancel Order
                         </button>
                       )}
-
-                      {/* Dismiss button when COLLECTED */}
-                      {displayOrder.status === 'COLLECTED' && (
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
+                        <h3 className="text-base font-black text-slate-900">Your Order ({cartTotalItems})</h3>
                         <button
                           type="button"
-                          onClick={() => handleDismissCollectedOrder(displayOrder.id)}
-                          className="text-[11px] text-slate-400 hover:text-slate-700 font-bold bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded-lg transition-colors cursor-pointer"
-                          title="Dismiss and Order Again"
+                          onClick={() => setCartOpen(false)}
+                          className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100"
                         >
-                          ✕ Done
+                          <IconX size={18} />
                         </button>
-                      )}
-                    </div>
-
-                    {/* Progress Step Bar with Distinct Colors per Stage */}
-                    <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3">
-                      <div className="flex items-center justify-between relative px-2">
-                        {/* Connecting background and active progress track */}
-                        <div className="absolute left-[18px] right-[18px] top-2.5 h-0.5 bg-slate-200 -z-0">
-                          <div
-                            className={`h-full transition-all duration-500 ${
-                              displayOrder.status === 'COLLECTED'
-                                ? 'bg-gradient-to-r from-blue-500 via-emerald-500 via-amber-500 via-purple-500 to-teal-500'
-                                : displayOrder.status === 'READY'
-                                ? 'bg-gradient-to-r from-blue-500 via-emerald-500 via-amber-500 to-purple-600'
-                                : displayOrder.status === 'PREPARING'
-                                ? 'bg-gradient-to-r from-blue-500 via-emerald-500 to-amber-500'
-                                : displayOrder.status === 'ACCEPTED'
-                                ? 'bg-gradient-to-r from-blue-500 to-emerald-500'
-                                : 'bg-blue-500'
-                            }`}
-                            style={{
-                              width:
-                                displayOrder.status === 'PLACED' ? '0%' :
-                                displayOrder.status === 'ACCEPTED' ? '25%' :
-                                displayOrder.status === 'PREPARING' ? '50%' :
-                                displayOrder.status === 'READY' ? '75%' : '100%'
-                            }}
-                          />
-                        </div>
-
-                        {[
-                          {
-                            key: 'PLACED',
-                            label: 'Placed',
-                            done: true,
-                            current: displayOrder.status === 'PLACED',
-                            color: 'bg-blue-600 text-white border-blue-600 shadow-blue-500/25',
-                            textColor: 'text-blue-700',
-                          },
-                          {
-                            key: 'ACCEPTED',
-                            label: 'Accepted',
-                            done: ['ACCEPTED', 'PREPARING', 'READY', 'COLLECTED'].includes(displayOrder.status),
-                            current: displayOrder.status === 'ACCEPTED',
-                            color: 'bg-emerald-600 text-white border-emerald-600 shadow-emerald-500/25',
-                            textColor: 'text-emerald-700',
-                          },
-                          {
-                            key: 'PREPARING',
-                            label: 'Cooking',
-                            done: ['PREPARING', 'READY', 'COLLECTED'].includes(displayOrder.status),
-                            current: displayOrder.status === 'PREPARING',
-                            color: 'bg-amber-500 text-white border-amber-500 shadow-amber-500/25',
-                            textColor: 'text-amber-700',
-                          },
-                          {
-                            key: 'READY',
-                            label: 'Ready',
-                            done: ['READY', 'COLLECTED'].includes(displayOrder.status),
-                            current: displayOrder.status === 'READY',
-                            color: 'bg-purple-600 text-white border-purple-600 shadow-purple-500/25',
-                            textColor: 'text-purple-700',
-                          },
-                          {
-                            key: 'COLLECTED',
-                            label: 'Collected',
-                            done: displayOrder.status === 'COLLECTED',
-                            current: displayOrder.status === 'COLLECTED',
-                            color: 'bg-teal-600 text-white border-teal-600 shadow-teal-500/25',
-                            textColor: 'text-teal-700',
-                          }
-                        ].map((step, idx) => (
-                          <div key={idx} className="flex flex-col items-center z-10">
-                            <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black border transition-all ${
-                              step.done
-                                ? `${step.color} shadow-xs scale-105`
-                                : 'bg-white border-slate-300 text-slate-400'
-                            } ${step.current ? 'ring-2 ring-offset-1 ring-slate-300 scale-110' : ''}`}>
-                              {step.done ? '✓' : idx + 1}
-                            </div>
-                            <span className={`text-[10px] font-bold mt-1 transition-colors ${
-                              step.done ? step.textColor : 'text-slate-400'
-                            }`}>
-                              {step.label}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Status Highlights & Pass / QR Code / Collected View */}
-                    {displayOrder.status === 'COLLECTED' ? (
-                      /* ================= ORDER COLLECTED SUCCESSFULLY PAGE ================= */
-                      <div className="relative overflow-hidden bg-gradient-to-b from-emerald-50 via-teal-50/50 to-emerald-100/30 border border-emerald-200 rounded-2xl p-4 sm:p-5 text-center space-y-3.5 shadow-xs">
-                        {/* Soft celebratory decorative stars */}
-                        <div className="absolute top-2.5 left-3 text-emerald-400 opacity-60 text-xs select-none">✨</div>
-                        <div className="absolute top-3.5 right-4 text-emerald-400 opacity-60 text-sm select-none">🎉</div>
-                        <div className="absolute bottom-3 left-4 text-emerald-400 opacity-40 text-xs select-none">🌟</div>
-
-                        {/* Animated 3D Success Icon Badge */}
-                        <div className="relative mx-auto w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-400 p-[1.5px] shadow-lg shadow-emerald-500/25 flex items-center justify-center">
-                          <div className="w-full h-full rounded-[14px] bg-gradient-to-b from-emerald-500 to-teal-600 flex items-center justify-center text-white relative overflow-hidden">
-                            <div className="absolute top-0 inset-x-0 h-1/2 bg-white/30 rounded-t-[14px]" />
-                            <CheckCircle2 size={28} className="relative z-10 drop-shadow-sm text-white" strokeWidth={2.6} />
-                          </div>
-                        </div>
-
-                        {/* Heading & description */}
-                        <div>
-                          <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-100 border border-emerald-300/80 text-emerald-800 text-[10px] font-black uppercase tracking-wider mb-1">
-                            <span>Order Handed Over</span>
-                            <span>✓</span>
-                          </div>
-                          <h4 className="font-black text-slate-900 text-base sm:text-lg tracking-tight">
-                            Order Collected Successfully! 🎉
-                          </h4>
-                          <p className="text-xs text-slate-600 mt-1 max-w-xs mx-auto leading-relaxed">
-                            Your food has been handed over at the counter. Enjoy your hot & fresh meal!
-                          </p>
-                        </div>
-
-                        {/* Verified Pickup Details Pill */}
-                        <div className="bg-white/95 border border-emerald-200/90 rounded-xl py-2 px-3 flex items-center justify-around text-center shadow-2xs">
-                          <div>
-                            <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Canteen</span>
-                            <span className="text-xs font-black text-slate-800 truncate max-w-[90px] block">
-                              {(displayOrder as any).canteens?.name || 'Main Canteen'}
-                            </span>
-                          </div>
-                          <div className="w-px h-6 bg-slate-200" />
-                          <div>
-                            <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Verification</span>
-                            <span className="text-xs font-black text-emerald-600 flex items-center justify-center gap-0.5">
-                              <span>Verified</span> ✓
-                            </span>
-                          </div>
-                          <div className="w-px h-6 bg-slate-200" />
-                          <div>
-                            <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Time</span>
-                            <span className="text-xs font-black text-slate-800 font-mono">
-                              {formatSingleTime((displayOrder as any).collected_at || new Date().toISOString())}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Action Buttons: Leave Review & Order More */}
-                        <div className="pt-1 flex flex-col sm:flex-row gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowHistory(true);
-                              setTimeout(() => {
-                                const el = document.getElementById(`order-${displayOrder.id}`);
-                                if (el) el.scrollIntoView({ behavior: 'smooth' });
-                              }, 150);
-                            }}
-                            className="flex-1 py-2 px-3 rounded-xl bg-white border border-emerald-300 hover:bg-emerald-50 text-emerald-700 font-bold text-xs shadow-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                          >
-                            <Star size={13} className="text-amber-500 fill-amber-500" />
-                            <span>Rate Meal</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDismissCollectedOrder(displayOrder.id)}
-                            className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-md shadow-emerald-600/20 transition-all cursor-pointer flex items-center justify-center gap-1.5"
-                          >
-                            <span>Order More Food →</span>
-                            {autoCloseCountdown > 0 && (
-                              <span className="px-1.5 py-0.5 rounded-full bg-emerald-800/50 text-[10px] font-mono">
-                                {autoCloseCountdown}s
-                              </span>
-                            )}
-                          </button>
-                        </div>
-                        <p className="text-[10px] text-slate-400 font-medium">
-                          Auto-closing and returning to menu in <span className="font-bold text-emerald-600">{autoCloseCountdown}s</span>
-                        </p>
-                      </div>
-                    ) : displayOrder.status === 'READY' ? (
-                      <div className="bg-gradient-to-b from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl p-4 text-center space-y-3">
-                        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-600 text-white text-[11px] font-black shadow-xs">
-                          <span className="relative flex h-2 w-2">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
-                          </span>
-                          <span>READY FOR PICKUP • {liveTickerTime}</span>
-                        </div>
-
-                        {/* QR Code */}
-                        <div
-                          onClick={() => setShowQrModal(true)}
-                          className="bg-white p-3 rounded-2xl border-2 border-emerald-400 shadow-md inline-block cursor-pointer hover:scale-105 transition-transform group relative"
-                          title="Click to Enlarge QR Code"
-                        >
-                          <QRCodeSVG
-                            value={`SKIPTRAY:${displayOrder.id}:${currentOtp}`}
-                            size={140}
-                            className="rounded-lg mx-auto"
-                          />
-                          <div className="absolute inset-0 bg-slate-900/60 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[11px] font-bold gap-1">
-                            <IconMaximize size={16} />
-                            <span>Enlarge</span>
-                          </div>
-                        </div>
-
-                        {/* OTP Display */}
-                        <div className="bg-white px-3 py-2.5 rounded-xl border border-emerald-200">
-                          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                            Pickup Verification OTP
-                          </p>
-                          {currentOtp ? (
-                            <p className="text-2xl font-mono font-black tracking-[0.25em] text-emerald-700 my-0.5">
-                              {currentOtp}
-                            </p>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={handleRequestOtp}
-                              disabled={requestingOtp}
-                              className="mt-1 px-3 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-lg shadow-xs hover:bg-emerald-700 disabled:opacity-50 cursor-pointer"
-                            >
-                              {requestingOtp ? 'Generating...' : 'Get OTP Code'}
-                            </button>
-                          )}
-                          <p className="text-[10px] text-slate-500 mt-0.5">
-                            Show OTP or scan QR at counter
-                          </p>
-                        </div>
-                      </div>
-                    ) : (
-                      /* Preparing / In-progress notice */
-                      <div className="bg-blue-50/70 border border-blue-200/80 rounded-2xl p-4 text-center space-y-2">
-                        <div className="w-10 h-10 rounded-full bg-blue-100 text-[#1d68f2] flex items-center justify-center mx-auto">
-                          <IconHourglass size={20} className="animate-spin" style={{ animationDuration: '4s' }} />
-                        </div>
-                        <div>
-                          <h4 className="font-black text-slate-900 text-sm">
-                            {displayOrder.status === 'PLACED' && 'Order Received'}
-                            {displayOrder.status === 'ACCEPTED' && 'Order Accepted'}
-                            {displayOrder.status === 'PREPARING' && 'Preparing Your Meal'}
-                          </h4>
-                          <p className="text-[11px] text-slate-500 mt-0.5">
-                            {displayOrder.status === 'PLACED' && 'Sent to kitchen staff. Awaiting confirmation.'}
-                            {displayOrder.status === 'ACCEPTED' && 'Kitchen accepted and will cook your meal on schedule.'}
-                            {displayOrder.status === 'PREPARING' && 'Food is being freshly cooked right now!'}
-                          </p>
-                        </div>
-                        <div className="pt-2 border-t border-blue-100 flex items-center justify-center gap-1.5 text-[10px] text-blue-700 font-bold">
-                          <Lock size={11} />
-                          <span>QR & OTP unlock automatically when READY</span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Items List inside Active Order */}
-                    <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">
-                          Ordered Items
-                        </span>
-                        <span className="text-[11px] font-bold text-slate-500">
-                          {(displayOrder as any).canteens?.name || 'Main Canteen'}
-                        </span>
                       </div>
 
-                      <div className="space-y-1.5 divide-y divide-slate-100">
-                        {(displayOrder as any).order_items && (displayOrder as any).order_items.length > 0 ? (
-                          (displayOrder as any).order_items.map((oi: any, idx: number) => {
-                            const itemName = oi.menu_items?.name || oi.name || 'Meal Item';
-                            const itemPrice = Number(oi.menu_items?.price ?? oi.price ?? 0);
-                            const itemQty = Number(oi.quantity) || 1;
-                            return (
-                              <div key={idx} className="pt-1.5 first:pt-0 flex items-center justify-between text-xs">
-                                <div>
-                                  <span className="font-bold text-slate-800">{itemName}</span>
-                                  <span className="text-[10px] text-slate-400 block font-medium">Qty: {itemQty}</span>
-                                </div>
-                                <span className="font-black text-slate-900 font-mono">
-                                  ₹{(itemPrice * itemQty).toFixed(2)}
-                                </span>
-                              </div>
-                            );
-                          })
-                        ) : (
-                          <div className="text-xs text-slate-400 italic">Order details loaded</div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Order Meta Badges */}
-                    <div className="grid grid-cols-2 gap-2 text-center text-xs">
-                      <div className="bg-slate-50 border border-slate-200/70 p-2 rounded-xl">
-                        <span className="text-[9px] text-slate-400 uppercase font-black block">Mode</span>
-                        <span className="font-bold text-slate-800 text-xs mt-0.5 block">
-                          {displayOrder.is_takeaway ? 'Takeaway' : 'Dine-In'}
-                        </span>
-                      </div>
-                      <div className="bg-slate-50 border border-slate-200/70 p-2 rounded-xl">
-                        <span className="text-[9px] text-slate-400 uppercase font-black block">Scheduled Pickup</span>
-                        <span className="font-bold text-slate-800 text-xs mt-0.5 block">
-                          {formatSingleTime(displayOrder.pickup_time)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  /* ================= Default Cart & Order Placement Builder ================= */
-                  <div>
-                    {/* Cart Header */}
-                    <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
-                      <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-xl bg-blue-100 text-[#1d68f2] flex items-center justify-center font-black text-xs">
-                          <ShoppingCart size={16} />
-                        </div>
-                        <div>
-                          <h3 className="font-black text-slate-900 text-base leading-tight">Your Order</h3>
-                          <p className="text-[11px] text-slate-400 font-medium">
-                            {cartTotalItems} item{cartTotalItems === 1 ? '' : 's'} (Max 5)
-                          </p>
-                        </div>
-                      </div>
-
-                      {cart.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => setCart([])}
-                          className="text-xs text-rose-500 hover:text-rose-700 font-bold transition-colors cursor-pointer"
-                        >
-                          Clear All
-                        </button>
-                      )}
-                    </div>
-
-                    {/* Operational Warnings */}
-                    {isSunday && (
-                      <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-2 text-xs text-amber-800 font-medium">
-                        <IconBan size={16} className="text-amber-600 shrink-0" />
-                        <span>Canteen closed on Sundays.</span>
-                      </div>
-                    )}
-
-                    {!isSunday && isBeforeOpeningTime && (
-                      <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center gap-2 text-xs text-blue-800 font-medium">
-                        <IconClock size={16} className="text-blue-600 shrink-0" />
-                        <span>Lunch booking opens at 9:30 AM today.</span>
-                      </div>
-                    )}
-
-                    {!isSunday && isLunchClosedForToday && (
-                      <div className="mb-4 p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-center gap-2 text-xs text-rose-800 font-medium">
-                        <IconClock size={16} className="text-rose-600 shrink-0" />
-                        <span>Lunch ordering closed for today.</span>
-                      </div>
-                    )}
-
-                    {/* Cart Items List without food images */}
-                    <div className="space-y-3 mb-4 max-h-60 overflow-y-auto pr-1">
-                      {cart.length === 0 ? (
-                        <div className="text-center py-8 px-3 bg-slate-50/70 rounded-2xl border border-dashed border-slate-200">
-                          <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-2 text-slate-300">
-                            <ShoppingCart size={22} />
-                          </div>
-                          <p className="text-xs font-bold text-slate-600">No items selected</p>
-                          <p className="text-[11px] text-slate-400 mt-0.5">
-                            Click "+ Add" on any menu item to build your lunch order.
-                          </p>
-                        </div>
-                      ) : (
-                        cart.map(c => {
-                          const liveItem = menuItems.find(m => m.id === c.item.id);
-                          const isSoldOut = liveItem?.is_sold_out ?? false;
-
+                      {/* Cart Items list */}
+                      <div className="space-y-2 mb-4">
+                        {cart.map(c => {
+                          const isItemSoldOut = menuItems.find(m => m.id === c.item.id)?.is_sold_out;
                           return (
                             <div
                               key={c.item.id}
-                              className={`flex items-center justify-between gap-2 p-2.5 rounded-xl border transition-all ${
-                                isSoldOut ? 'bg-rose-50/50 border-rose-200' : 'bg-slate-50/70 border-slate-200/70'
-                              }`}
+                              className={`flex items-center justify-between p-2 rounded-xl border ${isItemSoldOut ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'
+                                }`}
                             >
-                              <div className="flex items-center gap-2 min-w-0">
-                                <span
-                                  className={`w-2 h-2 rounded-full shrink-0 ${
-                                    liveItem?.veg_non_veg === 'VEG' ? 'bg-emerald-500' : 'bg-rose-500'
-                                  }`}
-                                />
-                                <div className="min-w-0">
-                                  <h4
-                                    className={`text-xs font-bold truncate leading-tight ${
-                                      isSoldOut ? 'text-rose-600 line-through' : 'text-slate-800'
-                                    }`}
-                                  >
-                                    {c.item.name}
-                                  </h4>
-                                  <div className="text-[11px] text-slate-500 font-semibold mt-0.5">
-                                    ₹{Number(c.item.price || 0).toFixed(2)}
-                                  </div>
-                                </div>
+                              <div className="flex-1 min-w-0 pr-2">
+                                <div className="text-xs font-bold text-slate-900 truncate">{c.item.name}</div>
+                                <div className="text-[11px] text-slate-500 font-semibold mt-0.5">₹{Number(c.item.price || 0).toFixed(2)} × {c.quantity}</div>
                               </div>
-
-                              {/* Qty controller */}
-                              <div className="flex items-center gap-1.5 shrink-0">
-                                <div className="flex items-center bg-white border border-slate-200 rounded-lg shadow-xs overflow-hidden">
-                                  <button
-                                    type="button"
-                                    onClick={() => removeFromCart(c.item.id)}
-                                    className="w-6 h-6 flex items-center justify-center text-slate-500 hover:bg-slate-100 font-bold text-xs"
-                                  >
-                                    −
-                                  </button>
-                                  <span className="w-5 text-center text-xs font-black text-slate-800 tabular-nums">
-                                    {c.quantity}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => addToCart(c.item)}
-                                    disabled={cartTotalItems >= 5}
-                                    className="w-6 h-6 flex items-center justify-center text-[#1d68f2] hover:bg-blue-50 font-bold text-xs disabled:opacity-30"
-                                  >
-                                    +
-                                  </button>
-                                </div>
-
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => removeFromCart(c.item.id)}
+                                  className="w-7 h-7 flex items-center justify-center bg-white border border-slate-200 rounded-lg font-bold text-xs text-slate-600 hover:bg-slate-100 active:scale-90"
+                                >
+                                  −
+                                </button>
+                                <span className="w-5 text-center text-xs font-black text-slate-800 tabular-nums">{c.quantity}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => addToCart(c.item)}
+                                  disabled={cartTotalItems >= 5}
+                                  className="w-7 h-7 flex items-center justify-center bg-white border border-slate-200 rounded-lg font-bold text-xs text-[#1d68f2] hover:bg-blue-50 disabled:opacity-30 active:scale-90"
+                                >
+                                  +
+                                </button>
                                 <button
                                   type="button"
                                   onClick={() => setCart(cart.filter(x => x.item.id !== c.item.id))}
-                                  className="p-1 text-slate-400 hover:text-rose-600 rounded-md transition-colors"
-                                  title="Remove"
+                                  className="w-7 h-7 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 flex items-center justify-center ml-0.5"
+                                  title="Remove item"
                                 >
                                   <Trash2 size={13} />
                                 </button>
                               </div>
                             </div>
                           );
-                        })
-                      )}
-                    </div>
-
-                    {/* Sold-out alert in cart */}
-                    {cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out) && (
-                      <div className="mb-3 p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700">
-                        <div className="flex items-center gap-1 font-bold mb-1">
-                          <IconAlertTriangle size={14} className="text-rose-600" />
-                          <span>Some items are sold out</span>
-                        </div>
-                        <p className="text-[11px] text-rose-600">Please remove them to place your order.</p>
-                      </div>
-                    )}
-
-                    {/* Pickup Time Selector */}
-                    <div className="mb-4 p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
-                      <div className="flex items-center justify-between mb-1.5">
-                        <label className="text-[11px] font-black uppercase tracking-wider text-slate-600">
-                          Pickup Time
-                        </label>
-                        <span className="text-[10px] text-[#1d68f2] font-bold bg-blue-50 px-2 py-0.5 rounded border border-blue-100/60">
-                          {slotConfig.slotMode === 'CUSTOM'
-                            ? 'Custom Slots'
-                            : `${slotConfig.slotDurationMinutes || 15}m Fixed Slots`}
-                        </span>
+                        })}
                       </div>
 
-                      {/* 12-Hour AM/PM Selector */}
-                      <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl p-1.5 shadow-xs">
-                        {/* Hour selector */}
-                        <div className="flex-1 min-w-0">
-                          <select
-                            value={parse12hParts(pickupTime).hour}
-                            onChange={e => {
-                              const { minute, period } = parse12hParts(pickupTime);
-                              setPickupTime(compose24hString(Number(e.target.value), minute, period));
-                              if (error) setError('');
-                            }}
-                            disabled={isSuspended}
-                            aria-label="Select Pickup Hour"
-                            className="w-full bg-slate-50 hover:bg-slate-100 text-slate-800 font-black text-xs rounded-lg px-2 py-1.5 outline-none cursor-pointer border border-slate-100 text-center"
-                          >
-                            {[12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(h => (
-                              <option key={h} value={h}>{String(h).padStart(2, '0')}</option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <span className="font-black text-slate-400 text-sm">:</span>
-
-                        {/* Minute selector */}
-                        <div className="flex-1 min-w-0">
-                          <select
-                            value={String(parse12hParts(pickupTime).minute).padStart(2, '0')}
-                            onChange={e => {
-                              const { hour, period } = parse12hParts(pickupTime);
-                              setPickupTime(compose24hString(hour, Number(e.target.value), period));
-                              if (error) setError('');
-                            }}
-                            disabled={isSuspended}
-                            aria-label="Select Pickup Minute"
-                            className="w-full bg-slate-50 hover:bg-slate-100 text-slate-800 font-black text-xs rounded-lg px-2 py-1.5 outline-none cursor-pointer border border-slate-100 text-center"
-                          >
-                            {availableMinuteOptions.map(m => (
-                              <option key={m} value={m}>{m}</option>
-                            ))}
-                          </select>
-                        </div>
-
-                        {/* AM / PM Toggle */}
-                        <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200/60 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const { hour, minute } = parse12hParts(pickupTime);
-                              setPickupTime(compose24hString(hour, minute, 'AM'));
-                              if (error) setError('');
-                            }}
-                            disabled={isSuspended}
-                            className={`px-2.5 py-1 rounded-md text-[10px] font-black transition-all cursor-pointer ${
-                              parse12hParts(pickupTime).period === 'AM'
-                                ? 'bg-[#1d68f2] text-white shadow-xs'
-                                : 'text-slate-600 hover:text-slate-900'
-                            }`}
-                          >
-                            AM
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const { hour, minute } = parse12hParts(pickupTime);
-                              setPickupTime(compose24hString(hour, minute, 'PM'));
-                              if (error) setError('');
-                            }}
-                            disabled={isSuspended}
-                            className={`px-2.5 py-1 rounded-md text-[10px] font-black transition-all cursor-pointer ${
-                              parse12hParts(pickupTime).period === 'PM'
-                                ? 'bg-[#1d68f2] text-white shadow-xs'
-                                : 'text-slate-600 hover:text-slate-900'
-                            }`}
-                          >
-                            PM
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Quick suggestion slots */}
-                      {suggestedQuickSlots.length > 0 && (
-                        <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-                          {suggestedQuickSlots.map(t => (
-                            <button
-                              key={t}
-                              type="button"
-                              onClick={() => {
-                                setPickupTime(t);
-                                if (error) setError('');
-                              }}
-                              className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition-all ${
-                                normalizeTimeTo24h(pickupTime) === t
-                                  ? 'bg-[#1d68f2] text-white border-[#1d68f2] shadow-xs'
-                                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                              }`}
-                            >
-                              {formatSingleTime(t)}
-                            </button>
-                          ))}
+                      {/* Sold-out alert in mobile cart */}
+                      {cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out) && (
+                        <div className="mb-3 p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700">
+                          <div className="flex items-center gap-1 font-bold mb-1">
+                            <IconAlertTriangle size={14} className="text-rose-600 shrink-0" />
+                            <span>Some items are sold out</span>
+                          </div>
+                          <p className="text-[11px] text-rose-600">Please remove them to place your order.</p>
                         </div>
                       )}
 
-                      {/* Smart Kitchen schedule info */}
-                      {smartSchedule.isValid && (
-                        <div className="mt-2.5 pt-2 border-t border-slate-200/80 flex items-center justify-between text-[10px] font-semibold text-slate-500">
-                          <span>⚡ Prep starts: <strong className="text-amber-600">{smartSchedule.prepStartFormatted}</strong></span>
-                          <span>Hot by: <strong className="text-emerald-600">{smartSchedule.readyByFormatted}</strong></span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Order Bill Summary */}
-                    {cart.length > 0 && (
-                      <div className="space-y-1.5 py-3 border-t border-b border-slate-100 text-xs mb-4">
-                        <div className="flex justify-between text-slate-500 font-medium">
-                          <span>Item Subtotal</span>
-                          <span className="font-bold text-slate-800">₹{ledger.food_subtotal.toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between text-slate-500 font-medium">
-                          <span>Payment Method</span>
-                          <span className="text-emerald-600 font-bold">Pay at Counter</span>
-                        </div>
-                        <div className="flex justify-between items-center pt-2 border-t border-slate-100 text-sm">
-                          <span className="font-black text-slate-900">Total Amount</span>
-                          <span className="text-lg font-black text-[#1d68f2]">
-                            ₹{ledger.gross_payable.toFixed(2)}
+                      {/* Mobile Pickup Time Selector in 12h AM/PM */}
+                      <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[11px] font-bold text-slate-700">Pickup Time (12h AM/PM)</label>
+                          <span className="text-[10px] text-[#1d68f2] font-bold bg-blue-50 px-2 py-0.5 rounded border border-blue-100/60">
+                            {slotConfig.slotMode === 'CUSTOM'
+                              ? 'Custom'
+                              : `${slotConfig.slotDurationMinutes || 15}m Fixed`}
                           </span>
                         </div>
-                      </div>
-                    )}
 
-                    {/* Checkout Submit Button */}
-                    <form onSubmit={handlePlaceOrder}>
-                      {error && (
-                        <div className="mb-3 p-2 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center gap-1.5 font-bold">
-                          <IconAlertTriangle size={14} className="shrink-0 text-rose-600" />
-                          <span>{error}</span>
-                        </div>
-                      )}
-
-                      {(() => {
-                        const isSelectedSlotClosed = isLunchClosedForToday;
-                        const isScheduleInvalid = !smartSchedule.isValid;
-                        const isOrderDisabled =
-                          isSuspended ||
-                          isSunday ||
-                          isBeforeOpeningTime ||
-                          isSelectedSlotClosed ||
-                          isScheduleInvalid ||
-                          cart.length === 0 ||
-                          !pickupTime ||
-                          submitting ||
-                          cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out);
-
-                        return (
-                          <button
-                            type="submit"
-                            disabled={isOrderDisabled}
-                            className={`w-full py-3.5 px-4 rounded-2xl font-black text-xs sm:text-sm shadow-lg transition-all flex items-center justify-center gap-2 ${
-                              isOrderDisabled
-                                ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
-                                : 'bg-gradient-to-r from-[#1d68f2] to-[#2563eb] text-white hover:from-blue-600 hover:to-blue-700 shadow-blue-500/30 active:scale-98'
-                            }`}
-                          >
-                            {isSuspended ? (
-                              'Account Deactivated'
-                            ) : isSunday ? (
-                              'Closed on Sundays'
-                            ) : isBeforeOpeningTime ? (
-                              'Lunch Booking Opens at 9:30 AM'
-                            ) : isSelectedSlotClosed ? (
-                              'Lunch Ordering Closed'
-                            ) : isScheduleInvalid ? (
-                              smartSchedule.statusBadge || smartSchedule.badge || 'Invalid Pickup Slot'
-                            ) : submitting ? (
-                              'Placing Order...'
-                            ) : (
-                              <>
-                                <span>Place Order</span>
-                                <span>•</span>
-                                <span>₹{ledger.gross_payable.toFixed(2)}</span>
-                                <ArrowRight size={16} />
-                              </>
-                            )}
-                          </button>
-                        );
-                      })()}
-                    </form>
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          </div>
-
-          {/* Responsive Mobile Drawer Trigger (< lg screens) */}
-          <div className="lg:hidden fixed bottom-2 left-2 right-2 sm:left-3 sm:right-3 z-40 pointer-events-none">
-            <div className="pointer-events-auto w-full h-15 bg-white/95 backdrop-blur-md border border-slate-200/90 rounded-2xl px-3 sm:px-4 flex items-center justify-between shadow-lg">
-              {displayOrder ? (
-                <>
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm shrink-0 ${
-                      displayOrder.status === 'COLLECTED'
-                        ? 'bg-emerald-100 text-emerald-700'
-                        : displayOrder.status === 'READY'
-                        ? 'bg-emerald-100 text-emerald-700'
-                        : 'bg-blue-100 text-[#1d68f2]'
-                    }`}>
-                      {displayOrder.status === 'COLLECTED' ? <CheckCircle2 size={18} /> : <Flame size={18} />}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-xs font-black text-slate-900 leading-tight flex items-center gap-1.5 truncate">
-                        <span>Order #{displayOrder.order_number}</span>
-                        <span className={`text-[10px] font-bold ${displayOrder.status === 'COLLECTED' ? 'text-emerald-700' : 'text-[#1d68f2]'}`}>
-                          ({displayOrder.status === 'COLLECTED' ? 'COLLECTED' : getOrderStatusText(displayOrder as any)})
-                        </span>
-                      </div>
-                      <div className="text-[11px] text-slate-500 font-medium truncate">
-                        {displayOrder.status === 'COLLECTED'
-                          ? `Collected at ${formatSingleTime((displayOrder as any).collected_at || new Date().toISOString())}`
-                          : `Pickup at ${formatSingleTime(displayOrder.pickup_time)}`}
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setCartOpen(true)}
-                    className="px-3.5 py-2 rounded-xl bg-[#1d68f2] hover:bg-blue-600 active:scale-95 text-white font-bold text-xs shadow-xs transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
-                  >
-                    <span>{displayOrder.status === 'COLLECTED' ? 'View Receipt' : 'View OTP'}</span>
-                    <IconChevronUp size={14} />
-                  </button>
-                </>
-              ) : (
-                <>
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-200/80 text-[#1d68f2] flex items-center justify-center font-black text-sm shadow-2xs">
-                      {cartTotalItems}
-                    </div>
-                    <div>
-                      <div className="text-xs font-bold text-slate-800 leading-tight">Your Order</div>
-                      <div className="text-xs font-black text-[#1d68f2]">
-                        ₹{ledger.gross_payable.toFixed(2)}
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setCartOpen(true)}
-                    className="px-4 py-2 rounded-xl bg-[#1d68f2] hover:bg-blue-600 active:scale-95 text-white font-bold text-xs shadow-xs transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
-                  >
-                    <span>View & Checkout</span>
-                    <IconChevronUp size={14} />
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Mobile Bottom Sheet Modal when cartOpen is true on small screens */}
-          {cartOpen && (
-            <div className="lg:hidden fixed inset-0 z-50 flex flex-col justify-end bg-slate-950/50 backdrop-blur-sm animate-in fade-in">
-              <div className="bg-white rounded-t-3xl max-h-[85vh] overflow-y-auto p-5 shadow-2xl flex flex-col justify-between">
-                {displayOrder ? (
-                  <div>
-                    <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-base font-black text-slate-900">Order #{displayOrder.order_number}</h3>
-                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
-                          displayOrder.status === 'COLLECTED'
-                            ? 'bg-emerald-100 text-emerald-700 border border-emerald-300'
-                            : 'bg-blue-100 text-[#1d68f2]'
-                        }`}>
-                          {displayOrder.status === 'COLLECTED' ? 'COLLECTED' : getOrderStatusText(displayOrder as any)}
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setCartOpen(false)}
-                        className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100"
-                      >
-                        <IconX size={18} />
-                      </button>
-                    </div>
-
-                    {/* Progress Step Bar with Distinct Colors per Stage */}
-                    <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3 mb-4">
-                      <div className="flex items-center justify-between relative px-2">
-                        <div className="absolute left-[18px] right-[18px] top-2.5 h-0.5 bg-slate-200 -z-0">
-                          <div
-                            className={`h-full transition-all duration-500 ${
-                              displayOrder.status === 'COLLECTED'
-                                ? 'bg-gradient-to-r from-blue-500 via-emerald-500 via-amber-500 via-purple-500 to-teal-500'
-                                : displayOrder.status === 'READY'
-                                ? 'bg-gradient-to-r from-blue-500 via-emerald-500 via-amber-500 to-purple-600'
-                                : displayOrder.status === 'PREPARING'
-                                ? 'bg-gradient-to-r from-blue-500 via-emerald-500 to-amber-500'
-                                : displayOrder.status === 'ACCEPTED'
-                                ? 'bg-gradient-to-r from-blue-500 to-emerald-500'
-                                : 'bg-blue-500'
-                            }`}
-                            style={{
-                              width:
-                                displayOrder.status === 'PLACED' ? '0%' :
-                                displayOrder.status === 'ACCEPTED' ? '25%' :
-                                displayOrder.status === 'PREPARING' ? '50%' :
-                                displayOrder.status === 'READY' ? '75%' : '100%'
-                            }}
-                          />
-                        </div>
-
-                        {[
-                          {
-                            key: 'PLACED',
-                            label: 'Placed',
-                            done: true,
-                            current: displayOrder.status === 'PLACED',
-                            color: 'bg-blue-600 text-white border-blue-600 shadow-blue-500/25',
-                            textColor: 'text-blue-700',
-                          },
-                          {
-                            key: 'ACCEPTED',
-                            label: 'Accepted',
-                            done: ['ACCEPTED', 'PREPARING', 'READY', 'COLLECTED'].includes(displayOrder.status),
-                            current: displayOrder.status === 'ACCEPTED',
-                            color: 'bg-emerald-600 text-white border-emerald-600 shadow-emerald-500/25',
-                            textColor: 'text-emerald-700',
-                          },
-                          {
-                            key: 'PREPARING',
-                            label: 'Cooking',
-                            done: ['PREPARING', 'READY', 'COLLECTED'].includes(displayOrder.status),
-                            current: displayOrder.status === 'PREPARING',
-                            color: 'bg-amber-500 text-white border-amber-500 shadow-amber-500/25',
-                            textColor: 'text-amber-700',
-                          },
-                          {
-                            key: 'READY',
-                            label: 'Ready',
-                            done: ['READY', 'COLLECTED'].includes(displayOrder.status),
-                            current: displayOrder.status === 'READY',
-                            color: 'bg-purple-600 text-white border-purple-600 shadow-purple-500/25',
-                            textColor: 'text-purple-700',
-                          },
-                          {
-                            key: 'COLLECTED',
-                            label: 'Collected',
-                            done: displayOrder.status === 'COLLECTED',
-                            current: displayOrder.status === 'COLLECTED',
-                            color: 'bg-teal-600 text-white border-teal-600 shadow-teal-500/25',
-                            textColor: 'text-teal-700',
-                          }
-                        ].map((step, idx) => (
-                          <div key={idx} className="flex flex-col items-center z-10">
-                            <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black border transition-all ${
-                              step.done
-                                ? `${step.color} shadow-xs scale-105`
-                                : 'bg-white border-slate-300 text-slate-400'
-                            } ${step.current ? 'ring-2 ring-offset-1 ring-slate-300 scale-110' : ''}`}>
-                              {step.done ? '✓' : idx + 1}
-                            </div>
-                            <span className={`text-[10px] font-bold mt-1 transition-colors ${
-                              step.done ? step.textColor : 'text-slate-400'
-                            }`}>
-                              {step.label}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* QR Code / Ready State / Collected State */}
-                    {displayOrder.status === 'COLLECTED' ? (
-                      <div className="relative overflow-hidden bg-gradient-to-b from-emerald-50 via-teal-50/50 to-emerald-100/30 border border-emerald-200 rounded-2xl p-4 text-center space-y-3 mb-4 shadow-xs">
-                        <div className="relative mx-auto w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-400 p-[1.5px] shadow-md shadow-emerald-500/25 flex items-center justify-center">
-                          <div className="w-full h-full rounded-[14px] bg-gradient-to-b from-emerald-500 to-teal-600 flex items-center justify-center text-white relative overflow-hidden">
-                            <div className="absolute top-0 inset-x-0 h-1/2 bg-white/30 rounded-t-[14px]" />
-                            <CheckCircle2 size={24} className="relative z-10 text-white" strokeWidth={2.6} />
-                          </div>
-                        </div>
-
-                        <div>
-                          <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-100 border border-emerald-300/80 text-emerald-800 text-[10px] font-black uppercase tracking-wider mb-1">
-                            <span>Order Handed Over</span> ✓
-                          </div>
-                          <h4 className="font-black text-slate-900 text-base">
-                            Order Collected Successfully! 🎉
-                          </h4>
-                          <p className="text-xs text-slate-600 mt-0.5">
-                            Your food has been handed over at the counter. Enjoy your meal!
-                          </p>
-                        </div>
-
-                        <div className="pt-1 flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setCartOpen(false);
-                              setShowHistory(true);
-                              setTimeout(() => {
-                                const el = document.getElementById(`order-${displayOrder.id}`);
-                                if (el) el.scrollIntoView({ behavior: 'smooth' });
-                              }, 150);
-                            }}
-                            className="flex-1 py-2 px-3 rounded-xl bg-white border border-emerald-300 text-emerald-700 font-bold text-xs flex items-center justify-center gap-1 cursor-pointer"
-                          >
-                            <Star size={12} className="text-amber-500 fill-amber-500" />
-                            <span>Rate Meal</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              handleDismissCollectedOrder(displayOrder.id);
-                              setCartOpen(false);
-                            }}
-                            className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-md shadow-emerald-600/20 cursor-pointer flex items-center justify-center gap-1"
-                          >
-                            <span>Order More →</span>
-                            {autoCloseCountdown > 0 && (
-                              <span className="px-1.5 py-0.2 rounded-full bg-emerald-800/50 text-[10px] font-mono">
-                                {autoCloseCountdown}s
-                              </span>
-                            )}
-                          </button>
-                        </div>
-                        <p className="text-[10px] text-slate-400 font-medium text-center">
-                          Auto-closing and returning to menu in <span className="font-bold text-emerald-600">{autoCloseCountdown}s</span>
-                        </p>
-                      </div>
-                    ) : displayOrder.status === 'READY' ? (
-                      <div className="text-center p-4 bg-emerald-50 border border-emerald-200 rounded-2xl mb-4 space-y-3">
-                        <span className="text-xs font-black text-emerald-700 uppercase tracking-wider block">
-                          Ready For Pickup!
-                        </span>
-                        <div
-                          onClick={() => setShowQrModal(true)}
-                          className="bg-white p-3 rounded-2xl border-2 border-emerald-400 shadow-sm inline-block mx-auto cursor-pointer"
-                        >
-                          <QRCodeSVG
-                            value={`SKIPTRAY:${displayOrder.id}:${currentOtp}`}
-                            size={160}
-                          />
-                        </div>
-                        <div className="bg-white py-2.5 px-3 rounded-xl border border-emerald-200">
-                          <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Pickup Verification OTP</span>
-                          {currentOtp ? (
-                            <span className="text-2xl font-mono font-black text-emerald-700 tracking-[0.25em] block">
-                              {currentOtp}
-                            </span>
-                          ) : (
-                            <div className="flex flex-col items-center gap-1.5 py-1">
-                              <button
-                                type="button"
-                                onClick={handleRequestOtp}
-                                disabled={requestingOtp}
-                                className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-lg shadow-xs disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
-                              >
-                                {requestingOtp ? (
-                                  <>
-                                    <IconHourglass size={12} className="animate-spin" />
-                                    <span>Generating OTP...</span>
-                                  </>
-                                ) : (
-                                  <span>Get Pickup OTP</span>
-                                )}
-                              </button>
-                              <span className="text-[10px] text-slate-400 font-medium">Tap to reveal 6-digit pickup code</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="text-center p-4 bg-blue-50 border border-blue-200 rounded-2xl mb-4">
-                        <IconHourglass size={24} className="animate-spin text-[#1d68f2] mx-auto mb-2" />
-                        <h4 className="font-black text-slate-900 text-sm">Kitchen is preparing your meal</h4>
-                        <p className="text-xs text-slate-500 mt-1">Scheduled for pickup at {formatSingleTime(displayOrder.pickup_time)}</p>
-                      </div>
-                    )}
-
-                    {/* Cancel button: allowed anytime before staff accepts order (PLACED only) */}
-                    {displayOrder.status === 'PLACED' && (
-                      <button
-                        type="button"
-                        onClick={() => { handleCancelOrder(); setCartOpen(false); }}
-                        className="w-full py-2.5 text-rose-600 bg-rose-50 border border-rose-200 font-bold text-xs rounded-xl hover:bg-rose-100"
-                      >
-                        Cancel Order
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <div>
-                    <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
-                      <h3 className="text-base font-black text-slate-900">Your Order ({cartTotalItems})</h3>
-                      <button
-                        type="button"
-                        onClick={() => setCartOpen(false)}
-                        className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100"
-                      >
-                        <IconX size={18} />
-                      </button>
-                    </div>
-
-                    {/* Cart Items list */}
-                    <div className="space-y-2 mb-4">
-                      {cart.map(c => {
-                        const isItemSoldOut = menuItems.find(m => m.id === c.item.id)?.is_sold_out;
-                        return (
-                          <div
-                            key={c.item.id}
-                            className={`flex items-center justify-between p-2 rounded-xl border ${
-                              isItemSoldOut ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'
-                            }`}
-                          >
-                            <div className="flex-1 min-w-0 pr-2">
-                              <div className="text-xs font-bold text-slate-900 truncate">{c.item.name}</div>
-                              <div className="text-[11px] text-slate-500 font-semibold mt-0.5">₹{Number(c.item.price || 0).toFixed(2)} × {c.quantity}</div>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => removeFromCart(c.item.id)}
-                                className="w-7 h-7 flex items-center justify-center bg-white border border-slate-200 rounded-lg font-bold text-xs text-slate-600 hover:bg-slate-100 active:scale-90"
-                              >
-                                −
-                              </button>
-                              <span className="w-5 text-center text-xs font-black text-slate-800 tabular-nums">{c.quantity}</span>
-                              <button
-                                type="button"
-                                onClick={() => addToCart(c.item)}
-                                disabled={cartTotalItems >= 5}
-                                className="w-7 h-7 flex items-center justify-center bg-white border border-slate-200 rounded-lg font-bold text-xs text-[#1d68f2] hover:bg-blue-50 disabled:opacity-30 active:scale-90"
-                              >
-                                +
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setCart(cart.filter(x => x.item.id !== c.item.id))}
-                                className="w-7 h-7 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 flex items-center justify-center ml-0.5"
-                                title="Remove item"
-                              >
-                                <Trash2 size={13} />
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {/* Sold-out alert in mobile cart */}
-                    {cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out) && (
-                      <div className="mb-3 p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700">
-                        <div className="flex items-center gap-1 font-bold mb-1">
-                          <IconAlertTriangle size={14} className="text-rose-600 shrink-0" />
-                          <span>Some items are sold out</span>
-                        </div>
-                        <p className="text-[11px] text-rose-600">Please remove them to place your order.</p>
-                      </div>
-                    )}
-
-                    {/* Mobile Pickup Time Selector in 12h AM/PM */}
-                    <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                      <div className="flex items-center justify-between">
-                        <label className="text-[11px] font-bold text-slate-700">Pickup Time (12h AM/PM)</label>
-                        <span className="text-[10px] text-[#1d68f2] font-bold bg-blue-50 px-2 py-0.5 rounded border border-blue-100/60">
-                          {slotConfig.slotMode === 'CUSTOM'
-                            ? 'Custom'
-                            : `${slotConfig.slotDurationMinutes || 15}m Fixed`}
-                        </span>
-                      </div>
-
-                      {/* 12-Hour AM/PM Selector */}
-                      <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl p-1.5 shadow-xs">
-                        <div className="flex-1 min-w-0">
-                          <select
-                            value={parse12hParts(pickupTime).hour}
-                            onChange={e => {
-                              const { minute, period } = parse12hParts(pickupTime);
-                              setPickupTime(compose24hString(Number(e.target.value), minute, period));
-                              if (error) setError('');
-                            }}
-                            disabled={isSuspended}
-                            aria-label="Select Pickup Hour"
-                            className="w-full bg-slate-50 hover:bg-slate-100 text-slate-800 font-black text-xs rounded-lg px-2 py-1.5 outline-none cursor-pointer border border-slate-100 text-center"
-                          >
-                            {[12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(h => (
-                              <option key={h} value={h}>{String(h).padStart(2, '0')}</option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <span className="font-black text-slate-400 text-sm">:</span>
-
-                        <div className="flex-1 min-w-0">
-                          <select
-                            value={String(parse12hParts(pickupTime).minute).padStart(2, '0')}
-                            onChange={e => {
-                              const { hour, period } = parse12hParts(pickupTime);
-                              setPickupTime(compose24hString(hour, Number(e.target.value), period));
-                              if (error) setError('');
-                            }}
-                            disabled={isSuspended}
-                            aria-label="Select Pickup Minute"
-                            className="w-full bg-slate-50 hover:bg-slate-100 text-slate-800 font-black text-xs rounded-lg px-2 py-1.5 outline-none cursor-pointer border border-slate-100 text-center"
-                          >
-                            {availableMinuteOptions.map(m => (
-                              <option key={m} value={m}>{m}</option>
-                            ))}
-                          </select>
-                        </div>
-
-                        {/* AM / PM Toggle */}
-                        <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200/60 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const { hour, minute } = parse12hParts(pickupTime);
-                              setPickupTime(compose24hString(hour, minute, 'AM'));
-                              if (error) setError('');
-                            }}
-                            disabled={isSuspended}
-                            className={`px-2.5 py-1 rounded-md text-[10px] font-black transition-all cursor-pointer ${
-                              parse12hParts(pickupTime).period === 'AM'
-                                ? 'bg-[#1d68f2] text-white shadow-xs'
-                                : 'text-slate-600 hover:text-slate-900'
-                            }`}
-                          >
-                            AM
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const { hour, minute } = parse12hParts(pickupTime);
-                              setPickupTime(compose24hString(hour, minute, 'PM'));
-                              if (error) setError('');
-                            }}
-                            disabled={isSuspended}
-                            className={`px-2.5 py-1 rounded-md text-[10px] font-black transition-all cursor-pointer ${
-                              parse12hParts(pickupTime).period === 'PM'
-                                ? 'bg-[#1d68f2] text-white shadow-xs'
-                                : 'text-slate-600 hover:text-slate-900'
-                            }`}
-                          >
-                            PM
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Quick suggestion slots */}
-                      {suggestedQuickSlots.length > 0 && (
-                        <div className="flex items-center gap-1.5 flex-wrap pt-1">
-                          {suggestedQuickSlots.map(t => (
-                            <button
-                              key={t}
-                              type="button"
-                              onClick={() => {
-                                setPickupTime(t);
+                        {/* 12-Hour AM/PM Selector */}
+                        <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl p-1.5 shadow-xs">
+                          <div className="flex-1 min-w-0">
+                            <select
+                              value={parse12hParts(pickupTime).hour}
+                              onChange={e => {
+                                const { minute, period } = parse12hParts(pickupTime);
+                                setPickupTime(compose24hString(Number(e.target.value), minute, period));
                                 if (error) setError('');
                               }}
-                              className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition-all cursor-pointer ${
-                                normalizeTimeTo24h(pickupTime) === t
-                                  ? 'bg-[#1d68f2] text-white border-[#1d68f2] shadow-xs'
-                                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                              }`}
+                              disabled={isSuspended}
+                              aria-label="Select Pickup Hour"
+                              className="w-full bg-slate-50 hover:bg-slate-100 text-slate-800 font-black text-xs rounded-lg px-2 py-1.5 outline-none cursor-pointer border border-slate-100 text-center"
                             >
-                              {formatSingleTime(t)}
+                              {[12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(h => (
+                                <option key={h} value={h}>{String(h).padStart(2, '0')}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <span className="font-black text-slate-400 text-sm">:</span>
+
+                          <div className="flex-1 min-w-0">
+                            <select
+                              value={String(parse12hParts(pickupTime).minute).padStart(2, '0')}
+                              onChange={e => {
+                                const { hour, period } = parse12hParts(pickupTime);
+                                setPickupTime(compose24hString(hour, Number(e.target.value), period));
+                                if (error) setError('');
+                              }}
+                              disabled={isSuspended}
+                              aria-label="Select Pickup Minute"
+                              className="w-full bg-slate-50 hover:bg-slate-100 text-slate-800 font-black text-xs rounded-lg px-2 py-1.5 outline-none cursor-pointer border border-slate-100 text-center"
+                            >
+                              {availableMinuteOptions.map(m => (
+                                <option key={m} value={m}>{m}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* AM / PM Toggle */}
+                          <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200/60 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const { hour, minute } = parse12hParts(pickupTime);
+                                setPickupTime(compose24hString(hour, minute, 'AM'));
+                                if (error) setError('');
+                              }}
+                              disabled={isSuspended}
+                              className={`px-2.5 py-1 rounded-md text-[10px] font-black transition-all cursor-pointer ${parse12hParts(pickupTime).period === 'AM'
+                                  ? 'bg-[#1d68f2] text-white shadow-xs'
+                                  : 'text-slate-600 hover:text-slate-900'
+                                }`}
+                            >
+                              AM
                             </button>
-                          ))}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const { hour, minute } = parse12hParts(pickupTime);
+                                setPickupTime(compose24hString(hour, minute, 'PM'));
+                                if (error) setError('');
+                              }}
+                              disabled={isSuspended}
+                              className={`px-2.5 py-1 rounded-md text-[10px] font-black transition-all cursor-pointer ${parse12hParts(pickupTime).period === 'PM'
+                                  ? 'bg-[#1d68f2] text-white shadow-xs'
+                                  : 'text-slate-600 hover:text-slate-900'
+                                }`}
+                            >
+                              PM
+                            </button>
+                          </div>
                         </div>
-                      )}
 
-                      {/* Smart Kitchen schedule info */}
-                      {smartSchedule.isValid && (
-                        <div className="pt-2 border-t border-slate-200/80 flex items-center justify-between text-[10px] font-semibold text-slate-500">
-                          <span>⚡ Prep: <strong className="text-amber-600">{smartSchedule.prepStartFormatted}</strong></span>
-                          <span>Hot: <strong className="text-emerald-600">{smartSchedule.readyByFormatted}</strong></span>
-                        </div>
-                      )}
-                    </div>
+                        {/* Quick suggestion slots */}
+                        {suggestedQuickSlots.length > 0 && (
+                          <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                            {suggestedQuickSlots.map(t => (
+                              <button
+                                key={t}
+                                type="button"
+                                onClick={() => {
+                                  setPickupTime(t);
+                                  if (error) setError('');
+                                }}
+                                className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition-all cursor-pointer ${normalizeTimeTo24h(pickupTime) === t
+                                    ? 'bg-[#1d68f2] text-white border-[#1d68f2] shadow-xs'
+                                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                                  }`}
+                              >
+                                {formatSingleTime(t)}
+                              </button>
+                            ))}
+                          </div>
+                        )}
 
-                    {/* Mobile Order Bill Summary / Price Breakdown */}
-                    {cart.length > 0 && (
-                      <div className="space-y-1.5 py-3 border-t border-b border-slate-100 text-xs mb-4">
-                        <div className="flex justify-between text-slate-500 font-medium">
-                          <span>Item Subtotal</span>
-                          <span className="font-bold text-slate-800">₹{ledger.food_subtotal.toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between text-slate-500 font-medium">
-                          <span>Payment Method</span>
-                          <span className="text-emerald-600 font-bold">Pay at Counter</span>
-                        </div>
-                        <div className="flex justify-between items-center pt-2 border-t border-slate-100 text-sm">
-                          <span className="font-black text-slate-900">Total Amount</span>
-                          <span className="text-lg font-black text-[#1d68f2]">
-                            ₹{ledger.gross_payable.toFixed(2)}
-                          </span>
-                        </div>
+                        {/* Smart Kitchen schedule info */}
+                        {smartSchedule.isValid && (
+                          <div className="pt-2 border-t border-slate-200/80 flex items-center justify-between text-[10px] font-semibold text-slate-500">
+                            <span>⚡ Prep: <strong className="text-amber-600">{smartSchedule.prepStartFormatted}</strong></span>
+                            <span>Hot: <strong className="text-emerald-600">{smartSchedule.readyByFormatted}</strong></span>
+                          </div>
+                        )}
                       </div>
-                    )}
 
-                    {/* Mobile Place Order Button */}
-                    <form onSubmit={handlePlaceOrder}>
-                      {error && (
-                        <div className="mb-3 p-2 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center gap-1.5 font-bold">
-                          <IconAlertTriangle size={14} className="shrink-0 text-rose-600" />
-                          <span>{error}</span>
+                      {/* Mobile Order Bill Summary / Price Breakdown */}
+                      {cart.length > 0 && (
+                        <div className="space-y-1.5 py-3 border-t border-b border-slate-100 text-xs mb-4">
+                          <div className="flex justify-between text-slate-500 font-medium">
+                            <span>Item Subtotal</span>
+                            <span className="font-bold text-slate-800">₹{ledger.food_subtotal.toFixed(2)}</span>
+                          </div>
+                          <div className="flex justify-between text-slate-500 font-medium">
+                            <span>Payment Method</span>
+                            <span className="text-emerald-600 font-bold">Pay at Counter</span>
+                          </div>
+                          <div className="flex justify-between items-center pt-2 border-t border-slate-100 text-sm">
+                            <span className="font-black text-slate-900">Total Amount</span>
+                            <span className="text-lg font-black text-[#1d68f2]">
+                              ₹{ledger.gross_payable.toFixed(2)}
+                            </span>
+                          </div>
                         </div>
                       )}
 
-                      {(() => {
-                        const isSelectedSlotClosed = isLunchClosedForToday;
-                        const isScheduleInvalid = !smartSchedule.isValid;
-                        const isOrderDisabled =
-                          isSuspended ||
-                          isSunday ||
-                          isBeforeOpeningTime ||
-                          isSelectedSlotClosed ||
-                          isScheduleInvalid ||
-                          cart.length === 0 ||
-                          !pickupTime ||
-                          submitting ||
-                          cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out);
+                      {/* Mobile Place Order Button */}
+                      <form onSubmit={handlePlaceOrder}>
+                        {error && (
+                          <div className="mb-3 p-2 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center gap-1.5 font-bold">
+                            <IconAlertTriangle size={14} className="shrink-0 text-rose-600" />
+                            <span>{error}</span>
+                          </div>
+                        )}
 
-                        return (
-                          <button
-                            type="submit"
-                            disabled={isOrderDisabled}
-                            className={`w-full py-3.5 px-4 rounded-xl font-black text-xs shadow-md transition-all flex items-center justify-center gap-2 ${
-                              isOrderDisabled
-                                ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
-                                : 'bg-gradient-to-r from-[#1d68f2] to-[#2563eb] text-white hover:from-blue-600 hover:to-blue-700 shadow-blue-500/20 active:scale-98 cursor-pointer'
-                            }`}
-                          >
-                            {isSuspended ? (
-                              'Account Deactivated'
-                            ) : isSunday ? (
-                              'Closed on Sundays'
-                            ) : isBeforeOpeningTime ? (
-                              'Lunch Booking Opens at 9:30 AM'
-                            ) : isSelectedSlotClosed ? (
-                              'Lunch Ordering Closed'
-                            ) : isScheduleInvalid ? (
-                              smartSchedule.statusBadge || smartSchedule.badge || 'Invalid Pickup Slot'
-                            ) : submitting ? (
-                              'Placing Order...'
-                            ) : (
-                              `Confirm & Place Order (₹${ledger.gross_payable.toFixed(2)})`
-                            )}
-                          </button>
-                        );
-                      })()}
-                    </form>
-                  </div>
-                )}
+                        {(() => {
+                          const isSelectedSlotClosed = isLunchClosedForToday;
+                          const isScheduleInvalid = !smartSchedule.isValid;
+                          const isOrderDisabled =
+                            isSuspended ||
+                            isSunday ||
+                            isBeforeOpeningTime ||
+                            isSelectedSlotClosed ||
+                            isScheduleInvalid ||
+                            cart.length === 0 ||
+                            !pickupTime ||
+                            submitting ||
+                            cart.some(c => menuItems.find(m => m.id === c.item.id)?.is_sold_out);
+
+                          return (
+                            <button
+                              type="submit"
+                              disabled={isOrderDisabled}
+                              className={`w-full py-3.5 px-4 rounded-xl font-black text-xs shadow-md transition-all flex items-center justify-center gap-2 ${isOrderDisabled
+                                  ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
+                                  : 'bg-gradient-to-r from-[#1d68f2] to-[#2563eb] text-white hover:from-blue-600 hover:to-blue-700 shadow-blue-500/20 active:scale-98 cursor-pointer'
+                                }`}
+                            >
+                              {isSuspended ? (
+                                'Account Deactivated'
+                              ) : isSunday ? (
+                                'Closed on Sundays'
+                              ) : isBeforeOpeningTime ? (
+                                'Lunch Booking Opens at 9:30 AM'
+                              ) : isSelectedSlotClosed ? (
+                                'Lunch Ordering Closed'
+                              ) : isScheduleInvalid ? (
+                                smartSchedule.statusBadge || smartSchedule.badge || 'Invalid Pickup Slot'
+                              ) : submitting ? (
+                                'Placing Order...'
+                              ) : (
+                                `Confirm & Place Order (₹${ledger.gross_payable.toFixed(2)})`
+                              )}
+                            </button>
+                          );
+                        })()}
+                      </form>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
-        </>
-      )}
+            )}
+          </>
+        )}
       </div>
 
       {/* Fullscreen Enlarge QR Modal */}

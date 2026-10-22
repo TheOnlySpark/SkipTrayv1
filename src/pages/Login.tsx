@@ -351,7 +351,7 @@ export default function Login() {
     <div className="w-full max-w-5xl mx-auto my-auto p-2 sm:p-4">
       {/* Canteen OS Container */}
       <div className="bg-[#f8fafc] border border-slate-200/80 rounded-2xl sm:rounded-[2.5rem] shadow-xl sm:shadow-2xl overflow-hidden grid grid-cols-1 lg:grid-cols-12 min-h-0 lg:min-h-[600px]">
-        
+
         {/* Left Side: Canteen OS Hero Brand & Food Showcase */}
         <div className="hidden lg:flex lg:col-span-6 bg-[#002b66] text-white p-7 sm:p-9 flex-col justify-between relative overflow-hidden">
           {/* Subtle glow / light flare accents */}
@@ -497,9 +497,8 @@ export default function Login() {
                       }}
                       autoComplete="email"
                       required
-                      className={`w-full pl-10 pr-4 py-3 bg-slate-50 border ${
-                        fieldErrors.email ? 'border-rose-400 ring-2 ring-rose-400/20 bg-rose-50/20' : 'border-slate-200 hover:border-slate-300'
-                      } rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#1d68f2] focus:bg-white transition-all text-sm font-medium text-slate-900 shadow-xs`}
+                      className={`w-full pl-10 pr-4 py-3 bg-slate-50 border ${fieldErrors.email ? 'border-rose-400 ring-2 ring-rose-400/20 bg-rose-50/20' : 'border-slate-200 hover:border-slate-300'
+                        } rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#1d68f2] focus:bg-white transition-all text-sm font-medium text-slate-900 shadow-xs`}
                     />
                   </div>
                   {fieldErrors.email && (
@@ -536,9 +535,8 @@ export default function Login() {
                       }}
                       autoComplete="current-password"
                       required
-                      className={`w-full pl-10 pr-11 py-3 bg-slate-50 border ${
-                        fieldErrors.password ? 'border-rose-400 ring-2 ring-rose-400/20 bg-rose-50/20' : 'border-slate-200 hover:border-slate-300'
-                      } rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#1d68f2] focus:bg-white transition-all text-sm font-medium text-slate-900 shadow-xs`}
+                      className={`w-full pl-10 pr-11 py-3 bg-slate-50 border ${fieldErrors.password ? 'border-rose-400 ring-2 ring-rose-400/20 bg-rose-50/20' : 'border-slate-200 hover:border-slate-300'
+                        } rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#1d68f2] focus:bg-white transition-all text-sm font-medium text-slate-900 shadow-xs`}
                     />
                     <button
                       type="button"
@@ -616,9 +614,8 @@ export default function Login() {
                       }}
                       autoComplete="email"
                       required
-                      className={`w-full pl-10 pr-4 py-2.5 bg-slate-50 border ${
-                        fieldErrors.email ? 'border-rose-400 ring-2 ring-rose-400/20' : 'border-slate-200'
-                      } rounded-xl focus:outline-none focus:ring-2 focus:ring-[#1d68f2] text-sm text-slate-900`}
+                      className={`w-full pl-10 pr-4 py-2.5 bg-slate-50 border ${fieldErrors.email ? 'border-rose-400 ring-2 ring-rose-400/20' : 'border-slate-200'
+                        } rounded-xl focus:outline-none focus:ring-2 focus:ring-[#1d68f2] text-sm text-slate-900`}
                     />
                   </div>
                   {fieldErrors.email && (
@@ -639,7 +636,7 @@ export default function Login() {
                       <input
                         id="reg-name"
                         type="text"
-                        placeholder="Madeshwar"
+                        placeholder="spark"
                         value={regName}
                         onChange={(e) => {
                           setRegName(e.target.value);
@@ -647,9 +644,8 @@ export default function Login() {
                         }}
                         maxLength={100}
                         required
-                        className={`w-full pl-10 pr-4 py-2.5 bg-slate-50 border ${
-                          fieldErrors.name ? 'border-rose-400 ring-2 ring-rose-400/20' : 'border-slate-200'
-                        } rounded-xl focus:outline-none focus:ring-2 focus:ring-[#1d68f2] text-sm text-slate-900`}
+                        className={`w-full pl-10 pr-4 py-2.5 bg-slate-50 border ${fieldErrors.name ? 'border-rose-400 ring-2 ring-rose-400/20' : 'border-slate-200'
+                          } rounded-xl focus:outline-none focus:ring-2 focus:ring-[#1d68f2] text-sm text-slate-900`}
                       />
                     </div>
                     {fieldErrors.name && (
@@ -677,9 +673,8 @@ export default function Login() {
                         }}
                         maxLength={20}
                         required
-                        className={`w-full pl-10 pr-4 py-2.5 bg-slate-50 border ${
-                          fieldErrors.idNumber ? 'border-rose-400 ring-2 ring-rose-400/20' : 'border-slate-200'
-                        } rounded-xl focus:outline-none focus:ring-2 focus:ring-[#1d68f2] text-sm text-slate-900`}
+                        className={`w-full pl-10 pr-4 py-2.5 bg-slate-50 border ${fieldErrors.idNumber ? 'border-rose-400 ring-2 ring-rose-400/20' : 'border-slate-200'
+                          } rounded-xl focus:outline-none focus:ring-2 focus:ring-[#1d68f2] text-sm text-slate-900`}
                       />
                     </div>
                     {fieldErrors.idNumber && (
@@ -710,9 +705,8 @@ export default function Login() {
                         autoComplete="new-password"
                         minLength={8}
                         required
-                        className={`w-full pl-10 pr-10 py-2.5 bg-slate-50 border ${
-                          fieldErrors.password ? 'border-rose-400 ring-2 ring-rose-400/20' : 'border-slate-200'
-                        } rounded-xl focus:outline-none focus:ring-2 focus:ring-[#1d68f2] text-sm text-slate-900`}
+                        className={`w-full pl-10 pr-10 py-2.5 bg-slate-50 border ${fieldErrors.password ? 'border-rose-400 ring-2 ring-rose-400/20' : 'border-slate-200'
+                          } rounded-xl focus:outline-none focus:ring-2 focus:ring-[#1d68f2] text-sm text-slate-900`}
                       />
                       <button
                         type="button"
@@ -748,9 +742,8 @@ export default function Login() {
                         }}
                         autoComplete="new-password"
                         required
-                        className={`w-full pl-10 pr-4 py-2.5 bg-slate-50 border ${
-                          fieldErrors.confirmPassword ? 'border-rose-400 ring-2 ring-rose-400/20' : 'border-slate-200'
-                        } rounded-xl focus:outline-none focus:ring-2 focus:ring-[#1d68f2] text-sm text-slate-900`}
+                        className={`w-full pl-10 pr-4 py-2.5 bg-slate-50 border ${fieldErrors.confirmPassword ? 'border-rose-400 ring-2 ring-rose-400/20' : 'border-slate-200'
+                          } rounded-xl focus:outline-none focus:ring-2 focus:ring-[#1d68f2] text-sm text-slate-900`}
                       />
                     </div>
                     {fieldErrors.confirmPassword && (
@@ -815,9 +808,8 @@ export default function Login() {
                         if (fieldErrors.forgotEmail) setFieldErrors(prev => ({ ...prev, forgotEmail: '' }));
                       }}
                       required
-                      className={`w-full pl-10 pr-4 py-3 bg-slate-50 border ${
-                        fieldErrors.forgotEmail ? 'border-rose-400 ring-2 ring-rose-400/20' : 'border-slate-200'
-                      } rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#1d68f2] text-sm text-slate-900`}
+                      className={`w-full pl-10 pr-4 py-3 bg-slate-50 border ${fieldErrors.forgotEmail ? 'border-rose-400 ring-2 ring-rose-400/20' : 'border-slate-200'
+                        } rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#1d68f2] text-sm text-slate-900`}
                     />
                   </div>
                   {fieldErrors.forgotEmail && (
