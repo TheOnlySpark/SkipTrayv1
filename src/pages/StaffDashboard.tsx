@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/ModalDialogContext';
 import { supabase } from '../lib/supabase';
 import { Database } from '../types/supabase';
-import { formatPickupTime, parseTimeToMinutes, LUNCH_SLOTS, fetchLunchSlotConfig, generateSlotsFromConfig, LunchSlot } from '../lib/lunchSlots';
+import { formatPickupTime, parseTimeToMinutes, normalizeTimeTo24h, LUNCH_SLOTS, fetchLunchSlotConfig, generateSlotsFromConfig, LunchSlot } from '../lib/lunchSlots';
 import { getPrepUrgencyStatus } from '../lib/smartScheduling';
 import {
   IconAlertTriangle,
@@ -1158,25 +1158,27 @@ export default function StaffDashboard() {
     return counts;
   }, [orders, activeLunchSlots]);
 
-  // Compute Live Kitchen Batch Preparation Summary
+  // Compute Live Kitchen Batch Preparation Summary (accepted orders awaiting preparation)
   const batchPrepSummary = useMemo(() => {
     const itemMap: Record<string, { count: number; veg: boolean; price: number }> = {};
-    // Only aggregate orders that are in kitchen or placed (active prep)
-    filteredOrders.forEach(o => {
-      o.order_items.forEach(oi => {
-        if (oi.menu_items) {
-          const name = oi.menu_items.name;
-          if (!itemMap[name]) {
-            itemMap[name] = {
-              count: 0,
-              veg: oi.menu_items.veg_non_veg === 'VEG',
-              price: Number(oi.menu_items.price || 0)
-            };
+    // Only aggregate orders that are accepted and awaiting preparation
+    filteredOrders
+      .filter(o => o.status === 'ACCEPTED')
+      .forEach(o => {
+        o.order_items.forEach(oi => {
+          if (oi.menu_items) {
+            const name = oi.menu_items.name;
+            if (!itemMap[name]) {
+              itemMap[name] = {
+                count: 0,
+                veg: oi.menu_items.veg_non_veg === 'VEG',
+                price: Number(oi.menu_items.price || 0)
+              };
+            }
+            itemMap[name].count += oi.quantity;
           }
-          itemMap[name].count += oi.quantity;
-        }
+        });
       });
-    });
     return Object.entries(itemMap).sort((a, b) => b[1].count - a[1].count);
   }, [filteredOrders]);
 
