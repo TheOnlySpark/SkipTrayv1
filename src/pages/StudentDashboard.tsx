@@ -950,7 +950,9 @@ export default function StudentDashboard() {
       if (isDismissed) return null;
 
       // Check if 1 minute (60s) has passed since collection
-      const collectedTime = activeOrder.collected_at ? new Date(activeOrder.collected_at).getTime() : 0;
+      const collectedTime = activeOrder.collected_at
+        ? new Date(activeOrder.collected_at).getTime()
+        : (activeOrder.created_at ? new Date(activeOrder.created_at).getTime() : 0);
       if (collectedTime > 0 && Date.now() - collectedTime > 60 * 1000) {
         return null;
       }
