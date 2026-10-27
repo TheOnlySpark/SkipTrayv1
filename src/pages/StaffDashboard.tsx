@@ -61,7 +61,7 @@ export default function StaffDashboard() {
   const [menuViewMode, setMenuViewMode] = useState<'GRID' | 'TABLE' | 'KANBAN'>('TABLE');
   const [compactKanban, setCompactKanban] = useState<boolean>(false);
   const [sortByPrepStart, setSortByPrepStart] = useState<boolean>(true);
-  const [showBatchSummary, setShowBatchSummary] = useState<boolean>(false);
+  const [showBatchSummary, setShowBatchSummary] = useState<boolean>(true);
   const [configuredSlots, setConfiguredSlots] = useState<LunchSlot[]>([]);
 
   const activeLunchSlots = useMemo(() => {
@@ -1165,12 +1165,12 @@ export default function StaffDashboard() {
     return counts;
   }, [orders, activeLunchSlots]);
 
-  // Compute Live Kitchen Batch Preparation Summary (accepted orders awaiting preparation)
+  // Compute Live Kitchen Batch Preparation Summary (orders needing preparation)
   const batchPrepSummary = useMemo(() => {
     const itemMap: Record<string, { count: number; veg: boolean; price: number }> = {};
-    // Only aggregate orders that are accepted and awaiting preparation
+    // Aggregate orders that need kitchen preparation (PLACED, ACCEPTED, PREPARING)
     filteredOrders
-      .filter(o => o.status === 'ACCEPTED')
+      .filter(o => ['PLACED', 'ACCEPTED', 'PREPARING'].includes(o.status))
       .forEach(o => {
         o.order_items.forEach(oi => {
           if (oi.menu_items) {
@@ -1197,223 +1197,151 @@ export default function StaffDashboard() {
     const overdueInfo = getOrderOverdueInfo(order);
     const qrExpired = isQrExpired(order);
     const urgency = getPrepUrgencyStatus(order as any, currentTime);
+    const orderTotal = calculateOrderTotal(order);
 
     return (
       <div
         key={order.id}
-        className={`bg-white border rounded-2xl p-4 shadow-sm flex flex-col transition-all hover:shadow-md ${overdueInfo.isOverdue ? 'border-amber-400 ring-2 ring-amber-100 bg-amber-50/20' : 'border-slate-200'
-          }`}
+        className={`bg-white border rounded-xl p-3 shadow-2xs flex flex-col transition-all hover:shadow-md ${
+          overdueInfo.isOverdue ? 'border-amber-400 ring-2 ring-amber-100 bg-amber-50/20' : 'border-slate-200/90'
+        }`}
       >
-        {/* Overdue No-Show Warning Banner */}
+        {/* Top Flags (Urgent/Overdue/Expired) */}
         {overdueInfo.isOverdue && (
-          <div className="bg-amber-50 border border-amber-200 text-amber-900 px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between gap-2 mb-3">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0"></span>
-              <IconAlertTriangle size={14} className="w-3.5 h-3.5 text-amber-700 shrink-0" />
-              <span className="truncate"><strong>No-Show:</strong> {overdueInfo.minutesOverdue}m overdue</span>
-            </div>
-            <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-bold shrink-0">&gt;10m</span>
+          <div className="bg-amber-100/90 border border-amber-300 text-amber-900 px-2 py-1 rounded-lg text-[10px] font-bold flex items-center justify-between gap-1 mb-2">
+            <span className="flex items-center gap-1 truncate">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-600 animate-pulse" />
+              <span>Overdue: {overdueInfo.minutesOverdue}m</span>
+            </span>
+            <span className="text-[9px] bg-amber-200 text-amber-900 px-1 py-0.2 rounded font-black">&gt;10m</span>
           </div>
         )}
 
-        {/* QR Expired Banner — scan will require Manual Override (DB: migration 0036) */}
         {qrExpired && (
-          <div className="bg-rose-50 border border-rose-200 text-rose-800 px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 mb-3">
-            <IconAlertTriangle size={14} className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-            <span className="truncate"><strong>QR Expired</strong> — pickup slot +30 min passed. Scan will require Override.</span>
+          <div className="bg-rose-50 border border-rose-200 text-rose-800 px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 mb-2">
+            <IconAlertTriangle size={12} className="text-rose-600 shrink-0" />
+            <span className="truncate">QR Expired • Requires Override</span>
           </div>
         )}
 
-        {/* Live Kitchen Preparation Urgency Status Banner */}
-        {order.status !== 'COLLECTED' && (
-          <div className="mb-2.5">
+        {/* Header: Order #, Slot, Mode, Status */}
+        <div className="flex items-center justify-between gap-1.5 pb-2 mb-2 border-b border-slate-100">
+          <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+            <span className="font-black text-sm text-slate-900 tracking-tight">#{order.order_number}</span>
+            <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200/80 px-1.5 py-0.5 rounded-md" title="Scheduled Pickup Slot">
+              {formatPickupTime((order as any).requested_pickup_time || order.pickup_time)}
+            </span>
+            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase ${
+              order.is_takeaway ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+            }`}>
+              {order.is_takeaway ? 'Takeaway' : 'Dine-In'}
+            </span>
+          </div>
+
+          <span className={`px-2 py-0.5 rounded-md text-[9px] font-extrabold uppercase tracking-wide shrink-0 border ${
+            order.status === 'PLACED' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+            order.status === 'PREPARING' ? 'bg-amber-50 text-amber-800 border-amber-200' :
+            order.status === 'READY' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+            'bg-slate-100 text-slate-700 border-slate-200'
+          }`}>
+            {order.status}
+          </span>
+        </div>
+
+        {/* Customer & Scheduling Line */}
+        <div className="flex items-center justify-between text-[11px] mb-2 text-slate-600">
+          <div className="truncate pr-1">
+            <span className="font-bold text-slate-900 truncate block">{order.profiles?.name || 'Customer'}</span>
+            <span className="text-[9px] text-slate-400 font-mono">ID: {order.profiles?.id_number || order.id.slice(0, 6)}</span>
+          </div>
+
+          <div className="text-right shrink-0">
             {urgency.stage === 'START_NOW' ? (
-              <div className="bg-amber-500/15 border border-amber-500/40 text-amber-900 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center justify-between gap-1.5">
-                <span className="flex items-center gap-1.5 min-w-0">
-                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping shrink-0" />
-                  <span className="truncate">⚡ {urgency.label}</span>
-                </span>
-                <span className="text-[10px] bg-amber-500 text-white px-1.5 py-0.5 rounded font-extrabold shrink-0">
-                  URGENT
-                </span>
-              </div>
-            ) : urgency.stage === 'UPCOMING' ? (
-              <div className="bg-blue-50 border border-blue-200 text-blue-800 px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-between gap-1.5">
-                <span className="flex items-center gap-1.5 min-w-0">
-                  <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
-                  <span className="truncate">{urgency.label}</span>
-                </span>
-                <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-bold shrink-0">
-                  {(order as any).planned_prep_start_time ? formatPickupTime((order as any).planned_prep_start_time) : 'UPCOMING'}
-                </span>
-              </div>
-            ) : urgency.stage === 'COOKING' ? (
-              <div className="bg-orange-50 border border-orange-200 text-orange-800 px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-between gap-1.5">
-                <span className="flex items-center gap-1.5 min-w-0">
-                  <IconCooking size={13} className="w-3.5 h-3.5 text-orange-600 shrink-0" />
-                  <span className="truncate">{urgency.label}</span>
-                </span>
-                <span className="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded font-bold shrink-0">
-                  IN KITCHEN
-                </span>
-              </div>
-            ) : urgency.stage === 'READY' ? (
-              <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-between gap-1.5">
-                <span className="flex items-center gap-1.5 min-w-0">
-                  <IconCheckCircle size={13} className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  <span className="truncate">{urgency.label}</span>
-                </span>
-                <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-bold shrink-0">
-                  HOT & READY
-                </span>
-              </div>
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-amber-500 text-white rounded text-[9px] font-black animate-pulse">
+                ⚡ Cook Now
+              </span>
+            ) : (order as any).planned_prep_start_time ? (
+              <span className="text-[9px] text-slate-500 font-semibold block">
+                Start: <strong className="text-slate-700">{formatPickupTime((order as any).planned_prep_start_time)}</strong>
+              </span>
             ) : null}
           </div>
-        )}
-
-        {/* Card Header */}
-        <div className="flex justify-between items-start gap-2 mb-2 pb-2 border-b border-slate-100">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="font-extrabold text-base text-slate-900">#{order.order_number}</span>
-              <span className="text-xs font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full" title="Student Expected Arrival Pickup Time">
-                {formatPickupTime((order as any).requested_pickup_time || order.pickup_time)}
-              </span>
-              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase ${order.is_takeaway ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-emerald-100 text-emerald-700 border border-emerald-200'}`}>
-                {order.is_takeaway ? 'TAKEAWAY' : 'DINE-IN'}
-              </span>
-            </div>
-            <h4 className="font-bold text-sm text-slate-800 truncate mt-1">{order.profiles?.name || 'Student'}</h4>
-            <div className="text-[11px] text-slate-400 font-mono">ID: {order.profiles?.id_number || order.id.split('-')[0].toUpperCase()}</div>
-          </div>
-          <div className={`px-2.5 py-0.5 rounded-full text-[11px] font-extrabold uppercase tracking-wide border shrink-0 ${order.status === 'PLACED' ? 'bg-slate-100 text-slate-700 border-slate-300' :
-              order.status === 'ACCEPTED' ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                order.status === 'PREPARING' ? 'bg-orange-50 text-orange-700 border-orange-200' :
-                  order.status === 'REJECTED' ? 'bg-red-50 text-red-700 border-red-200' :
-                    'bg-emerald-50 text-emerald-700 border-emerald-200'
-            }`}>
-            {order.status === 'REJECTED'
-              ? ((order as any).cancellation_reason === 'USER_CANCELLED' || (order as any).cancellation_reason?.toLowerCase().includes('cancel') ? 'CANCELLED' : 'REJECTED')
-              : order.status}
-          </div>
         </div>
 
-        {/* Smart Preparation Scheduling Metrics */}
-        <div className="bg-slate-50 border border-slate-100 rounded-xl p-2.5 my-1.5 grid grid-cols-3 gap-2 text-center">
-          <div className="min-w-0">
-            <span className="block text-[10px] uppercase font-bold text-slate-400 truncate">Prep Starts</span>
-            <span className="block text-xs font-black text-amber-700 truncate">
-              {(order as any).planned_prep_start_time ? formatPickupTime((order as any).planned_prep_start_time) : '—'}
-            </span>
-          </div>
-          <div className="min-w-0">
-            <span className="block text-[10px] uppercase font-bold text-slate-400 truncate">Prep Time</span>
-            <span className="block text-xs font-bold text-slate-700 truncate">
-              {(order as any).estimated_prep_duration_minutes ? `${(order as any).estimated_prep_duration_minutes}m` : '10m'}
-            </span>
-          </div>
-          <div className="min-w-0">
-            <span className="block text-[10px] uppercase font-bold text-slate-400 truncate">Target Ready</span>
-            <span className="block text-xs font-black text-emerald-700 truncate">
-              {formatPickupTime((order as any).target_ready_by_time || (order as any).requested_pickup_time || order.pickup_time)}
-            </span>
-          </div>
-        </div>
-
-        {/* Item Breakdown */}
-        {(() => {
-          const orderTotal = calculateOrderTotal(order);
-          return compactKanban ? (
-            <div className="my-1.5 flex justify-between items-center bg-slate-50 p-2 rounded-xl border border-slate-100 text-xs">
-              <span className="text-slate-700 font-semibold truncate max-w-[180px]">
-                {order.order_items.map(i => `${i.quantity}x ${i.menu_items?.name || 'Item'}`).join(', ')}
-              </span>
-              <span className="text-indigo-600 font-extrabold text-xs ml-2 shrink-0">
-                {formatCurrency(orderTotal.totalAmount)}
-              </span>
-            </div>
-          ) : (
-            <div className="flex-grow my-1">
-              <ul className="space-y-1">
-                {order.order_items.map(item => {
-                  const unitPrice = Number(item.menu_items?.price ?? (item as any).price ?? 0);
-                  return (
-                    <li key={item.id} className="text-xs flex justify-between items-center text-slate-700">
-                      <span className="truncate">
-                        <span className="font-bold text-slate-900 bg-slate-100 px-1.5 py-0.5 rounded mr-1.5">{item.quantity}x</span>
-                        {item.menu_items?.name}
-                      </span>
-                      {unitPrice > 0 && (
-                        <span className="text-[11px] text-slate-400 font-medium ml-2 shrink-0">
-                          {formatCurrency(unitPrice * item.quantity)}
-                        </span>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-              <div className="mt-2 pt-1.5 border-t border-dashed border-slate-100 flex justify-between items-center text-[11px] font-bold text-slate-500">
-                <span>Total Value</span>
-                <span className="text-indigo-600 font-extrabold text-xs">
-                  {formatCurrency(orderTotal.totalAmount)}
+        {/* Compact Items List (Designed for 100+ orders) */}
+        <div className="bg-slate-50/80 border border-slate-100 rounded-lg p-2 mb-2 flex-1">
+          <ul className="space-y-1">
+            {order.order_items.map(item => (
+              <li key={item.id} className="text-xs flex items-center justify-between text-slate-800">
+                <span className="truncate pr-1 flex items-center gap-1">
+                  <span className="font-mono font-black text-slate-900 bg-white border border-slate-200 px-1 py-0.2 rounded text-[10px]">
+                    {item.quantity}x
+                  </span>
+                  <span className="truncate font-semibold">{item.menu_items?.name || 'Item'}</span>
                 </span>
-              </div>
-            </div>
-          );
-        })()}
+                <span className="text-[10px] text-slate-400 font-mono shrink-0">
+                  ₹{(Number(item.menu_items?.price || 0) * item.quantity).toFixed(0)}
+                </span>
+              </li>
+            ))}
+          </ul>
 
-        {/* Action Buttons */}
-        <div className="mt-3 pt-2.5 border-t border-slate-100 flex flex-col gap-1.5">
+          <div className="mt-1.5 pt-1.5 border-t border-dashed border-slate-200/80 flex justify-between items-center text-[10px] font-bold text-slate-500">
+            <span>Total</span>
+            <span className="text-slate-900 font-black text-xs font-mono">
+              ₹{orderTotal.totalAmount.toFixed(0)}
+            </span>
+          </div>
+        </div>
+
+        {/* Action Controls */}
+        <div className="pt-1 mt-auto">
           {order.status === 'PLACED' && (
-            <div className="flex gap-2">
-              <Button
-                variant="success"
-                size="md"
-                fullWidth
-                onClick={() => updateOrderStatus(order.id, 'ACCEPTED')}
-                className="font-bold bg-emerald-600 hover:bg-emerald-700 shadow-sm shadow-emerald-600/30 active:scale-95 text-white"
+            <div className="grid grid-cols-3 gap-1.5">
+              <button
+                type="button"
+                onClick={() => updateOrderStatus(order.id, 'PREPARING')}
+                className="col-span-2 py-2 px-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black text-xs rounded-lg shadow-2xs active:scale-95 transition-all flex items-center justify-center gap-1 cursor-pointer"
               >
-                Accept Order
-              </Button>
-              <Button
-                variant="danger"
-                size="md"
+                <IconCooking size={13} className="shrink-0" />
+                <span>Accept & Prep</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => updateOrderStatus(order.id, 'REJECTED')}
-                className="font-bold shadow-sm shadow-rose-600/25 active:scale-95 text-white"
+                className="py-2 px-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-[11px] rounded-lg active:scale-95 transition-all cursor-pointer"
               >
                 Reject
-              </Button>
+              </button>
             </div>
           )}
 
           {order.status === 'ACCEPTED' && (
-            <Button
-              size="sm"
-              fullWidth
+            <button
+              type="button"
               onClick={() => updateOrderStatus(order.id, 'PREPARING')}
-              leftIcon={<IconCooking size={14} className="w-3.5 h-3.5 text-amber-100" />}
-              className="bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white font-bold border-0 shadow-sm shadow-orange-500/30 active:scale-95"
+              className="w-full py-2 px-2 bg-amber-500 hover:bg-amber-600 text-white font-black text-xs rounded-lg shadow-2xs active:scale-95 transition-all flex items-center justify-center gap-1 cursor-pointer"
             >
-              Start Preparing
-            </Button>
+              <IconCooking size={13} className="shrink-0" />
+              <span>Start Preparing</span>
+            </button>
           )}
 
           {order.status === 'PREPARING' && (
-            <Button
-              variant="success"
-              size="sm"
-              fullWidth
+            <button
+              type="button"
               onClick={() => updateOrderStatus(order.id, 'READY')}
-              leftIcon={<IconCheckCircle size={14} className="w-3.5 h-3.5" />}
+              className="w-full py-2 px-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-black text-xs rounded-lg shadow-2xs active:scale-95 transition-all flex items-center justify-center gap-1 cursor-pointer"
             >
-              Mark Ready for Pickup
-            </Button>
+              <IconCheckCircle size={13} className="shrink-0" />
+              <span>Mark Ready</span>
+            </button>
           )}
 
           {order.status === 'READY' && (
-            <div className="flex flex-col gap-1.5">
+            <div>
               {selectedOrderForOtp === order.id ? (
-                <div className="flex gap-1.5 items-center">
+                <div className="flex gap-1 items-center">
                   <InputField
                     type="text"
                     placeholder="OTP"
@@ -1426,15 +1354,15 @@ export default function StaffDashboard() {
                     autoComplete="one-time-code"
                     maxLength={6}
                     size="sm"
-                    className="w-20 text-center font-mono tracking-widest text-xs"
-                    containerClassName="w-20"
+                    className="w-16 text-center font-mono tracking-widest text-xs py-1"
+                    containerClassName="w-16"
                   />
                   <Button
                     variant="primary"
                     size="sm"
                     onClick={() => handleVerifyOtp(order.id)}
                     disabled={otpInput.length !== 6}
-                    className="flex-1"
+                    className="flex-1 py-1 text-xs"
                   >
                     Verify
                   </Button>
@@ -1442,9 +1370,9 @@ export default function StaffDashboard() {
                     variant="tertiary"
                     size="sm"
                     onClick={() => { setSelectedOrderForOtp(null); setOtpInput(''); }}
-                    className="px-2"
+                    className="px-1.5 py-1"
                   >
-                    <IconX size={13} className="w-3.5 h-3.5" />
+                    <IconX size={12} />
                   </Button>
                 </div>
               ) : (
@@ -1453,22 +1381,21 @@ export default function StaffDashboard() {
                   size="sm"
                   fullWidth
                   onClick={() => setSelectedOrderForOtp(order.id)}
-                  leftIcon={<IconKey size={14} className="w-3.5 h-3.5 text-indigo-200" />}
+                  leftIcon={<IconKey size={13} className="text-indigo-200" />}
+                  className="py-1.5 text-xs font-bold"
                 >
                   Verify OTP
                 </Button>
               )}
 
               {overdueInfo.isOverdue && (
-                <Button
-                  variant="danger"
-                  size="sm"
-                  fullWidth
+                <button
+                  type="button"
                   onClick={() => handleMarkNoShow(order)}
-                  title="Cancel order and issue 1 strike for uncollected food"
+                  className="w-full mt-1.5 py-1 text-[10px] text-rose-600 hover:text-rose-700 font-bold bg-rose-50 border border-rose-200 rounded-md"
                 >
-                  Cancel & Strike (Uncollected)
-                </Button>
+                  Strike No-Show
+                </button>
               )}
             </div>
           )}
@@ -2910,110 +2837,89 @@ export default function StaffDashboard() {
               hoverable={true}
             />
           ) : viewMode === 'KANBAN' ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 items-start">
-              {/* Column 1: Placed */}
-              <div className="bg-blue-50/60 border border-blue-200/70 rounded-2xl p-3 sm:p-4 flex flex-col min-h-[300px]">
-                <div className="flex justify-between items-center mb-3 px-1">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 items-start">
+              {/* Column 1: Placed (New Incoming Orders) */}
+              <div className="bg-blue-50/50 border border-blue-200/80 rounded-2xl p-3 flex flex-col min-h-[350px] shadow-2xs">
+                <div className="flex justify-between items-center mb-2.5 px-1 pb-2 border-b border-blue-200/50">
                   <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
-                    <h3 className="font-extrabold text-sm text-blue-950 uppercase tracking-wide">
+                    <span className="w-2.5 h-2.5 rounded-full bg-blue-600 animate-pulse"></span>
+                    <h3 className="font-black text-xs sm:text-sm text-blue-950 uppercase tracking-wide">
                       Placed
                     </h3>
-                    <span className="bg-blue-200 text-blue-900 text-xs font-black px-2 py-0.5 rounded-full">
+                    <span className="bg-blue-200/90 text-blue-900 text-xs font-black px-2 py-0.5 rounded-full font-mono">
                       {placedOrders.length}
                     </span>
                   </div>
                   {placedOrders.length > 1 && (
-                    <Button
-                      variant="secondary"
-                      size="sm"
+                    <button
+                      type="button"
                       onClick={() => bulkAcceptOrders(placedOrders.map(o => o.id))}
-                      leftIcon={<IconZap size={12} className="w-3 h-3 text-indigo-600" />}
-                      className="text-[11px] py-1 px-2 rounded-lg cursor-pointer"
+                      className="text-[11px] font-bold py-1 px-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white shadow-2xs transition-all active:scale-95 cursor-pointer flex items-center gap-1"
                     >
-                      Accept All
-                    </Button>
+                      <IconZap size={11} className="shrink-0" />
+                      <span>Prep All ({placedOrders.length})</span>
+                    </button>
                   )}
                 </div>
 
-                <div className="space-y-3 flex-1 overflow-y-auto max-h-[75vh] pr-1">
+                <div className="space-y-2.5 flex-1 overflow-y-auto max-h-[75vh] pr-1 scrollbar-thin">
                   {placedOrders.length === 0 ? (
-                    <div className="text-center text-xs text-slate-400 py-10">No placed orders</div>
+                    <div className="text-center text-xs text-slate-400 py-12 italic">No new incoming orders</div>
                   ) : (
                     placedOrders.map(renderOrderCard)
                   )}
                 </div>
               </div>
 
-              {/* Column 2: Accepted */}
-              <div className="bg-cyan-50/60 border border-cyan-200/70 rounded-2xl p-3 sm:p-4 flex flex-col min-h-[300px]">
-                <div className="flex justify-between items-center mb-3 px-1">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-cyan-500"></span>
-                    <h3 className="font-extrabold text-sm text-cyan-950 uppercase tracking-wide">
-                      Accepted
-                    </h3>
-                    <span className="bg-cyan-200 text-cyan-900 text-xs font-black px-2 py-0.5 rounded-full">
-                      {orders.filter(o => o.status === 'ACCEPTED').length}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="space-y-3 flex-1 overflow-y-auto max-h-[75vh] pr-1">
-                  {orders.filter(o => o.status === 'ACCEPTED').length === 0 ? (
-                    <div className="text-center text-xs text-slate-400 py-10">No accepted orders</div>
-                  ) : (
-                    orders.filter(o => o.status === 'ACCEPTED').map(renderOrderCard)
-                  )}
-                </div>
-              </div>
-
-              {/* Column 3: Preparing */}
-              <div className="bg-amber-50/60 border border-amber-200/70 rounded-2xl p-3 sm:p-4 flex flex-col min-h-[300px]">
-                <div className="flex justify-between items-center mb-3 px-1">
+              {/* Column 2: Preparing (Kitchen Active Cooking Queue) */}
+              <div className="bg-amber-50/50 border border-amber-200/80 rounded-2xl p-3 flex flex-col min-h-[350px] shadow-2xs">
+                <div className="flex justify-between items-center mb-2.5 px-1 pb-2 border-b border-amber-200/50">
                   <div className="flex items-center gap-2">
                     <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
-                    <h3 className="font-extrabold text-sm text-amber-950 uppercase tracking-wide">
+                    <h3 className="font-black text-xs sm:text-sm text-amber-950 uppercase tracking-wide">
                       Preparing
                     </h3>
-                    <span className="bg-amber-200 text-amber-900 text-xs font-black px-2 py-0.5 rounded-full">
-                      {orders.filter(o => o.status === 'PREPARING').length}
+                    <span className="bg-amber-200/90 text-amber-900 text-xs font-black px-2 py-0.5 rounded-full font-mono">
+                      {orders.filter(o => ['ACCEPTED', 'PREPARING'].includes(o.status)).length}
                     </span>
                   </div>
+                  <span className="text-[10px] text-amber-700 font-bold uppercase tracking-wider">
+                    In Kitchen
+                  </span>
                 </div>
 
-                <div className="space-y-3 flex-1 overflow-y-auto max-h-[75vh] pr-1">
-                  {orders.filter(o => o.status === 'PREPARING').length === 0 ? (
-                    <div className="text-center text-xs text-slate-400 py-10">No orders cooking</div>
+                <div className="space-y-2.5 flex-1 overflow-y-auto max-h-[75vh] pr-1 scrollbar-thin">
+                  {orders.filter(o => ['ACCEPTED', 'PREPARING'].includes(o.status)).length === 0 ? (
+                    <div className="text-center text-xs text-slate-400 py-12 italic">No orders currently cooking</div>
                   ) : (
-                    orders.filter(o => o.status === 'PREPARING').map(renderOrderCard)
+                    orders.filter(o => ['ACCEPTED', 'PREPARING'].includes(o.status)).map(renderOrderCard)
                   )}
                 </div>
               </div>
 
-              {/* Column 4: Ready */}
-              <div className="bg-emerald-50/60 border border-emerald-200/70 rounded-2xl p-3 sm:p-4 flex flex-col min-h-[300px]">
-                <div className="flex justify-between items-center mb-3 px-1">
+              {/* Column 3: Ready for Collection */}
+              <div className="bg-emerald-50/50 border border-emerald-200/80 rounded-2xl p-3 flex flex-col min-h-[350px] shadow-2xs">
+                <div className="flex justify-between items-center mb-2.5 px-1 pb-2 border-b border-emerald-200/50">
                   <div className="flex items-center gap-2">
                     <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                    <h3 className="font-extrabold text-sm text-emerald-950 uppercase tracking-wide">
+                    <h3 className="font-black text-xs sm:text-sm text-emerald-950 uppercase tracking-wide">
                       Ready
                     </h3>
-                    <span className="bg-emerald-200 text-emerald-900 text-xs font-black px-2 py-0.5 rounded-full">
+                    <span className="bg-emerald-200/90 text-emerald-900 text-xs font-black px-2 py-0.5 rounded-full font-mono">
                       {readyOrders.length}
                     </span>
                   </div>
                   {readyOrders.some(o => getOrderOverdueInfo(o).isOverdue) && (
-                    <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200 animate-pulse flex items-center gap-1">
+                    <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-300 animate-pulse flex items-center gap-1">
                       <IconAlertTriangle size={11} className="w-3 h-3 text-amber-700 shrink-0" />
                       <span>Overdue</span>
                     </span>
                   )}
                 </div>
 
-                <div className="space-y-3 flex-1 overflow-y-auto max-h-[75vh] pr-1">
+                <div className="space-y-2.5 flex-1 overflow-y-auto max-h-[75vh] pr-1 scrollbar-thin">
                   {readyOrders.length === 0 ? (
-                    <div className="text-center text-xs text-slate-400 py-10">No orders awaiting pickup</div>
+                    <div className="text-center text-xs text-slate-400 py-12 italic">No orders awaiting pickup</div>
                   ) : (
                     readyOrders.map(renderOrderCard)
                   )}
