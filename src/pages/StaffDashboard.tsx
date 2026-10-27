@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/ModalDialogContext';
@@ -20,7 +20,8 @@ import {
   IconCamera
 } from '../components/Icons';
 import { QRScannerModal, playSuccessBeep, playErrorBuzzer } from '../components/QRScannerModal';
-import { LayoutList, Utensils, Search as SearchIcon, Store, ChefHat, Clock, Sparkles, KeyRound, CalendarDays, ArrowRight, MoreVertical, Leaf, Flame, CheckCircle2, XCircle, QrCode, ScanLine, Package } from 'lucide-react';
+import { playIncomingOrderAlarm } from '../utils/notificationSound';
+import { LayoutList, Utensils, Search as SearchIcon, Store, ChefHat, Clock, Sparkles, KeyRound, CalendarDays, ArrowRight, MoreVertical, Leaf, Flame, CheckCircle2, XCircle, QrCode, ScanLine, Package, Volume2, VolumeX } from 'lucide-react';
 import { useLocation, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatErrorMessage } from '../utils/validation';
@@ -68,6 +69,32 @@ export default function StaffDashboard() {
     return configuredSlots.length > 0 ? configuredSlots : LUNCH_SLOTS;
   }, [configuredSlots]);
 
+
+  // Kitchen Audio Alarm for incoming new orders (Loud Alert)
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('skiptray_staff_sound_alerts');
+      return saved !== null ? saved === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+  const soundEnabledRef = useRef(soundEnabled);
+  soundEnabledRef.current = soundEnabled;
+
+  const toggleSound = () => {
+    setSoundEnabled(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('skiptray_staff_sound_alerts', String(next));
+      } catch {}
+      if (next) {
+        // Test loud alarm immediately when turning on so user confirms volume
+        playIncomingOrderAlarm();
+      }
+      return next;
+    });
+  };
 
   // Quick OTP & QR Scanner Verification State
   const [quickOtpInput, setQuickOtpInput] = useState('');
@@ -487,7 +514,13 @@ export default function StaffDashboard() {
         schema: 'public',
         table: 'orders',
         ...(effectiveCanteenId ? { filter: `canteen_id=eq.${effectiveCanteenId}` } : {})
-      }, () => {
+      }, (payload) => {
+        // Loud audible alert for incoming orders (INSERT or status changed to PLACED)
+        const isNewOrder = payload.eventType === 'INSERT';
+        const isPlaced = (payload.new as any)?.status === 'PLACED';
+        if ((isNewOrder || isPlaced) && soundEnabledRef.current) {
+          playIncomingOrderAlarm();
+        }
         fetchOrders();
         fetchRecentOrders();
       })
@@ -2585,6 +2618,22 @@ export default function StaffDashboard() {
                 >
                   <span className={sortByPrepStart ? 'text-amber-500 font-bold' : 'text-slate-400'}>⚡</span>
                   <span>{sortByPrepStart ? 'Prep Sequence' : 'Default Order'}</span>
+                </button>
+
+                <button
+                  onClick={toggleSound}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 cursor-pointer ${soundEnabled
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-300 shadow-2xs hover:bg-emerald-100'
+                      : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
+                    }`}
+                  title={soundEnabled ? 'Loud order sound alert is ACTIVE (Click to mute)' : 'Loud order sound alert is MUTED (Click to activate)'}
+                >
+                  {soundEnabled ? (
+                    <Volume2 size={14} className="w-3.5 h-3.5 text-emerald-600 shrink-0 animate-pulse" />
+                  ) : (
+                    <VolumeX size={14} className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                  )}
+                  <span>{soundEnabled ? 'Kitchen Alarm: ON' : 'Kitchen Alarm: OFF'}</span>
                 </button>
 
                 {/* View Mode Segmented Switcher (Table first & primary) */}

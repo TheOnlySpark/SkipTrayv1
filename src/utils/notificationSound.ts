@@ -142,6 +142,59 @@ export function playStatusChime(status: OrderNotificationStatus): void {
 }
 
 /**
+ * Play a loud, attention-grabbing kitchen alert chime when a new order arrives.
+ * Designed specifically for noisy kitchen environments with dual-tone repeating chime.
+ */
+export function playIncomingOrderAlarm(): void {
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+
+    const now = ctx.currentTime;
+
+    // Pattern: 2 rapid piercing bell bursts (High E6: 1318.5Hz + B5: 987.77Hz + G#5: 830.61Hz)
+    // Plays at t=0 and repeated at t=0.35s for maximum audibility in noisy kitchens.
+    const bursts = [0, 0.35, 0.70];
+    const notes = [
+      { freq: 830.61, offset: 0, dur: 0.28, type: 'triangle' as OscillatorType, peakGain: 0.75 },
+      { freq: 1318.51, offset: 0.04, dur: 0.30, type: 'sine' as OscillatorType, peakGain: 0.85 },
+      { freq: 1567.98, offset: 0.08, dur: 0.32, type: 'sine' as OscillatorType, peakGain: 0.70 },
+    ];
+
+    bursts.forEach(burstTime => {
+      notes.forEach(({ freq, offset, dur, type, peakGain }) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, now + burstTime + offset);
+
+        const startTime = now + burstTime + offset;
+        gain.gain.setValueAtTime(0, startTime);
+        gain.gain.linearRampToValueAtTime(peakGain, startTime + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.001, startTime + dur);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start(startTime);
+        osc.stop(startTime + dur);
+      });
+    });
+
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      navigator.vibrate([250, 100, 250, 100, 400]);
+    }
+  } catch {
+    // Gracefully handle browser sound policy
+  }
+}
+
+/**
  * Triggers vibration feedback on supported mobile devices.
  */
 export function triggerHapticFeedback(status: OrderNotificationStatus): void {
@@ -163,4 +216,3 @@ export function triggerHapticFeedback(status: OrderNotificationStatus): void {
     // Gracefully ignore devices that don't support vibration
   }
 }
-
