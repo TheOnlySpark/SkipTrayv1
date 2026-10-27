@@ -1027,7 +1027,7 @@ export default function CanteenAdminDashboard() {
     fetchStats();
 
     const orderSub = supabase
-      .channel('canteen:orders')
+      .channel(`canteen_orders_${currentCanteenId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `canteen_id=eq.${currentCanteenId}` }, () => {
         fetchStats();
         queryClient.invalidateQueries({ queryKey: ['canteenOrders'] });
@@ -1036,21 +1036,21 @@ export default function CanteenAdminDashboard() {
       .subscribe();
 
     const menuSub = supabase
-      .channel('canteen:menu_items')
+      .channel(`canteen_menu_${currentCanteenId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items', filter: `canteen_id=eq.${currentCanteenId}` }, () => {
         fetchMenu();
       })
       .subscribe();
 
     const reviewSub = supabase
-      .channel('canteen:item_reviews')
+      .channel(`canteen_reviews_${currentCanteenId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'item_reviews' }, () => {
         queryClient.invalidateQueries({ queryKey: ['canteenReviews'] });
       })
       .subscribe();
 
     const staffSub = supabase
-      .channel('canteen:staff')
+      .channel(`canteen_staff_${currentCanteenId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles', filter: `canteen_id=eq.${currentCanteenId}` }, () => {
         queryClient.invalidateQueries({ queryKey: ['canteenStaff'] });
       })

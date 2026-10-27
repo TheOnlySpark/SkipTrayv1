@@ -7,5 +7,12 @@ const supabaseAnonKey = (typeof import.meta !== 'undefined' && import.meta.env?.
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   auth: {
     storage: typeof window !== 'undefined' ? window.sessionStorage : undefined,
-  }
+  },
+  realtime: {
+    params: {
+      eventsPerSecond: 10,
+    },
+    heartbeatIntervalMs: 5000,      // Ping every 15s (default ~30s). Detects silent drops faster.
+    reconnectAfterMs: (tries: number) => Math.min(tries * 750, 8000), // Faster reconnect on free tier
+  },
 });

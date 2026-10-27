@@ -660,6 +660,11 @@ export default function StudentDashboard() {
         table: 'orders',
         filter: `user_id=eq.${profile.id}`
       }, async (payload) => {
+        // Dispatch local event for NotificationContext & in-app sync
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('skiptray:order_changed', { detail: payload }));
+        }
+
         const updatedOrder = payload.new as Order;
         if (['PLACED', 'ACCEPTED', 'PREPARING', 'READY', 'COLLECTED'].includes(updatedOrder?.status)) {
           if (updatedOrder?.status === 'COLLECTED') {
@@ -676,10 +681,16 @@ export default function StudentDashboard() {
       })
       .subscribe();
 
+    // Safety fallback: Poll active order every 30s to keep UI updated even if network dropped briefly
+    const syncInterval = setInterval(() => {
+      fetchActive();
+    }, 30000);
+
     return () => {
+      clearInterval(syncInterval);
       orderSub.unsubscribe();
     };
-  }, [profile?.id, queryClient]);
+  }, [profile?.id, fetchActive, queryClient]);
 
   const { data: menuItems = [], isLoading: menuLoading } = useQuery({
     queryKey: ['menuItems'],

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/ModalDialogContext';
@@ -333,44 +333,7 @@ export default function StaffDashboard() {
     };
   }, [effectiveCanteenId]);
 
-  useEffect(() => {
-    fetchOrders();
-    fetchRecentOrders();
-    fetchMenu();
-
-    // Realtime subscriptions for orders and menu
-    const channelName = effectiveCanteenId ? `staff_orders_${effectiveCanteenId}` : `staff_orders_all`;
-    const orderSub = supabase.channel(channelName)
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'orders',
-        ...(effectiveCanteenId ? { filter: `canteen_id=eq.${effectiveCanteenId}` } : {})
-      }, () => {
-        fetchOrders();
-        fetchRecentOrders();
-      })
-      .subscribe();
-
-    const menuChannelName = effectiveCanteenId ? `staff_menu_${effectiveCanteenId}` : `staff_menu_all`;
-    const menuSub = supabase.channel(menuChannelName)
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'menu_items',
-        ...(effectiveCanteenId ? { filter: `canteen_id=eq.${effectiveCanteenId}` } : {})
-      }, () => {
-        fetchMenu();
-      })
-      .subscribe();
-
-    return () => {
-      orderSub.unsubscribe();
-      menuSub.unsubscribe();
-    };
-  }, [effectiveCanteenId]);
-
-  const fetchMenu = async () => {
+  const fetchMenu = useCallback(async () => {
     const targetCanteenId = effectiveCanteenId || profile?.canteen_id;
     if (!targetCanteenId) {
       setMenuItems([]);
@@ -395,9 +358,9 @@ export default function StaffDashboard() {
         });
       setMenuItems(sorted);
     }
-  };
+  }, [effectiveCanteenId, profile?.canteen_id]);
 
-  const fetchRecentOrders = async () => {
+  const fetchRecentOrders = useCallback(async () => {
     const targetCanteenId = effectiveCanteenId || profile?.canteen_id;
     const query = (tableName: string) => {
       let q = (supabase.from(tableName as any) as any)
@@ -441,9 +404,9 @@ export default function StaffDashboard() {
       data = fallback.data;
     }
     if (data) setRecentOrders(data as unknown as OrderWithDetails[]);
-  };
+  }, [effectiveCanteenId, profile?.canteen_id]);
 
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     setLoading(true);
     let targetCanteenId = effectiveCanteenId || profile?.canteen_id;
 
@@ -509,7 +472,51 @@ export default function StaffDashboard() {
 
     if (data) setOrders(data as unknown as OrderWithDetails[]);
     setLoading(false);
-  };
+  }, [effectiveCanteenId, profile?.canteen_id, profile?.tenant_id]);
+
+  useEffect(() => {
+    fetchOrders();
+    fetchRecentOrders();
+    fetchMenu();
+
+    // Realtime subscriptions for orders and menu
+    const channelName = effectiveCanteenId ? `staff_orders_${effectiveCanteenId}` : `staff_orders_all`;
+    const orderSub = supabase.channel(channelName)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'orders',
+        ...(effectiveCanteenId ? { filter: `canteen_id=eq.${effectiveCanteenId}` } : {})
+      }, () => {
+        fetchOrders();
+        fetchRecentOrders();
+      })
+      .subscribe();
+
+    const menuChannelName = effectiveCanteenId ? `staff_menu_${effectiveCanteenId}` : `staff_menu_all`;
+    const menuSub = supabase.channel(menuChannelName)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'menu_items',
+        ...(effectiveCanteenId ? { filter: `canteen_id=eq.${effectiveCanteenId}` } : {})
+      }, () => {
+        fetchMenu();
+      })
+      .subscribe();
+
+    // Safety fallback: Poll every 30s to recover silently dropped connections
+    const pollInterval = setInterval(() => {
+      fetchOrders();
+      fetchRecentOrders();
+    }, 30000);
+
+    return () => {
+      clearInterval(pollInterval);
+      orderSub.unsubscribe();
+      menuSub.unsubscribe();
+    };
+  }, [effectiveCanteenId, fetchOrders, fetchRecentOrders, fetchMenu]);
 
   const updateOrderStatus = async (orderId: string, status: string) => {
     if (transitioningOrderIds.has(orderId)) return;

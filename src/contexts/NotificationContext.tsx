@@ -387,6 +387,44 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   useEffect(() => {
     if (!user?.id) return;
 
+    const handleOrderPayload = (payload: any) => {
+      const newOrder = payload?.new as Order | null;
+      if (!newOrder || !newOrder.id) return;
+
+      const prevStatus = knownStatusMapRef.current.get(newOrder.id);
+      const currentStatus = newOrder.status;
+
+      // Always update our tracked status
+      knownStatusMapRef.current.set(newOrder.id, currentStatus);
+
+      // If this is during initial load or status hasn't transitioned, skip
+      if (!initialFetchDoneRef.current && !prevStatus) return;
+      if (prevStatus === currentStatus) return;
+
+      // Only alert when advancing to ACCEPTED, PREPARING, READY, or COLLECTED
+      if (
+        currentStatus === 'ACCEPTED' ||
+        currentStatus === 'PREPARING' ||
+        currentStatus === 'READY' ||
+        currentStatus === 'COLLECTED'
+      ) {
+        dispatchNotification(
+          currentStatus as OrderNotificationStatus,
+          newOrder.id,
+          newOrder.order_number
+        );
+      }
+    };
+
+    // Listen to custom DOM event dispatched by StudentDashboard for instant zero-latency sync
+    const handleCustomOrderEvent = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      if (customEvent.detail) {
+        handleOrderPayload(customEvent.detail);
+      }
+    };
+    window.addEventListener('skiptray:order_changed', handleCustomOrderEvent);
+
     const channel = supabase
       .channel(`user_order_notifications_${user.id}`)
       .on(
@@ -397,38 +435,12 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
           table: 'orders',
           filter: `user_id=eq.${user.id}`,
         },
-        (payload) => {
-          const newOrder = payload.new as Order | null;
-          if (!newOrder || !newOrder.id) return;
-
-          const prevStatus = knownStatusMapRef.current.get(newOrder.id);
-          const currentStatus = newOrder.status;
-
-          // Always update our tracked status
-          knownStatusMapRef.current.set(newOrder.id, currentStatus);
-
-          // If this is during initial load or status hasn't transitioned, skip
-          if (!initialFetchDoneRef.current && !prevStatus) return;
-          if (prevStatus === currentStatus) return;
-
-          // Only alert when advancing to ACCEPTED, PREPARING, READY, or COLLECTED
-          if (
-            currentStatus === 'ACCEPTED' ||
-            currentStatus === 'PREPARING' ||
-            currentStatus === 'READY' ||
-            currentStatus === 'COLLECTED'
-          ) {
-            dispatchNotification(
-              currentStatus as OrderNotificationStatus,
-              newOrder.id,
-              newOrder.order_number
-            );
-          }
-        }
+        handleOrderPayload
       )
       .subscribe();
 
     return () => {
+      window.removeEventListener('skiptray:order_changed', handleCustomOrderEvent);
       channel.unsubscribe();
     };
   }, [user?.id, dispatchNotification]);
