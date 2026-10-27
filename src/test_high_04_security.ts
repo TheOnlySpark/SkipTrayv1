@@ -259,11 +259,12 @@ class MockSupabaseBackend {
       return { success: false, message: 'Access denied: cannot cancel order belonging to another customer' };
     }
 
-    if (!['PLACED', 'ACCEPTED'].includes(order.status)) {
-      return { success: false, message: `Order cannot be cancelled in status ${order.status}` };
+    if (order.status !== 'PLACED') {
+      return { success: false, message: `Order cannot be cancelled once accepted by the kitchen (current status: ${order.status})` };
     }
 
     order.status = 'REJECTED';
+    (order as any).cancellation_reason = 'USER_CANCELLED';
     return { success: true, message: 'Order cancelled successfully' };
   }
 }
@@ -470,14 +471,28 @@ const res12Cancel = backend.cancelOrder(studentOther, order12.id);
 assert(res12Cancel.success === false, 'Test 12.1: Other customer cannot cancel order');
 assert(res12Cancel.message?.includes('cannot cancel order belonging to another customer'), 'Test 12.2: Explains ownership violation');
 
-// Bob attempts to request collection OTP for Ashik's order
+// Student cancels own order in PLACED state -> succeeds
+const order12b = backend.createOrder(student, canteenA, '16:45');
+const res12bCancel = backend.cancelOrder(student, order12b.id);
+assert(res12bCancel.success === true, 'Test 12.3: Student can cancel own order in PLACED status');
+assert(backend.orders.get(order12b.id)?.status === 'REJECTED', 'Test 12.4: Cancelled order status is REJECTED');
+
+// Staff accepts order12
 backend.updateOrderStatus(staffCanteenA, order12.id, 'ACCEPTED');
+
+// Student attempts to cancel order12 once accepted -> blocked
+const res12CancelAfterAccept = backend.cancelOrder(student, order12.id);
+assert(res12CancelAfterAccept.success === false, 'Test 12.5: Student cannot cancel order once accepted by kitchen');
+assert(res12CancelAfterAccept.message?.includes('once accepted by the kitchen'), 'Test 12.6: Explains order cannot be cancelled after acceptance');
+
+// Kitchen continues prep to READY
 backend.updateOrderStatus(staffCanteenA, order12.id, 'PREPARING');
 backend.updateOrderStatus(staffCanteenA, order12.id, 'READY');
 
+// Bob attempts to request collection OTP for Ashik's order
 const res12Otp = backend.requestCollectionOtp(studentOther, order12.id);
-assert(res12Otp.success === false, 'Test 12.3: Other customer cannot request pickup OTP');
-assert(res12Otp.message.includes('only request pickup OTP for your own order'), 'Test 12.4: Explains access violation');
+assert(res12Otp.success === false, 'Test 12.7: Other customer cannot request pickup OTP');
+assert(res12Otp.message.includes('only request pickup OTP for your own order'), 'Test 12.8: Explains access violation');
 
 // ----------------------------------------------------------------------------
 // Test 13: Staff cannot modify orders outside their assigned permissions

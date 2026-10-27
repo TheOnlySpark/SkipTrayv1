@@ -476,6 +476,7 @@ export interface Database {
           canteen_id: string
           total_tax_amount: number | null
           tax_snapshot: Json | null
+          cancellation_reason: string | null
         }
         Insert: {
           accepted_at?: string | null
@@ -501,6 +502,7 @@ export interface Database {
           canteen_id: string
           total_tax_amount?: number | null
           tax_snapshot?: Json | null
+          cancellation_reason?: string | null
         }
         Update: {
           accepted_at?: string | null
@@ -526,6 +528,7 @@ export interface Database {
           canteen_id?: string
           total_tax_amount?: number | null
           tax_snapshot?: Json | null
+          cancellation_reason?: string | null
         }
         Relationships: [
           {

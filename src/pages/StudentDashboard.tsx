@@ -1299,50 +1299,16 @@ export default function StudentDashboard() {
     });
     if (!confirmed) return;
 
-    // Call cancel_order RPC with p_order_id matching Postgres schema signature
-    let { error } = await supabase.rpc('cancel_order', {
-      p_order_id: activeOrder.id
+    // Call cancel_order RPC (only allowed while in PLACED status)
+    const { error } = await supabase.rpc('cancel_order', {
+      p_order_id: activeOrder.id,
+      p_reason: 'USER_CANCELLED'
     });
-
-    if (error && (error.code === 'PGRST202' || error.message?.includes('p_reason'))) {
-      // Retry with p_order_id only if signature mismatch occurred
-      const retry = await supabase.rpc('cancel_order', {
-        p_order_id: activeOrder.id
-      });
-      error = retry.error;
-    }
-
-    if (error) {
-      console.warn('cancel_order RPC returned error, attempting fallback update:', error.message);
-      // Fallback: If in PLACED state, attempt direct status update to REJECTED
-      if (activeOrder.status === 'PLACED') {
-        try {
-          const { error: directErr } = await supabase
-            .from('orders')
-            .update({ status: 'REJECTED', cancellation_reason: 'USER_CANCELLED' } as any)
-            .eq('id', activeOrder.id)
-            .eq('user_id', profile?.id);
-
-          if (!directErr) {
-            error = null;
-          } else {
-            const { error: retryErr } = await supabase
-              .from('orders')
-              .update({ status: 'REJECTED' } as any)
-              .eq('id', activeOrder.id)
-              .eq('user_id', profile?.id);
-            if (!retryErr) error = null;
-          }
-        } catch {
-          // ignore column missing
-        }
-      }
-    }
 
     if (error) {
       showAlert({
         title: 'Cancellation Failed',
-        message: 'Unable to cancel order. ' + (error.message.includes('5 minutes') ? 'Cancellation window (5 mins) has passed.' : error.message),
+        message: 'Unable to cancel order: ' + error.message,
         type: 'error'
       });
     } else {
@@ -1352,6 +1318,7 @@ export default function StudentDashboard() {
       } catch { }
       setActiveOrder(null);
       queryClient.invalidateQueries({ queryKey: ['pastOrders'] });
+      queryClient.invalidateQueries({ queryKey: ['menuItems'] });
       showAlert({
         title: 'Order Cancelled',
         message: 'Your order has been cancelled successfully.',
