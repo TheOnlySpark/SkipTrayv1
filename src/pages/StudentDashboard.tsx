@@ -136,6 +136,7 @@ export default function StudentDashboard() {
   const [cart, setCart] = useState<{ item: MenuItem, quantity: number }[]>([]);
   const [showCartBuilder, setShowCartBuilder] = useState(false);
   const [pickupTime, setPickupTime] = useState(getInitialPickupTime);
+  const [isTakeaway, setIsTakeaway] = useState<boolean>(false);
 
   // Helper to convert 24h string ("16:31") to 12h parts and vice versa
   const parse12hParts = (timeStr?: string | null) => {
@@ -1118,7 +1119,7 @@ export default function StudentDashboard() {
         planned_prep_start_time: smartSchedule.plannedPrepStartTime,
         target_ready_by_time: smartSchedule.targetReadyByTime,
         estimated_prep_duration_minutes: smartSchedule.estimatedPrepDurationMinutes,
-        is_takeaway: false,
+        is_takeaway: isTakeaway,
         status: 'PLACED',
         idempotency_key: idempotencyKey,
       };
@@ -1139,7 +1140,7 @@ export default function StudentDashboard() {
             canteen_id: canteenId,
             tenant_id: tenantId,
             pickup_time: finalPickupTime,
-            is_takeaway: false,
+            is_takeaway: isTakeaway,
             status: 'PLACED',
             idempotency_key: idempotencyKey,
           };
@@ -2607,6 +2608,40 @@ export default function StudentDashboard() {
                         )}
                       </div>
 
+                      {/* Dining Mode (Dine-In vs Takeaway) */}
+                      <div className="mb-4">
+                        <label className="text-[11px] font-bold text-slate-700 block mb-1.5 flex items-center justify-between">
+                          <span>Order Type</span>
+                          <span className="text-[10px] text-slate-500 font-medium">{isTakeaway ? 'Packed to-go' : 'Serve in canteen'}</span>
+                        </label>
+                        <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl border border-slate-200/80">
+                          <button
+                            type="button"
+                            onClick={() => setIsTakeaway(false)}
+                            className={`py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                              !isTakeaway
+                                ? 'bg-white text-emerald-700 shadow-xs border border-emerald-200/60'
+                                : 'text-slate-600 hover:text-slate-900'
+                            }`}
+                          >
+                            <UtensilsCrossed size={14} className={!isTakeaway ? 'text-emerald-600' : 'text-slate-400'} />
+                            <span>Dine-In</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsTakeaway(true)}
+                            className={`py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                              isTakeaway
+                                ? 'bg-white text-amber-700 shadow-xs border border-amber-200/60'
+                                : 'text-slate-600 hover:text-slate-900'
+                            }`}
+                          >
+                            <Package size={14} className={isTakeaway ? 'text-amber-600' : 'text-slate-400'} />
+                            <span>Takeaway</span>
+                          </button>
+                        </div>
+                      </div>
+
                       {/* Order Bill Summary */}
                       {cart.length > 0 && (
                         <div className="space-y-1.5 py-3 border-t border-b border-slate-100 text-xs mb-4">
@@ -2970,6 +3005,57 @@ export default function StudentDashboard() {
                         </div>
                       )}
 
+                      {/* Items List inside Mobile Active Order */}
+                      <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3 mb-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">
+                            Ordered Items
+                          </span>
+                          <span className="text-[11px] font-bold text-slate-500">
+                            {(displayOrder as any).canteens?.name || 'Main Canteen'}
+                          </span>
+                        </div>
+
+                        <div className="space-y-1.5 divide-y divide-slate-100">
+                          {(displayOrder as any).order_items && (displayOrder as any).order_items.length > 0 ? (
+                            (displayOrder as any).order_items.map((oi: any, idx: number) => {
+                              const itemName = oi.menu_items?.name || oi.name || 'Meal Item';
+                              const itemPrice = Number(oi.menu_items?.price ?? oi.price ?? 0);
+                              const itemQty = Number(oi.quantity) || 1;
+                              return (
+                                <div key={idx} className="pt-1.5 first:pt-0 flex items-center justify-between text-xs">
+                                  <div>
+                                    <span className="font-bold text-slate-800">{itemName}</span>
+                                    <span className="text-[10px] text-slate-400 block font-medium">Qty: {itemQty}</span>
+                                  </div>
+                                  <span className="font-black text-slate-900 font-mono">
+                                    ₹{(itemPrice * itemQty).toFixed(2)}
+                                  </span>
+                                </div>
+                              );
+                            })
+                          ) : (
+                            <div className="text-xs text-slate-400 italic">Order details loaded</div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Mobile Order Meta Badges (Mode & Scheduled Pickup) */}
+                      <div className="grid grid-cols-2 gap-2 text-center text-xs mb-3">
+                        <div className="bg-slate-50 border border-slate-200/70 p-2 rounded-xl">
+                          <span className="text-[9px] text-slate-400 uppercase font-black block">Mode</span>
+                          <span className="font-bold text-slate-800 text-xs mt-0.5 block">
+                            {displayOrder.is_takeaway ? 'Takeaway' : 'Dine-In'}
+                          </span>
+                        </div>
+                        <div className="bg-slate-50 border border-slate-200/70 p-2 rounded-xl">
+                          <span className="text-[9px] text-slate-400 uppercase font-black block">Scheduled Pickup</span>
+                          <span className="font-bold text-slate-800 text-xs mt-0.5 block">
+                            {formatSingleTime(displayOrder.pickup_time)}
+                          </span>
+                        </div>
+                      </div>
+
                       {/* Cancel button: allowed anytime before staff accepts order (PLACED only) */}
                       {displayOrder.status === 'PLACED' && (
                         <button
@@ -3165,6 +3251,40 @@ export default function StudentDashboard() {
                             <span>Hot: <strong className="text-emerald-600">{smartSchedule.readyByFormatted}</strong></span>
                           </div>
                         )}
+                      </div>
+
+                      {/* Mobile Dining Mode (Dine-In vs Takeaway) */}
+                      <div className="mb-4">
+                        <label className="text-[11px] font-bold text-slate-700 block mb-1.5 flex items-center justify-between">
+                          <span>Order Type</span>
+                          <span className="text-[10px] text-slate-500 font-medium">{isTakeaway ? 'Packed to-go' : 'Serve in canteen'}</span>
+                        </label>
+                        <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl border border-slate-200/80">
+                          <button
+                            type="button"
+                            onClick={() => setIsTakeaway(false)}
+                            className={`py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                              !isTakeaway
+                                ? 'bg-white text-emerald-700 shadow-xs border border-emerald-200/60'
+                                : 'text-slate-600 hover:text-slate-900'
+                            }`}
+                          >
+                            <UtensilsCrossed size={14} className={!isTakeaway ? 'text-emerald-600' : 'text-slate-400'} />
+                            <span>Dine-In</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsTakeaway(true)}
+                            className={`py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                              isTakeaway
+                                ? 'bg-white text-amber-700 shadow-xs border border-amber-200/60'
+                                : 'text-slate-600 hover:text-slate-900'
+                            }`}
+                          >
+                            <Package size={14} className={isTakeaway ? 'text-amber-600' : 'text-slate-400'} />
+                            <span>Takeaway</span>
+                          </button>
+                        </div>
                       </div>
 
                       {/* Mobile Order Bill Summary / Price Breakdown */}
