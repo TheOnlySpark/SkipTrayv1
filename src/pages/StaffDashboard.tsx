@@ -1300,11 +1300,11 @@ export default function StaffDashboard() {
             <div className="grid grid-cols-3 gap-1.5">
               <button
                 type="button"
-                onClick={() => updateOrderStatus(order.id, 'PREPARING')}
+                onClick={() => updateOrderStatus(order.id, 'ACCEPTED')}
                 className="col-span-2 py-2 px-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black text-xs rounded-lg shadow-2xs active:scale-95 transition-all flex items-center justify-center gap-1 cursor-pointer"
               >
-                <IconCooking size={13} className="shrink-0" />
-                <span>Accept & Prep</span>
+                <IconCheckCircle size={13} className="shrink-0" />
+                <span>Accept</span>
               </button>
               <button
                 type="button"
@@ -2857,7 +2857,7 @@ export default function StaffDashboard() {
                       className="text-[11px] font-bold py-1 px-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white shadow-2xs transition-all active:scale-95 cursor-pointer flex items-center gap-1"
                     >
                       <IconZap size={11} className="shrink-0" />
-                      <span>Prep All ({placedOrders.length})</span>
+                      <span>Accept All ({placedOrders.length})</span>
                     </button>
                   )}
                 </div>
